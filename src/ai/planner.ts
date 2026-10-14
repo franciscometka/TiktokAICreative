@@ -2,6 +2,7 @@ import type { CampaignPlan } from "@/domain/campaign";
 import type { CreativeStyle } from "@/domain/creative";
 import type { ProductInput } from "@/domain/product";
 import type { QualitySettings } from "@/domain/quality";
+import type { LlmErrorKind } from "./llm-client";
 import type { LlmCallAttempt } from "./structured-output";
 
 export interface PlanningRequest {
@@ -47,8 +48,21 @@ export class PlanningError extends Error {
     /** Chamadas feitas antes da falha — precisam ser contabilizadas. */
     readonly calls: LlmCallAttempt[],
     readonly meta: { provider: string; promptId: string; promptVersion: string; simulated: boolean },
+    /** Quando kind = "provider_error": o tipo do erro do LLM (rate limit, timeout...). */
+    readonly llmErrorKind?: LlmErrorKind,
   ) {
     super(`${MESSAGES[kind]}: ${detail}`);
+  }
+}
+
+/** O planner não pode ser usado (ex.: ANTHROPIC_API_KEY ausente). Nada é criado nem chamado. */
+export class PlanningUnavailableError extends Error {
+  override name = "PlanningUnavailableError";
+  constructor(
+    readonly llmErrorKind: LlmErrorKind,
+    message: string,
+  ) {
+    super(message);
   }
 }
 
@@ -57,6 +71,8 @@ export class PlanningError extends Error {
  */
 export interface CreativePlanner {
   readonly id: string;
+  /** Presente quando o planner não pode ser usado; o pipeline recusa antes de criar a campanha. */
+  readonly unavailable?: { kind: LlmErrorKind; message: string };
   worstCase(request: PlanningRequest): PlanningWorstCase;
   plan(request: PlanningRequest): Promise<PlanningResult>;
 }

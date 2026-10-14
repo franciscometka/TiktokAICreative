@@ -2,7 +2,7 @@
 
 Transforma informações de um produto em criativos verticais de venda (MP4 1080x1920) para TikTok Shop, com **estimativa de custo e aprovação humana antes de qualquer geração paga**.
 
-> **Status: Lote 1.** Planejamento com o Claude real (opcional, `LLM_PROVIDER=anthropic`) e persistência local. Vídeo, áudio e renderização ainda são **mocks**. Veja [docs/TASKS.md](docs/TASKS.md).
+> **Status: Lote 2.** Interface de criação (`/create`), revisão do plano, custo e aprovação. Planejamento mock (padrão) ou Claude real (`LLM_PROVIDER=anthropic`). Vídeo, áudio e renderização ainda são **mocks**: a aprovação roda em modo de teste. Veja [docs/TASKS.md](docs/TASKS.md).
 
 ## Requisitos
 - Node.js 22+ (testado com 24)
@@ -13,7 +13,16 @@ npm install
 cp .env.example .env.local
 npm run dev
 ```
-Abra http://localhost:3000 — a home mostra os presets de qualidade com as faixas de custo calculadas pela configuração atual.
+Abra http://localhost:3000 e clique em **Criar campanha**. Funciona sem nenhuma chave (`LLM_PROVIDER=mock`, `VIDEO_PROVIDER=mock`, `AUDIO_PROVIDER=mock`).
+
+## Fluxo
+1. **Produto**: nome, descrição, características, benefícios, preço, público, observações e imagens (upload local).
+2. **Estratégia**: quantidade de criativos (1/2/3/5), formatos (AUTO ou escolhidos), qualidade/custo e limites de orçamento.
+3. **Planejamento**: roda em background; a página acompanha o estado. Se o servidor reiniciar no meio, a campanha aparece como *interrompida* e pode ser planejada de novo (com confirmação).
+4. **Revisão**: análise, hooks, conceitos, criativos, cenas e prompts (recolhidos).
+5. **Custo e aprovação**: já utilizado (real) × futuro estimado × total projetado; "Gerar por aproximadamente R$X" por criativo; diálogo de orçamento excedido.
+
+Histórico em `/campaigns`. Para ver a tela de processamento com o mock, use `MOCK_PLANNER_DELAY_MS=20000` em `.env.local`.
 
 ## Scripts
 | Comando | O que faz |
@@ -50,6 +59,8 @@ O resultado, o custo real e as chamadas ficam em `data/manual/`.
 
 ## Dados locais
 `DATA_DIR` (padrão `data/`, fora do git): `campaigns/*.json`, `jobs/*.json`, `ledger.jsonl` (custo real), `llm-calls.jsonl` (auditoria das chamadas ao Claude). Escrita atômica; use um processo por diretório.
+
+`UPLOADS_DIR` (padrão `outputs/uploads/`, fora do git): imagens em `{productId}/img_<uuid>.<ext>`. JPG, PNG ou WebP, até 8 MB e 6 imagens por produto; o tipo é conferido pelo conteúdo do arquivo.
 
 ## Configuração
 Veja [.env.example](.env.example). Preços ficam em [src/config/pricing.ts](src/config/pricing.ts) e presets em [src/config/quality-presets.ts](src/config/quality-presets.ts).

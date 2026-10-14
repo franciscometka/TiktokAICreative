@@ -10,7 +10,7 @@ produto → análise (Claude) → hooks → conceitos → roteiro → plano cena
 - Roda localmente. Sem banco, sem integração com TikTok.
 - Providers trocáveis sem reescrever o sistema (interfaces `VideoProvider`, `AudioProvider`, `LlmClient`, `Renderer`).
 
-## Entrada (página `/create`, lote futuro)
+## Entrada (página `/create`, Lote 2)
 Nome, link (opcional), descrição, características, benefícios, preço (opcional), público (opcional), observações, imagens, quantidade de criativos, estilos (UGC, Problema→solução, Review, Demonstração, Curiosidade, Antes/depois), qualidade (Econômico, Alta qualidade, Premium).
 
 Cada card de qualidade mostra: provider/modelo planejado, segundos de vídeo IA, duração final, faixa de custo.
@@ -45,5 +45,17 @@ Produto → Claude → análise (resumo, público, dores, benefícios, diferenci
 - Toda chamada ao Claude é registrada com custo real (inclusive tentativas inválidas).
 - Persistência local de campanhas, jobs, estimativas, aprovações, ledger e chamadas.
 
-## Fora do escopo do Lote 0
-Integração real com Claude, providers de vídeo/áudio reais, ElevenLabs, banco de dados, TikTok API, página `/create`, composição Remotion.
+## Lote 2 — interface de criação
+- `/create` em etapas: Produto → Estratégia; depois `/campaigns/[id]`: Planejamento → Revisão → Custo e aprovação.
+- Produto: nome e descrição obrigatórios; link (http/https), características e benefícios (listas), preço, público, observações e até 6 imagens (JPG/PNG/WebP, 8 MB) opcionais.
+- Estratégia: 1, 2, 3 ou 5 criativos; formatos AUTO (todos permitidos, o Claude escolhe) ou escolhidos; preset Econômico/Alta qualidade/Premium (cards com números do sistema de custos); limites por criativo e por campanha (defaults do config) e opção de permitir autorizar exceder.
+- O planejamento não segura a request: a campanha é criada em `planning` e a página acompanha. Sem progresso inventado: só "produto recebido" aparece como concluído.
+- Interrupção (processo caiu): estado "interrompido"; planejar de novo é ação explícita e confirmada (nova chamada, possível novo custo).
+- Revisão: análise, hooks (copiáveis), conceitos ligados aos criativos, roteiro, CTA, durações, cenas com tipo visual, prompts recolhidos, ajuste do preset apresentado como otimização.
+- Custos: "já utilizado" (real) separado de "futuro estimado"; total projetado; "Estimativa provisória" quando o preço é placeholder.
+- Aprovação por criativo, pelo estimateId exibido; com mídia mock, a interface avisa "MODO DE TESTE".
+- BUDGET_EXCEEDED: diálogo com limite, custo atual, próxima geração, projetado e excedente; "Autorizar até R$X" só quando o domínio permite.
+- Funciona inteiramente com LLM/vídeo/áudio mock e sem chaves.
+
+## Fora do escopo do Lote 2
+Vídeo/áudio reais, Remotion real, banco de dados, TikTok API, analytics de performance e vendas.

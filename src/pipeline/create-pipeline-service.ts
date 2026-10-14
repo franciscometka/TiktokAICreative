@@ -1,5 +1,7 @@
 import { createAnthropicLlmClient } from "@/ai/create-llm-client";
+import { LlmError } from "@/ai/llm-client";
 import { LlmCreativePlanner } from "@/ai/llm-planner";
+import { UnavailablePlanner } from "@/ai/unavailable-planner";
 import { MockCreativePlanner } from "@/ai/mock-planner";
 import type { CreativePlanner } from "@/ai/planner";
 import type { AppConfig } from "@/config/env";
@@ -22,11 +24,20 @@ import { PipelineService, type PipelineDeps } from "./pipeline-service";
 function createPlanner(config: AppConfig, ids: IdGenerator, env: Record<string, string | undefined>): CreativePlanner {
   switch (config.llmProvider) {
     case "mock":
-      return new MockCreativePlanner(ids);
-    case "anthropic":
-      return new LlmCreativePlanner(createAnthropicLlmClient(config, env), ids, {
+      return new MockCreativePlanner(ids, config.mockPlannerDelayMs);
+    case "anthropic": {
+      let client;
+      try {
+        client = createAnthropicLlmClient(config, env);
+      } catch (error) {
+        // Sem chave: o app abre normalmente; só criar/replanejar campanha é recusado.
+        if (error instanceof LlmError) return new UnavailablePlanner("anthropic", error);
+        throw error;
+      }
+      return new LlmCreativePlanner(client, ids, {
         maxValidationAttempts: config.llmPolicy.maxValidationAttempts,
       });
+    }
   }
 }
 

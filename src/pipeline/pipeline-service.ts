@@ -1,4 +1,11 @@
-import { PlanningError, type CreativePlanner, type PlanningRequest, type PlanningWorstCase } from "@/ai/planner";
+import {
+  PlanningError,
+  PlanningUnavailableError,
+  type CreativePlanner,
+  type PlanningRequest,
+  type PlanningResult,
+  type PlanningWorstCase,
+} from "@/ai/planner";
 import type { LlmCallAttempt } from "@/ai/structured-output";
 import { authorizeOverBudget, checkBudget, type BudgetCheckResult } from "@/costs/budget";
 import {
@@ -22,6 +29,7 @@ import type {
   CostCategory,
   CostEstimate,
   CostOperation,
+  GenerationCost,
   IncurredCost,
   ProviderPricing,
 } from "@/domain/cost";
@@ -29,6 +37,7 @@ import type { CreativePlan, ScenePlan } from "@/domain/creative";
 import {
   CampaignRequestSchema,
   type Campaign,
+  type CampaignErrorCode,
   type CampaignRequest,
   type GenerationJob,
   type MediaAttempt,
@@ -83,6 +92,10 @@ export class PlanningBudgetError extends Error {
   override name = "PlanningBudgetError";
 }
 
+export class PlanningInProgressError extends Error {
+  override name = "PlanningInProgressError";
+}
+
 export type BudgetExceededOutcome = { kind: "BUDGET_EXCEEDED"; decision: BudgetExceededDecision; job: GenerationJob };
 export type ApproveOutcome = { kind: "APPROVED"; job: GenerationJob } | BudgetExceededOutcome;
 export type GenerationOutcome =
@@ -123,6 +136,11 @@ interface JobContext {
  */
 export class PipelineService {
   private readonly campaignLocks = new KeyedMutex();
+  /**
+   * Planejamentos em execução NESTE processo. Não é fila durável: se o processo cair, a campanha
+   * fica em "planning" sem entrada aqui e passa a ser vista como interrompida.
+   */
+  private readonly activePlanning = new Map<string, Promise<Campaign>>();
 
   constructor(private readonly deps: PipelineDeps) {}
 
@@ -130,28 +148,27 @@ export class PipelineService {
 
   /**
    * Produto → plano validado → revisão contra o preset → jobs com estimativa de custo.
+   * Espera o planejamento terminar. A UI usa startPlanning (não bloqueia).
+   */
+  async planCampaign(input: CampaignRequest): Promise<Campaign> {
+    const { completion } = await this.startPlanning(input);
+    return completion;
+  }
+
+  /**
+   * Valida o pedido, checa o pior caso contra o orçamento, persiste a campanha em "planning"
+   * e dispara o planejamento NESTE processo, sem esperar. `completion` termina quando a campanha
+   * vira "planned" ou "failed" (nunca rejeita por falha do planner; só por falha de I/O).
+   *
    * O custo REAL de cada chamada ao LLM (inclusive tentativas inválidas e falhas) vai para o ledger.
    * Nenhuma chamada paga de MÍDIA acontece aqui.
    */
-  async planCampaign(input: CampaignRequest): Promise<Campaign> {
+  async startPlanning(input: CampaignRequest): Promise<{ campaign: Campaign; completion: Promise<Campaign> }> {
     const { store, clock, ids } = this.deps;
+    this.assertPlannerAvailable();
     const request = CampaignRequestSchema.parse(input);
     const settings = resolveQualitySettings(request.quality, request.customSettings);
-    const pricing = resolvePricing(settings, this.deps.pricing);
-    const rate = (await this.deps.exchangeRates.getUsdBrl()).rate;
-    const planningRequest = {
-      product: request.product,
-      styles: request.styles,
-      creativeCount: request.creativeCount,
-      settings,
-    };
-
-    const worstCaseBrl = usdToBrl(worstCaseLlmCostUsd(pricing.llm, this.toWorstCaseParams(planningRequest)), rate);
-    if (toCents(worstCaseBrl) > toCents(request.budget.maxCostPerCampaignBrl)) {
-      throw new PlanningBudgetError(
-        `O pior caso do planejamento (R$${worstCaseBrl.toFixed(2)}) excede o orçamento da campanha`,
-      );
-    }
+    await this.assertPlanningFitsBudget(request, settings, 0);
 
     const createdAt = clock();
     let campaign: Campaign = {
@@ -165,14 +182,158 @@ export class PipelineService {
       updatedAt: createdAt,
     };
     await store.saveCampaign(campaign);
-    campaign = transitionCampaign(campaign, "planning", clock());
+    campaign = this.beginPlanningRun(campaign);
     await store.saveCampaign(campaign);
+    return { campaign, completion: this.launchPlanning(campaign) };
+  }
 
+  /**
+   * Planeja de novo uma campanha que falhou ou foi interrompida. Ação EXPLÍCITA do usuário:
+   * é uma nova chamada paga. O pior caso + o que o planejamento já custou precisa caber no orçamento.
+   */
+  async retryPlanning(campaignId: string): Promise<{ campaign: Campaign; completion: Promise<Campaign> }> {
+    this.assertPlannerAvailable();
+    return this.campaignLocks.run(campaignId, async () => {
+      let campaign = await this.deps.store.getCampaign(campaignId);
+      if (this.isPlanningActive(campaignId)) {
+        throw new PlanningInProgressError("O planejamento desta campanha ainda está em andamento");
+      }
+      if (campaign.status === "planning") campaign = this.markInterrupted(campaign);
+      // "draft" = o processo caiu entre criar a campanha e iniciar o planejamento.
+      if (campaign.status !== "failed" && campaign.status !== "draft") {
+        throw new UnexpectedStatusError(`Campanha em "${campaign.status}" não pode ser planejada de novo`);
+      }
+      const spent = (await this.planningEntries(campaign.id)).reduce((acc, e) => acc + e.costBrl, 0);
+      await this.assertPlanningFitsBudget(campaign.request, campaign.settings, spent);
+
+      campaign = this.beginPlanningRun({ ...campaign, error: undefined, errorCode: undefined });
+      await this.deps.store.saveCampaign(campaign);
+      return { campaign, completion: this.launchPlanning(campaign) };
+    });
+  }
+
+  /** false = o planner configurado não pode ser usado (ex.: sem ANTHROPIC_API_KEY). */
+  planningAvailable(): boolean {
+    return this.deps.planner.unavailable === undefined;
+  }
+
+  /** true se ESTE processo está executando o planejamento da campanha. */
+  isPlanningActive(campaignId: string): boolean {
+    return this.activePlanning.has(campaignId);
+  }
+
+  /**
+   * Campanha em "planning" sem execução neste processo = interrompida (o processo caiu/reiniciou).
+   * Derivado, sem escrita: a retomada é sempre uma ação explícita (retryPlanning).
+   */
+  isPlanningInterrupted(campaign: Campaign): boolean {
+    return campaign.status === "planning" && !this.isPlanningActive(campaign.id);
+  }
+
+  getCampaign(campaignId: string): Promise<Campaign> {
+    return this.deps.store.getCampaign(campaignId);
+  }
+
+  getJob(jobId: string): Promise<GenerationJob> {
+    return this.deps.store.getJob(jobId);
+  }
+
+  listJobs(campaignId: string): Promise<GenerationJob[]> {
+    return this.deps.store.listJobs(campaignId);
+  }
+
+  listCampaignIds(): Promise<string[]> {
+    return this.deps.store.listCampaignIds();
+  }
+
+  private assertPlannerAvailable(): void {
+    const unavailable = this.deps.planner.unavailable;
+    if (unavailable) throw new PlanningUnavailableError(unavailable.kind, unavailable.message);
+  }
+
+  /** Pior caso desta execução + o que o planejamento já custou precisa caber no orçamento da campanha. */
+  private async assertPlanningFitsBudget(
+    request: CampaignRequest,
+    settings: QualitySettings,
+    alreadySpentBrl: number,
+  ): Promise<void> {
+    const pricing = resolvePricing(settings, this.deps.pricing);
+    const rate = (await this.deps.exchangeRates.getUsdBrl()).rate;
+    const worstCaseBrl = usdToBrl(
+      worstCaseLlmCostUsd(pricing.llm, this.toWorstCaseParams(this.toPlanningRequest(request, settings))),
+      rate,
+    );
+    if (toCents(alreadySpentBrl + worstCaseBrl) > toCents(request.budget.maxCostPerCampaignBrl)) {
+      throw new PlanningBudgetError(
+        `O pior caso do planejamento (R$${worstCaseBrl.toFixed(2)}) excede o orçamento da campanha`,
+      );
+    }
+  }
+
+  private beginPlanningRun(campaign: Campaign): Campaign {
+    const now = this.deps.clock();
+    return {
+      ...transitionCampaign(campaign, "planning", now),
+      planningRunId: this.deps.ids("planrun"),
+      planningStartedAt: now,
+      planningRuns: (campaign.planningRuns ?? 0) + 1,
+    };
+  }
+
+  private markInterrupted(campaign: Campaign): Campaign {
+    return {
+      ...transitionCampaign(campaign, "failed", this.deps.clock()),
+      errorCode: "interrupted",
+      error: "O planejamento foi interrompido antes de terminar (o servidor parou ou reiniciou).",
+    };
+  }
+
+  private launchPlanning(campaign: Campaign): Promise<Campaign> {
+    const run = this.runPlanning(campaign).finally(() => {
+      if (this.activePlanning.get(campaign.id) === run) this.activePlanning.delete(campaign.id);
+    });
+    this.activePlanning.set(campaign.id, run);
+    return run;
+  }
+
+  private async runPlanning(started: Campaign): Promise<Campaign> {
+    const { store, clock } = this.deps;
+    const settings = started.settings;
+    const pricing = resolvePricing(settings, this.deps.pricing);
+    const rate = (await this.deps.exchangeRates.getUsdBrl()).rate;
+
+    let outcome: { ok: true; result: PlanningResult } | { ok: false; error: unknown };
     try {
-      const result = await this.deps.planner.plan(planningRequest);
-      await this.recordLlmCalls(campaign.id, result.calls, settings, rate, result);
+      outcome = { ok: true, result: await this.deps.planner.plan(this.toPlanningRequest(started.request, settings)) };
+    } catch (error) {
+      outcome = { ok: false, error };
+    }
 
-      const review = reviewCampaignPlan(result.plan, settings, pricing, rate);
+    return this.campaignLocks.run(started.id, async () => {
+      // Custo real SEMPRE registrado, mesmo que esta execução tenha sido substituída.
+      if (outcome.ok) await this.recordLlmCalls(started.id, outcome.result.calls, settings, rate, outcome.result);
+      else if (outcome.error instanceof PlanningError) {
+        await this.recordLlmCalls(started.id, outcome.error.calls, settings, rate, outcome.error.meta);
+      }
+
+      let campaign = await store.getCampaign(started.id);
+      if (campaign.status !== "planning" || campaign.planningRunId !== started.planningRunId) {
+        console.warn(`Planejamento ${started.planningRunId} da campanha ${started.id} foi substituído; resultado descartado`);
+        return campaign;
+      }
+
+      if (!outcome.ok) {
+        console.error(`Planejamento da campanha ${started.id} falhou:`, messageOf(outcome.error));
+        campaign = {
+          ...transitionCampaign(campaign, "failed", clock()),
+          error: messageOf(outcome.error),
+          errorCode: planningErrorCode(outcome.error),
+        };
+        await store.saveCampaign(campaign);
+        return campaign;
+      }
+
+      const review = reviewCampaignPlan(outcome.result.plan, settings, pricing, rate);
       const jobs = review.plan.creatives.map((creative) => this.newJob(campaign.id, creative));
       for (const job of jobs) await store.saveJob(job);
       campaign = {
@@ -184,43 +345,48 @@ export class PipelineService {
       await store.saveCampaign(campaign);
 
       // Estimar é cálculo puro (gratuito): todos os jobs já saem com custo incorrido × futuro.
-      for (const job of jobs) await this.estimateCost(job.id);
+      for (const job of jobs) await this.estimateJob(job.id);
       return campaign;
-    } catch (error) {
-      if (error instanceof PlanningError) {
-        await this.recordLlmCalls(campaign.id, error.calls, settings, rate, error.meta);
-      }
-      campaign = { ...transitionCampaign(campaign, "failed", clock()), error: messageOf(error) };
-      await store.saveCampaign(campaign);
-      return campaign;
-    }
+    });
+  }
+
+  private toPlanningRequest(request: CampaignRequest, settings: QualitySettings): PlanningRequest {
+    return {
+      product: request.product,
+      styles: request.styles,
+      creativeCount: request.creativeCount,
+      settings,
+    };
   }
 
   // ---------------------------------------------------------------- estimativa e aprovação
 
   /** Calcula (ou recalcula) a estimativa. Qualquer aprovação anterior deixa de valer. */
   async estimateCost(jobId: string): Promise<GenerationJob> {
-    return this.withJobLock(jobId, async () => {
-      const { job, campaign, creative, pricing } = await this.load(jobId);
-      const rate = (await this.deps.exchangeRates.getUsdBrl()).rate;
-      const estimate = estimateCreativeCost({
-        id: this.deps.ids("estimate"),
-        plan: creative,
-        settings: campaign.settings,
-        pricing,
-        incurred: await this.incurredPlanningShare(campaign),
-        exchangeRate: rate,
-        createdAt: this.deps.clock(),
-      });
-      const next: GenerationJob = {
-        ...transitionJob(job, "cost_estimated", this.deps.clock()),
-        estimate,
-        approval: undefined,
-        pendingBudgetDecision: undefined,
-      };
-      await this.deps.store.saveJob(next);
-      return next;
+    return this.withJobLock(jobId, () => this.estimateJob(jobId));
+  }
+
+  /** Sem lock: quem chama já segura o lock da campanha. */
+  private async estimateJob(jobId: string): Promise<GenerationJob> {
+    const { job, campaign, creative, pricing } = await this.load(jobId);
+    const rate = (await this.deps.exchangeRates.getUsdBrl()).rate;
+    const estimate = estimateCreativeCost({
+      id: this.deps.ids("estimate"),
+      plan: creative,
+      settings: campaign.settings,
+      pricing,
+      incurred: await this.incurredPlanningShare(campaign),
+      exchangeRate: rate,
+      createdAt: this.deps.clock(),
     });
+    const next: GenerationJob = {
+      ...transitionJob(job, "cost_estimated", this.deps.clock()),
+      estimate,
+      approval: undefined,
+      pendingBudgetDecision: undefined,
+    };
+    await this.deps.store.saveJob(next);
+    return next;
   }
 
   async requestApproval(jobId: string): Promise<ApprovalRequest> {
@@ -807,11 +973,14 @@ export class PipelineService {
     }
   }
 
+  /** Custo REAL de todas as execuções de planejamento da campanha (nível campanha). */
+  private async planningEntries(campaignId: string): Promise<GenerationCost[]> {
+    return (await this.deps.ledger.list({ campaignId, jobId: null })).filter((e) => e.operation === "campaign_plan");
+  }
+
   /** Rateio do custo REAL do planejamento entre os criativos da campanha. */
   private async incurredPlanningShare(campaign: Campaign): Promise<IncurredCost> {
-    const entries = (await this.deps.ledger.list({ campaignId: campaign.id, jobId: null })).filter(
-      (e) => e.operation === "campaign_plan",
-    );
+    const entries = await this.planningEntries(campaign.id);
     const shared = Math.max(1, campaign.jobIds.length);
     const usd = entries.reduce((acc, e) => acc + e.costUsd, 0);
     const brl = entries.reduce((acc, e) => acc + e.costBrl, 0);
@@ -826,4 +995,33 @@ export class PipelineService {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Traduz a falha do planner num código estável para a UI (a mensagem crua fica no log/campanha). */
+export function planningErrorCode(error: unknown): CampaignErrorCode {
+  if (error instanceof PlanningUnavailableError) return "not_configured";
+  if (!(error instanceof PlanningError)) return "unknown";
+  switch (error.kind) {
+    case "retry_exhausted":
+    case "invalid_plan":
+      return "invalid_response";
+    case "stopped":
+      return "stopped";
+    case "provider_error":
+      switch (error.llmErrorKind) {
+        case "missing_credentials":
+          return "not_configured";
+        case "invalid_credentials":
+        case "permission_denied":
+          return "auth_error";
+        case "rate_limited":
+          return "rate_limited";
+        case "timeout":
+          return "timeout";
+        case "connection_error":
+          return "connection_error";
+        default:
+          return "provider_error";
+      }
+  }
 }

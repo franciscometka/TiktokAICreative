@@ -14,7 +14,7 @@ export const QUALITY_PRESETS: Record<PresetQuality, QualitySettings> = {
   economy: {
     quality: "economy",
     label: "Econômico",
-    description: "Provider mais barato; poucos segundos de IA complementados por imagens e Remotion.",
+    description: "Para testar produtos e ideias em volume.",
     video: { provider: "unassigned-video", model: "economy-tier" },
     audio: { provider: "unassigned-audio", model: "economy-tts" },
     llm: PLANNING_LLM.economy,
@@ -28,7 +28,7 @@ export const QUALITY_PRESETS: Record<PresetQuality, QualitySettings> = {
   high: {
     quality: "high",
     label: "Alta qualidade",
-    description: "Provider intermediário; mais cenas geradas por IA.",
+    description: "Equilíbrio entre custo e qualidade.",
     video: { provider: "unassigned-video", model: "high-tier" },
     audio: { provider: "unassigned-audio", model: "high-tts" },
     llm: PLANNING_LLM.high,
@@ -42,7 +42,7 @@ export const QUALITY_PRESETS: Record<PresetQuality, QualitySettings> = {
   premium: {
     quality: "premium",
     label: "Premium",
-    description: "Prioriza qualidade máxima; maior parte do vídeo gerada por IA.",
+    description: "Mais vídeo gerado por IA e planejamento com o modelo mais avançado.",
     video: { provider: "unassigned-video", model: "premium-tier" },
     audio: { provider: "unassigned-audio", model: "premium-tts" },
     llm: PLANNING_LLM.premium,

@@ -8,9 +8,10 @@ produto → análise/hooks/conceitos/roteiro/cenas (Claude) → validação + aj
 Custo é preocupação central; nada pago de mídia acontece sem aprovação explícita.
 
 ## Estado atual
-- Lote 0 (fundação) e Lote 1 (planejamento com Claude real + persistência local) concluídos.
+- Lotes 0, 1 e 2 concluídos. Lote 2 = experiência `/create` → `/campaigns/[id]` (planejar, revisar, custo, aprovar).
 - Planejamento: `LLM_PROVIDER=mock` (padrão, sem custo) ou `anthropic` (Claude real, pago).
-- Vídeo, áudio e renderer continuam **mocks**. Sem UI de criação ainda (Lote 2).
+- Vídeo, áudio e renderer continuam **mocks** (aprovação roda em MODO DE TESTE). Remotion real = Lote 3.
+- Validação real do prompt `campaign-plan@1.0.0` ainda **pendente** (sem chave nas sessões até agora).
 - **Não avance de lote sem instrução do usuário.** Ver `docs/TASKS.md`.
 
 ## Comandos
@@ -24,15 +25,20 @@ npm run build             # build de produção
 npm run plan:real         # validação manual com Claude real: sem --confirm só mostra o pior caso
 npm run test:integration  # testes PAGOS; só rodam com RUN_PAID_TESTS=1 e ANTHROPIC_API_KEY
 ```
+Para ver a tela de processamento com o mock: `MOCK_PLANNER_DELAY_MS=20000` em `.env.local`.
 
 ## Arquitetura (resumo — detalhes em docs/ARCHITECTURE.md)
+- `src/app/` — páginas (`/`, `/create`, `/campaigns`, `/campaigns/[id]`), `actions.ts` (Server Actions FINAS: validam formato e delegam), `api/uploads` (POST upload, GET imagem).
+- `src/components/` — apresentação (`ui/` primitivos, `create/` wizard, `campaign/` revisão/custo/aprovação). Sem regra de negócio.
+- `src/application/` — casos de uso da UI (`campaign-actions.ts`), formulário (`campaign-form.ts`), view model serializável (`campaign-view.ts`), apresentação de custos (`cost-presentation.ts`), erros de usuário (`user-errors.ts`), rótulos.
+- `src/server/runtime.ts` — um `PipelineService` + `LocalUploadStore` por processo (em `globalThis`); `getPublicConfig()` = única config enviada à UI.
 - `src/domain/` — schemas Zod = modelos. `*DraftSchema` = saída do LLM (sem IDs); `ai/hydrate.ts` atribui IDs.
 - `src/config/` — env validado, `llm-models.ts` (**único lugar com IDs de modelo Claude**), `pricing.ts` (**único lugar com preços**), `quality-presets.ts`.
 - `src/costs/` — cálculo puro, orçamento puro, `plan-evaluation.ts` (limite de segundos de IA), ledger, catálogo, câmbio.
 - `src/ai/` — `LlmClient` (abstrato), `anthropic/` (**único lugar que importa `@anthropic-ai/sdk`**), prompts versionados em `ai/prompts/`, `runStructuredPrompt`, `LlmCreativePlanner`, `MockCreativePlanner`.
 - `src/providers/` — `VideoProvider`/`AudioProvider`, mocks, factories, polling com limite.
 - `src/pipeline/` — estados, guards, contexto de orçamento, `PipelineService`, raiz de composição.
-- `src/storage/` — `FilePipelineStore`, `FileCostLedger`, `FileLlmCallLog` (JSON/JSONL atômicos em `DATA_DIR`) e versões em memória.
+- `src/storage/` — `FilePipelineStore`, `FileCostLedger`, `FileLlmCallLog` (JSON/JSONL atômicos em `DATA_DIR`), `LocalUploadStore` (`UPLOADS_DIR`) e versões em memória.
 - `src/render/` — `buildRenderManifest` (puro), `MockRenderer`.
 - `scripts/plan-real.ts` — validação manual com o Claude real.
 
@@ -58,6 +64,13 @@ npm run test:integration  # testes PAGOS; só rodam com RUN_PAID_TESTS=1 e ANTHR
 - Antes de chamar: pior caso do planejamento precisa caber no orçamento da campanha.
 - Plano acima do máximo de segundos de IA é ajustado deterministicamente (`fitPlanToPreset`), nunca aceito.
 
+## Planejamento assíncrono (Lote 2)
+- UI chama `startPlanning` (cria campanha em `planning` e dispara o planner no processo, sem esperar) e a página faz polling (`router.refresh`).
+- `planning` sem execução no processo = **interrompida** (derivado, sem escrita). Retomar é `retryPlanning`, ação explícita com confirmação; nunca automático.
+- Cada execução tem `planningRunId`; uma execução substituída só registra custo, não grava plano.
+- Falha → `campaign.errorCode` (rate_limited, timeout, invalid_response, not_configured...). UI usa `application/user-errors.ts`.
+- `LLM_PROVIDER=anthropic` sem chave → `UnavailablePlanner`: o app abre, só planejar é recusado antes de criar campanha.
+
 ## Aprovação e orçamento
 - Caminho obrigatório: `planned → cost_estimated → awaiting_approval → (approve) → generating`. Sem atalhos.
 - Aprovação vale para **um** `estimateId`; re-estimar invalida.
@@ -65,12 +78,14 @@ npm run test:integration  # testes PAGOS; só rodam com RUN_PAID_TESTS=1 e ANTHR
 - `BUDGET_EXCEEDED` → UI oferece Cancelar/Autorizar. `allowOverBudget` = usuário **pode** autorizar, até o total mostrado.
 - Regeneração: limite `MAX_ATTEMPTS_PER_SCENE`, custo anterior vira "descartado" mas continua no total.
 - Operações por campanha são serializadas (lock). Um processo por `DATA_DIR`.
+- UI aprova por criativo via `approveCreative` (requestApproval → approve(estimateId) → generate). O diálogo de orçamento só mostra "Autorizar" se `canAuthorizeOverBudget`.
 
 ## Padrões
 - TypeScript estrito. `import type` para tipos (lint exige).
 - Funções puras para regras; serviços orquestram I/O; injeção de dependência (clock, ids, store, ledger, llm).
 - Zod na borda: entrada, saída do LLM, storage, ledger.
-- Erros tipados (`LlmError`, `PlanningError`, `CorruptedDataError`...). Testes ao lado do código; fixtures em `src/test/`.
+- Erros tipados (`LlmError`, `PlanningError`, `CorruptedDataError`...) com `name` próprio. Na camada de UI, identifique erros por `error.name`, não `instanceof` (o runtime é compartilhado entre camadas do bundler do Next). Testes ao lado do código; fixtures em `src/test/`.
+- UI: tema claro, zinc + um tom por estado; números monetários com `tabular`; sem libs de UI (primitivos em `components/ui/`). Custos sempre via `presentEstimate`/`presentBudgetDecision`, nunca recalculados no componente.
 - Testes de LLM usam `ScriptedLlm` (`src/test/fake-llm.ts`) ou transporte falso do SDK. Testes pagos: `*.integration.test.ts`.
 - Comentários e textos de UI em português; identificadores em inglês.
 
@@ -84,3 +99,5 @@ npm run test:integration  # testes PAGOS; só rodam com RUN_PAID_TESTS=1 e ANTHR
 - Não apagar/editar custos (ledger append-only).
 - Não logar, serializar ou enviar ao browser a `ANTHROPIC_API_KEY`; não commitar `.env*` nem `data/`.
 - Não adicionar banco externo, integração TikTok, providers de mídia reais ou Remotion real sem instrução do lote.
+- Não aceitar caminhos de arquivo vindos do browser (só IDs gerados: `SAFE_PRODUCT_ID`, `STORED_IMAGE_NAME`); não servir arquivos fora de `UPLOADS_DIR`.
+- Não colocar regra de negócio/custo em componentes ou Server Actions; não serializar `AppConfig` para o cliente (use `getPublicConfig`).

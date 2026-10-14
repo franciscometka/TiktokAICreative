@@ -64,7 +64,7 @@ export class LlmCreativePlanner implements CreativePlanner {
         case "stopped":
           throw new PlanningError("stopped", failure.stopReason, failure.calls, meta);
         case "provider_error":
-          throw new PlanningError("provider_error", failure.message, failure.calls, meta);
+          throw new PlanningError("provider_error", failure.message, failure.calls, meta, failure.llmErrorKind);
       }
     }
 

@@ -15,7 +15,11 @@ import { hookCountFor } from "./prompts/campaign-plan.v1";
 export class MockCreativePlanner implements CreativePlanner {
   readonly id = "mock";
 
-  constructor(private readonly ids: IdGenerator) {}
+  constructor(
+    private readonly ids: IdGenerator,
+    /** Atraso artificial (ms) para simular a demora do Claude na interface. 0 = imediato. */
+    private readonly delayMs = 0,
+  ) {}
 
   worstCase(request: PlanningRequest): PlanningWorstCase {
     const tokens = request.settings.llmTokensPerCreative;
@@ -27,6 +31,7 @@ export class MockCreativePlanner implements CreativePlanner {
   }
 
   async plan(request: PlanningRequest): Promise<PlanningResult> {
+    if (this.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.delayMs));
     const draft = buildMockDraft(request);
     const tokens = request.settings.llmTokensPerCreative;
     const model = request.settings.llm.model;

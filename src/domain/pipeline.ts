@@ -39,9 +39,17 @@ export const JOB_STATUSES = [
 export const JobStatusSchema = z.enum(JOB_STATUSES);
 export type JobStatus = z.infer<typeof JobStatusSchema>;
 
+/**
+ * "auto": o usuário deixou o planejamento escolher os ângulos — `styles` contém todos os formatos.
+ * "manual": o usuário escolheu os formatos de `styles`. Ausente = "manual" (dados do Lote 1).
+ */
+export const StyleSelectionSchema = z.enum(["auto", "manual"]);
+export type StyleSelection = z.infer<typeof StyleSelectionSchema>;
+
 export const CampaignRequestSchema = z.object({
   product: ProductInputSchema,
   styles: z.array(CreativeStyleSchema).min(1),
+  styleSelection: StyleSelectionSchema.optional(),
   creativeCount: z.int().min(1).max(10),
   quality: GenerationQualitySchema,
   /** Obrigatório quando quality = "custom". */
@@ -49,6 +57,25 @@ export const CampaignRequestSchema = z.object({
   budget: CostBudgetSchema,
 });
 export type CampaignRequest = z.infer<typeof CampaignRequestSchema>;
+
+/**
+ * Motivo tipado da falha do planejamento — a UI escolhe a mensagem a partir dele.
+ * "interrupted": o processo caiu (ou reiniciou) com a campanha em "planning".
+ */
+export const CAMPAIGN_ERROR_CODES = [
+  "not_configured",
+  "auth_error",
+  "rate_limited",
+  "timeout",
+  "connection_error",
+  "invalid_response",
+  "stopped",
+  "provider_error",
+  "interrupted",
+  "unknown",
+] as const;
+export const CampaignErrorCodeSchema = z.enum(CAMPAIGN_ERROR_CODES);
+export type CampaignErrorCode = z.infer<typeof CampaignErrorCodeSchema>;
 
 export const CampaignSchema = z.object({
   id: nonEmpty,
@@ -62,6 +89,15 @@ export const CampaignSchema = z.object({
   plannerId: z.string().optional(),
   jobIds: z.array(nonEmpty),
   error: z.string().optional(),
+  errorCode: CampaignErrorCodeSchema.optional(),
+  /**
+   * Identifica a execução de planejamento em andamento. Uma execução que termina depois de
+   * outra ter sido iniciada (ex.: retomada após interrupção) só registra custos, não o plano.
+   */
+  planningRunId: z.string().optional(),
+  planningStartedAt: z.string().optional(),
+  /** Quantas vezes o planejamento foi iniciado (1 = primeira). Cada execução pode ter custo. */
+  planningRuns: z.int().positive().optional(),
   createdAt: nonEmpty,
   updatedAt: nonEmpty,
 });

@@ -11,6 +11,9 @@ export const DEFAULT_BUDGET: CostBudget = {
 
 export const DEFAULT_MAX_ATTEMPTS_PER_SCENE = 3;
 
+/** Imagens enviadas pelo usuário (fora do código-fonte e do git). */
+export const DEFAULT_UPLOADS_DIR = "outputs/uploads";
+
 /** Política de retry do LLM (ver docs/DECISIONS.md D23). */
 export const DEFAULT_LLM_POLICY = {
   /** Tentativas por saída estruturada inválida (1 = sem retry). Máximo 3. */
@@ -32,6 +35,7 @@ const optionalPositiveNumber = z.preprocess(emptyToUndefined, z.coerce.number().
 
 const EnvSchema = z.object({
   LLM_PROVIDER: z.preprocess(emptyToUndefined, z.enum(LLM_PROVIDER_IDS).default("mock")),
+  MOCK_PLANNER_DELAY_MS: z.preprocess(emptyToUndefined, z.coerce.number().int().min(0).max(120_000).default(0)),
   LLM_MAX_VALIDATION_ATTEMPTS: z.preprocess(
     emptyToUndefined,
     z.coerce.number().int().min(1).max(3).default(DEFAULT_LLM_POLICY.maxValidationAttempts),
@@ -46,6 +50,7 @@ const EnvSchema = z.object({
   ),
   STORAGE: z.preprocess(emptyToUndefined, z.enum(["file", "memory"]).default("file")),
   DATA_DIR: z.preprocess(emptyToUndefined, z.string().default("data")),
+  UPLOADS_DIR: z.preprocess(emptyToUndefined, z.string().default(DEFAULT_UPLOADS_DIR)),
   VIDEO_PROVIDER: z.preprocess(emptyToUndefined, z.enum(VIDEO_PROVIDER_IDS).default("mock")),
   AUDIO_PROVIDER: z.preprocess(emptyToUndefined, z.enum(AUDIO_PROVIDER_IDS).default("mock")),
   USD_BRL_EXCHANGE_RATE: optionalPositiveNumber,
@@ -61,9 +66,12 @@ const EnvSchema = z.object({
 /** Configuração NÃO secreta. A API key nunca entra aqui (ver readAnthropicApiKey). */
 export interface AppConfig {
   llmProvider: (typeof LLM_PROVIDER_IDS)[number];
+  /** Só para LLM_PROVIDER=mock: atraso artificial para exercitar a tela de processamento. */
+  mockPlannerDelayMs: number;
   llmPolicy: { maxValidationAttempts: number; maxTransportRetries: number; timeoutMs: number };
   storage: "file" | "memory";
   dataDir: string;
+  uploadsDir: string;
   videoProvider: (typeof VIDEO_PROVIDER_IDS)[number];
   audioProvider: (typeof AUDIO_PROVIDER_IDS)[number];
   exchangeRate: ExchangeRate;
@@ -87,6 +95,7 @@ export function loadAppConfig(
   const e = parsed.data;
   return {
     llmProvider: e.LLM_PROVIDER,
+    mockPlannerDelayMs: e.MOCK_PLANNER_DELAY_MS,
     llmPolicy: {
       maxValidationAttempts: e.LLM_MAX_VALIDATION_ATTEMPTS,
       maxTransportRetries: e.LLM_MAX_TRANSPORT_RETRIES,
@@ -94,6 +103,7 @@ export function loadAppConfig(
     },
     storage: e.STORAGE,
     dataDir: e.DATA_DIR,
+    uploadsDir: e.UPLOADS_DIR,
     videoProvider: e.VIDEO_PROVIDER,
     audioProvider: e.AUDIO_PROVIDER,
     exchangeRate:

@@ -1,0 +1,61 @@
+import { NextResponse } from "next/server";
+import { uploadProductImage } from "@/application/campaign-actions";
+import { UPLOAD_LIMITS } from "@/domain/upload";
+import { getRuntime } from "@/server/runtime";
+
+export const runtime = "nodejs";
+
+/**
+ * POST multipart: `file` (imagem) + `productId` opcional. Route handler fino; a validação de
+ * tipo/tamanho/conteúdo e a gravação ficam em application/ e storage/.
+ * Nunca recebe caminhos: o servidor gera o nome e decide a pasta.
+ */
+export async function POST(request: Request) {
+  // Mesmo critério dos Server Actions: só aceita envio da própria origem (anti-CSRF).
+  const origin = request.headers.get("origin");
+  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  if (origin && host && safeHost(origin) !== host) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  const length = Number(request.headers.get("content-length") ?? "0");
+  // Margem para os campos do multipart; o limite real é checado nos bytes do arquivo.
+  if (length > UPLOAD_LIMITS.maxBytes + 64 * 1024) {
+    return NextResponse.json(
+      { ok: false, error: { code: "upload", title: "Imagem recusada", message: "A imagem passa do tamanho máximo.", retryable: false } },
+      { status: 413 },
+    );
+  }
+
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: { code: "upload", title: "Imagem recusada", message: "Envio inválido.", retryable: false } },
+      { status: 400 },
+    );
+  }
+  const file = form.get("file");
+  const productId = form.get("productId");
+  if (!(file instanceof File)) {
+    return NextResponse.json(
+      { ok: false, error: { code: "upload", title: "Imagem recusada", message: "Nenhum arquivo enviado.", retryable: false } },
+      { status: 400 },
+    );
+  }
+
+  const result = await uploadProductImage(getRuntime().deps, {
+    productId: typeof productId === "string" && productId !== "" ? productId : null,
+    file: { bytes: new Uint8Array(await file.arrayBuffer()), size: file.size, type: file.type },
+  });
+  return NextResponse.json(result, { status: result.ok ? 201 : 422 });
+}
+
+function safeHost(origin: string): string | undefined {
+  try {
+    return new URL(origin).host;
+  } catch {
+    return undefined;
+  }
+}

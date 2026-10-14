@@ -13,6 +13,17 @@ export const CLAUDE_MODELS = {
 } as const;
 export type ClaudeModelId = (typeof CLAUDE_MODELS)[keyof typeof CLAUDE_MODELS];
 
+/** Nome amigável para a interface. */
+export const CLAUDE_MODEL_NAMES: Record<ClaudeModelId, string> = {
+  [CLAUDE_MODELS.opus]: "Claude Opus 5.5",
+  [CLAUDE_MODELS.sonnet]: "Claude Sonnet 5.5",
+  [CLAUDE_MODELS.haiku]: "Claude Haiku 5.5",
+};
+
+export function claudeModelName(model: string): string {
+  return (CLAUDE_MODEL_NAMES as Record<string, string>)[model] ?? model;
+}
+
 /** Modelo de planejamento por preset (referenciado em quality-presets.ts). */
 export const PLANNING_LLM = {
   economy: { provider: ANTHROPIC_PROVIDER, model: CLAUDE_MODELS.sonnet, effort: "medium" },

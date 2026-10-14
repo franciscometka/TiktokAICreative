@@ -1,3 +1,4 @@
+import { claudeModelName } from "@/config/llm-models";
 import { PRESET_ORDER, QUALITY_PRESETS, type PresetQuality } from "@/config/quality-presets";
 import type { ExchangeRate } from "@/domain/cost";
 import type { Range } from "@/domain/quality";
@@ -12,6 +13,9 @@ export interface PresetSummary {
   videoProviderLabel: string;
   /** Modelo Claude usado no planejamento deste preset. */
   llmModelLabel: string;
+  /** Nome amigável do modelo (ex.: "Claude Sonnet 5.5"). */
+  llmModelName: string;
+  llmEffort: string;
   generatedVideoSeconds: Range;
   finalVideoSeconds: Range;
   estimatedCostBrl: Range;
@@ -29,6 +33,8 @@ export function summarizePresets(catalog: PricingCatalog, exchangeRate: Exchange
       description: settings.description,
       videoProviderLabel: `${settings.video.provider} / ${settings.video.model}`,
       llmModelLabel: `${settings.llm.model} (esforço ${settings.llm.effort})`,
+      llmModelName: claudeModelName(settings.llm.model),
+      llmEffort: settings.llm.effort,
       generatedVideoSeconds: settings.generatedVideoSeconds,
       finalVideoSeconds: settings.finalVideoSeconds,
       estimatedCostBrl: { min: range.min.brl, max: range.max.brl },

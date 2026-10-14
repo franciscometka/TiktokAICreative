@@ -1,3 +1,4 @@
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { CampaignSchema, GenerationJobSchema, type Campaign, type GenerationJob } from "@/domain/pipeline";
 import { cleanupTempFiles, CorruptedDataError, readTextIfExists, writeFileAtomic } from "./atomic-file";
@@ -54,6 +55,21 @@ export class FilePipelineStore implements PipelineStore {
   async listJobs(campaignId: string): Promise<GenerationJob[]> {
     const campaign = await this.getCampaign(campaignId);
     return Promise.all(campaign.jobIds.map((id) => this.getJob(id)));
+  }
+
+  /** Lê só os nomes dos arquivos; arquivos temporários e nomes fora do padrão são ignorados. */
+  async listCampaignIds(): Promise<string[]> {
+    let names: string[];
+    try {
+      names = await readdir(this.campaignsDir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+    return names
+      .filter((n) => n.endsWith(".json"))
+      .map((n) => n.slice(0, -".json".length))
+      .filter((id) => SAFE_ID.test(id));
   }
 
   private async init(): Promise<void> {

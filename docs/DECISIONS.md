@@ -142,3 +142,40 @@ A chave é lida só por `readAnthropicApiKey()` dentro da fábrica do cliente (s
 
 ## D30 — Lock por campanha
 Operações que mudam estado de job (estimar, aprovar, gerar, regenerar, resolver orçamento, cancelar) são serializadas por campanha (`KeyedMutex`), eliminando a corrida entre aprovações simultâneas no mesmo processo.
+
+---
+
+# Lote 2 — Interface de criação
+
+## D31 — Camada `application/` entre a UI e o pipeline
+Contexto: as telas precisam de formulário validado, view model serializável, custos formatados e erros legíveis, sem regra de negócio em componentes nem em Server Actions. Decisão: `src/application/` concentra os casos de uso da UI (`campaign-actions.ts`, funções que recebem `{ service, uploads }`), a validação do formulário (`campaign-form.ts`), o view model (`campaign-view.ts`), a apresentação de custos (`cost-presentation.ts`) e os erros de usuário (`user-errors.ts`). `app/actions.ts` só valida o formato dos argumentos e delega. Consequência: tudo testável sem Next; componentes recebem dados prontos e não recalculam custo.
+
+## D32 — Planejamento em background no próprio processo (sem fila)
+Contexto: uma chamada ao Claude pode levar minutos; não queremos uma request aberta esse tempo, nem Redis/BullMQ. Decisão: `PipelineService.startPlanning` valida, persiste a campanha em `planning` e dispara o planner SEM esperar, guardando a promessa num `Map` do processo (`activePlanning`). A página faz polling com `router.refresh()`. `planCampaign` continua existindo (espera o fim) para scripts e testes. Consequência: simples e correto para uso local single-process. NÃO é fila durável: se o processo cair, nada retoma sozinho (D33).
+
+## D33 — Interrupção derivada e retomada explícita
+Contexto: com o processo reiniciado, uma campanha pode ficar em `planning` para sempre; e a chamada ao Claude que estava em curso pode ter sido cobrada sem que o `usage` chegasse. Decisão: "interrompida" é DERIVADO na leitura (`planning` && não está em `activePlanning`) — ler o status nunca escreve nem chama nada. Planejar de novo é `retryPlanning`, uma ação do usuário com confirmação que avisa do possível custo não registrado; ela marca `failed/interrupted`, checa pior caso + custo já gasto contra o orçamento e inicia uma nova execução. Consequência: nenhuma chamada paga é repetida silenciosamente.
+
+## D34 — `planningRunId`: execução substituída não grava plano
+Contexto: em `next dev` (hot reload) ou em restart, uma execução antiga pode terminar depois de o usuário retomar. Decisão: cada execução recebe `planningRunId`; ao terminar, ela registra o custo das chamadas (sempre) e só grava o plano se a campanha ainda estiver em `planning` com o mesmo `runId`. O runtime do processo fica em `globalThis` para sobreviver ao hot reload. Consequência: o custo real nunca se perde e o resultado mais recente não é sobrescrito.
+
+## D35 — Código de erro tipado na campanha
+Contexto: a UI precisa diferenciar rate limit, timeout, resposta inválida, falta de chave etc. sem interpretar mensagens. Decisão: `Campaign.errorCode` (`CAMPAIGN_ERROR_CODES`) é preenchido por `planningErrorCode()`; `PlanningError` carrega o `llmErrorKind`. A mensagem técnica fica em `campaign.error`/log e aparece só em "Detalhes técnicos". `LLM_PROVIDER=anthropic` sem chave usa `UnavailablePlanner`: o app abre e mostra campanhas; criar/replanejar é recusado ANTES de qualquer escrita.
+
+## D36 — Erros identificados por `name` na camada de UI
+Contexto: no Next, o runtime em `globalThis` é compartilhado entre camadas do bundler (páginas/Server Actions × route handlers), e cada camada pode carregar sua própria cópia de um módulo; `instanceof` falha entre cópias (visto no upload). Decisão: `toUserError` identifica erros por `error.name` (todas as classes definem `name`). Dentro do pipeline o `instanceof` continua válido (planner e serviço vêm da mesma composição).
+
+## D37 — Uploads locais: confiança zero no browser
+Decisão: `LocalUploadStore` grava em `UPLOADS_DIR/<productId>/img_<uuid>.<ext>`; o tipo é detectado pela assinatura dos bytes (JPEG/PNG/WebP) e precisa bater com o MIME declarado; limite de 8 MB e 6 imagens por produto (serializado por produto). `productId` e nome do arquivo são validados por regex e o caminho resolvido precisa ficar dentro da raiz. O formulário envia só IDs de imagem; as URIs do `ProductInput` vêm do store. A leitura é servida por `GET /api/uploads/<productId>/<arquivo>` com `nosniff` e CSP restritiva. O POST confere a origem (anti-CSRF). Upload via route handler (não Server Action) para não depender do limite de 1 MB do corpo das actions.
+
+## D38 — AUTO = todos os formatos, sem mudar o prompt
+Contexto: "AUTO" deixa o Claude escolher os ângulos. Decisão: AUTO envia todos os `CREATIVE_STYLES` em `styles` e marca `styleSelection: "auto"` no pedido; o prompt `campaign-plan@1.0.0` já instrui a escolher formatos adequados (e a evitar antes/depois sem mudança visível). Não alteramos o prompt antes da validação real (Etapa 0 pendente).
+
+## D39 — Aprovação por criativo e modo de teste
+Decisão: cada criativo é aprovado separadamente (a aprovação vale para um `estimateId`, D4). O botão mostra o custo FUTURO ("Gerar por aproximadamente R$X"); o total projetado aparece ao lado. Com providers de mídia mock, a interface mostra "MODO DE TESTE — nenhuma mídia real será gerada ou cobrada" e, ao concluir, deixa claro que nenhum MP4 foi gerado. A geração mock roda dentro da Server Action; providers reais exigirão execução em background (Lote 5).
+
+## D40 — Visual
+Tema claro (o app era só escuro), Inter via `next/font`, escala zinc com um tom por estado (azul = vídeo IA/andamento, verde = imagem do produto/concluído, âmbar = provisório/atenção, vermelho = erro). Sem biblioteca de UI: primitivos em `components/ui/` (Button, Badge, Panel, Notice, InfoTip, Dialog nativo). Dark mode fica para depois.
+
+## D41 — Atraso opcional do planner mock
+`MOCK_PLANNER_DELAY_MS` (padrão 0, só com `LLM_PROVIDER=mock`) simula a demora do Claude para exercitar a tela de processamento, o polling e a recuperação após restart sem custo.

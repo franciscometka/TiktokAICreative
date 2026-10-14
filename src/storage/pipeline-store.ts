@@ -5,8 +5,7 @@ export class NotFoundError extends Error {
 }
 
 /**
- * Persistência de campanhas e jobs. V1: memória (sem banco, por decisão do Lote 0).
- * Próximo passo natural: implementação em arquivos JSON em outputs/ ou SQLite.
+ * Persistência de campanhas e jobs. Implementações: FilePipelineStore (padrão) e memória (testes).
  */
 export interface PipelineStore {
   saveCampaign(campaign: Campaign): Promise<void>;
@@ -14,6 +13,8 @@ export interface PipelineStore {
   saveJob(job: GenerationJob): Promise<void>;
   getJob(id: string): Promise<GenerationJob>;
   listJobs(campaignId: string): Promise<GenerationJob[]>;
+  /** IDs de todas as campanhas (ordem não garantida). */
+  listCampaignIds(): Promise<string[]>;
 }
 
 /** Guarda cópias validadas; leituras devolvem cópias (sem aliasing de objetos mutáveis). */
@@ -43,5 +44,9 @@ export class InMemoryPipelineStore implements PipelineStore {
 
   async listJobs(campaignId: string): Promise<GenerationJob[]> {
     return [...this.jobs.values()].filter((j) => j.campaignId === campaignId).map((j) => structuredClone(j));
+  }
+
+  async listCampaignIds(): Promise<string[]> {
+    return [...this.campaigns.keys()];
   }
 }

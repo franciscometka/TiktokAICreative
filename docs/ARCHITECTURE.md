@@ -4,8 +4,11 @@
 
 ```
 src/
-  app/          UI (Next.js App Router). Só chama serviços e formata.
-  components/   Componentes React de apresentação. Sem regra de negócio.
+  app/          UI (Next.js App Router): páginas, Server Actions finas (actions.ts), route handlers de upload.
+  components/   Componentes React de apresentação (ui/, create/, campaign/). Sem regra de negócio.
+  application/  Casos de uso da UI: formulário → CampaignRequest, view model serializável,
+                apresentação de custos, erros de usuário. Chama o PipelineService.
+  server/       Runtime do processo Next (um PipelineService + UploadStore) e config pública.
   domain/       Modelos (schemas Zod) + regras puras pequenas. Não importa nada de fora de domain/ e lib/.
   config/       env (validado), modelos Claude por preset (llm-models.ts), tabela de preços, presets.
   costs/        Cálculo de custo (puro), orçamento (puro), avaliação do plano vs preset (pura),
@@ -25,8 +28,10 @@ docs/           SPEC, TASKS, DECISIONS, ARCHITECTURE.
 Regra de dependência (de fora para dentro):
 
 ```
-app/components → pipeline → (ai, providers, render, storage, costs) → config → domain → lib
+app/components → server/application → pipeline → (ai, providers, render, storage, costs) → config → domain → lib
 ```
+
+- Componentes cliente importam de `application/` apenas tipos e funções puras de apresentação (`cost-presentation`, `campaign-form`, `labels`) — nunca o runtime, o pipeline ou o storage.
 
 - `domain/` não conhece providers, Next, Anthropic nem Remotion.
 - Fornecedores concretos só aparecem em `providers/*/` e na raiz de composição.
@@ -44,6 +49,43 @@ planCampaign(request)
   └─ jobs (planned) → estimateCost (incurred real + futuro estimado) → cost_estimated
 ```
 
+## Interface (Lote 2)
+
+```
+/create (client: CampaignWizard)
+  ├─ upload → POST /api/uploads → application.uploadProductImage → LocalUploadStore
+  │            (tipo detectado pelos bytes, nome gerado, outputs/uploads/{productId}/)
+  └─ "Planejar campanha" → actions.startPlanningAction
+        → application.startCampaignPlanning (parseCampaignForm → imagens do store → CampaignRequest)
+        → PipelineService.startPlanning   (salva campanha "planning", dispara o planner, devolve o id)
+        → router.push(/campaigns/{id})
+
+/campaigns/[id] (server) → application.getCampaignView → buildCampaignView (view model serializável)
+  ├─ planning     → PlanningProgress (router.refresh a cada 2,5s; sem progresso inventado)
+  ├─ interrupted  → PlanningFailure ("Planejar novamente" com confirmação → retryPlanning)
+  ├─ failed       → PlanningFailure (mensagem por errorCode; detalhes técnicos recolhidos)
+  └─ planned      → Análise · Hooks · Conceitos · Criativos/Cenas · Custo e aprovação
+                     "Gerar por ~R$X" → actions.approveCreativeAction
+                       → requestApproval → approve(estimateId) → generate (mídia mock)
+                       | BUDGET_EXCEEDED → BudgetDialog → approve(authorize) / resolveBudgetDecision
+```
+
+### Execução do planejamento (single-process)
+
+```
+startPlanning:  draft → planning (planningRunId, planningStartedAt, planningRuns++) → launch
+launch:         activePlanning[campaignId] = runPlanning()   (Map em memória do processo)
+runPlanning:    planner.plan()  (fora do lock)
+                → lock(campaign): registra custo das chamadas SEMPRE
+                → campanha ainda em "planning" com o MESMO runId? senão descarta o resultado
+                → planned (+ jobs estimados) | failed (+ errorCode)
+leitura:        status "planning" && !activePlanning.has(id)  ⇒  "interrompida" (derivado)
+retryPlanning:  ação explícita; planning→failed(interrupted) se preciso → failed→planning (novo runId)
+                checa pior caso + custo de planejamento já gasto contra o orçamento da campanha
+```
+
+Não é fila durável: se o processo cair, nada retoma sozinho.
+
 ## Persistência
 
 ```
@@ -52,6 +94,8 @@ DATA_DIR/
   jobs/<id>.json        estimativa, aprovação, decisão de orçamento e tentativas dentro do job
   ledger.jsonl          custo real, append-only, fsync por linha
   llm-calls.jsonl       auditoria das chamadas ao LLM
+UPLOADS_DIR/            (padrão outputs/uploads)
+  <productId>/img_<uuid>.<jpg|png|webp>   imagens do produto; servidas só por GET /api/uploads/<productId>/<arquivo>
 ```
 
 ## Fluxo
@@ -88,7 +132,7 @@ Job (`pipeline/states.ts`):
 
 \* só quando uma regeneração falha e o vídeo anterior é mantido.
 
-Campanha: `draft → planning → planned | failed`, `failed → planning`.
+Campanha: `draft → planning → planned | failed`, `failed → planning`. Na interface, `planning` sem execução no processo aparece como **interrompida** (estado derivado, não persistido).
 
 ## Sistema de custos
 
