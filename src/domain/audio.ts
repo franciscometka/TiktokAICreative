@@ -107,10 +107,13 @@ export const NarrationInfoSchema = z.object({
   voiceId: z.string().optional(),
   language: SpeechLanguageSchema,
   requestId: z.string().optional(),
-  /** Caracteres enviados ao TTS (texto falado, já normalizado). */
-  characters: z.int().nonnegative(),
-  /** Caracteres cobrados informados pelo provider (pode diferir de `characters`). */
-  billedCharacters: z.int().nonnegative().optional(),
+  /** Caracteres enviados ao TTS (texto falado, já normalizado). Base do custo monetário. */
+  inputCharacters: z.int().nonnegative(),
+  /**
+   * Consumo BRUTO informado pelo provider (ElevenLabs: header `character-cost`, créditos/quota).
+   * Outra unidade: não é caractere cobrado nem dinheiro; nunca entra no cálculo de custo.
+   */
+  providerCharacterCost: z.int().nonnegative().optional(),
   /** Versão no disco (ex.: "v2"). Ausente no mock. */
   version: z.string().optional(),
   timingUri: z.string().optional(),

@@ -124,14 +124,14 @@ describe("estimateCreativeCost — incorrido × futuro", () => {
   it("custo futuro: vídeo por cena com IA + áudio + render", () => {
     expect(estimate.videoCost.usd).toBeCloseTo(0.64, 6); // 8s × US$0.08
     expect(estimate.videoCost.brl).toBeCloseTo(3.2, 2);
-    // Texto FALADO: 300 caracteres escritos + 1 espaço entre as falas = 301 × US$0.04/1000 (ElevenLabs Flash)
-    expect(estimate.audioCost.usd).toBeCloseTo(0.01204, 6);
+    // Texto FALADO: 300 caracteres escritos + 1 espaço entre as falas = 301 × US$0.05/1000 (ElevenLabs Flash)
+    expect(estimate.audioCost.usd).toBeCloseTo(0.01505, 6);
     expect(estimate.renderingCost.usd).toBe(0);
-    expect(estimate.estimatedAdditionalUsd).toBeCloseTo(0.65204, 6);
+    expect(estimate.estimatedAdditionalUsd).toBeCloseTo(0.65505, 6);
   });
 
   it("total projetado = incorrido + futuro", () => {
-    expect(estimate.projectedTotalUsd).toBeCloseTo(0.69404, 6);
+    expect(estimate.projectedTotalUsd).toBeCloseTo(0.69705, 6);
     expect(estimate.projectedTotalBrl).toBeCloseTo(0.21 + estimate.estimatedAdditionalBrl, 2);
   });
 

@@ -92,10 +92,22 @@ Conclusão: o prompt `campaign-plan@1.0.0` funciona estruturalmente (schema, lim
 - [x] `npm run tts:real` (sem `--confirm` não chama; com `--confirm`, UMA chamada curta)
 - [x] `npm run test:render` com fixture WAV local: MP4 com trilha AAC sem usar ElevenLabs
 
-### Validação do Lote 4 (2026-10-14)
-- Sem `ELEVENLABS_API_KEY` neste ambiente: **nenhuma chamada real à ElevenLabs foi feita**. O provider foi validado com transporte falso (formato oficial da API) e o MP4 com áudio foi validado com fixture local.
-- `npm run tts:real` (sem `--confirm`): Clara → "Sarah", `eleven_flash_v2_5`, 169 caracteres falados, US$0,00676 ≈ R$0,04.
-- Pendente com autorização: UMA `npm run tts:real -- --confirm` para conferir voz/sotaque, `character-cost` e alinhamento reais.
+### Validação real do Lote 4 ✅ (2026-10-14)
+UMA chamada real (`npm run tts:real -- --confirm`), sem retentativa:
+
+| Item | Resultado |
+|---|---|
+| Modelo / voz | `eleven_flash_v2_5` · Clara → "Sarah" |
+| Caracteres enviados | 169 |
+| `character-cost` (créditos) | 85 |
+| Request id | `IxjNGD1yOudqif0Kw02v` |
+| Duração do áudio / fim da fala | 10,658s / 10,589s |
+| Latência | 1.215 ms |
+| AudioFit (alvo 9s) | `too_long` |
+| Alinhamento / legendas / MP3 | válidos / válidas / salvo |
+| Custo monetário (tabela da API) | 169 × US$0,05/1000 = US$0,00845 |
+
+Correções depois da validação: `character-cost` separado de caracteres enviados e de custo (D67); preço vigente da API US$0,05 / US$0,10 (D57).
 
 ## Roadmap (próximos lotes — não iniciar sem autorização)
 
@@ -127,10 +139,10 @@ Conclusão: o prompt `campaign-plan@1.0.0` funciona estruturalmente (schema, lim
 - Re-estimativa após falha recalcula o criativo inteiro; mocks retornam URIs `mock://`; cotação estática.
 - Prompt `campaign-plan@1.0.0` validado só com 1 criativo no preset economy; high/premium e vários criativos ainda não foram testados com o modelo real.
 - `campaign-plan@1.0.1` ainda não validado com o Claude real (só testes do texto do prompt).
-- ElevenLabs validada só com transporte falso; voz/sotaque e headers reais pendentes de UMA validação (`tts:real -- --confirm`).
+- ElevenLabs validada com UMA chamada real curta (preset economy); Multilingual v2 e criativos completos ainda não testados em chamada real.
 - Vozes são premade multilíngues (sotaque pode não ser brasileiro nativo); trocar por vozes pt-BR da Voice Library.
 - Timeout de TTS: a chamada pode ter sido cobrada sem registro (não sabemos o `usage`); a mensagem avisa e nada é re-tentado.
-- Preço de API (USD) ≠ consumo de créditos de assinatura; o ledger usa o preço de API.
+- Preço de API (USD) ≠ créditos/quota da assinatura (`character-cost`); o ledger usa só o preço de API. Se a conta for por assinatura, o gasto real em dinheiro depende do plano.
 - Regenerar narração refaz o criativo inteiro (narração contínua, D55); não há regeneração parcial por cena.
 - Normalização pt-BR cobre dinheiro, números, unidades comuns e %; datas, horas "10:30", siglas e números ordinais seguem como escritos.
 - Legendas são cortadas quando o CTA entra (mesma faixa da tela), mesmo com a fala continuando.

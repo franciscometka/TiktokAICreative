@@ -30,6 +30,10 @@ export interface NarrationView {
   /** /api/audio/<campanha>/<criativo>/<versão> — só para áudio real salvo. */
   audioUrl: string | null;
   captionTiming: "alignment" | "estimated" | null;
+  /** Caracteres enviados (base do custo). */
+  inputCharacters: number | null;
+  /** Consumo bruto informado pela ElevenLabs (créditos/quota; outra unidade). */
+  providerCharacterCost: number | null;
   fit: AudioFit | null;
   note: string | null;
   lastError: string | null;
@@ -94,6 +98,8 @@ export function buildNarrationView(input: {
     version: info?.version ?? null,
     audioUrl: info?.version && job && !current?.isMock ? narrationAudioUrl(campaign.id, job.creativeId, info.version) : null,
     captionTiming: info?.captionTiming ?? null,
+    inputCharacters: info?.inputCharacters ?? null,
+    providerCharacterCost: info?.providerCharacterCost ?? null,
     fit: info?.fit ?? null,
     note: info?.note ?? null,
     lastError: last?.status === "failed" ? (last.error ?? "Falha na geração da narração") : null,

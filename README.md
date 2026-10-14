@@ -71,10 +71,10 @@ ELEVENLABS_API_KEY=sk_...
 ```
 | Preset | Modelo TTS | Preço (API) |
 |---|---|---|
-| Econômico | eleven_flash_v2_5 | US$0,04 / 1.000 caracteres |
-| Alta qualidade / Premium | eleven_multilingual_v2 | US$0,08 / 1.000 caracteres |
+| Econômico | eleven_flash_v2_5 | US$0,05 / 1.000 caracteres |
+| Alta qualidade / Premium | eleven_multilingual_v2 | US$0,10 / 1.000 caracteres |
 
-Um criativo de ~25s tem ~350–450 caracteres falados (≈ R$0,08–0,20). Preços em [src/config/pricing.ts](src/config/pricing.ts) (verificados em 2026-10-14); planos de assinatura usam créditos e podem sair diferentes. Vozes em [src/config/voices.ts](src/config/voices.ts) — são vozes padrão multilíngues; para sotaque brasileiro nativo, troque o voiceId por uma voz pt-BR da Voice Library.
+Um criativo de ~25s tem ~350–450 caracteres falados (≈ R$0,10–0,25). Preços em [src/config/pricing.ts](src/config/pricing.ts) (tabela vigente da API, 2026-10-14). O custo é calculado sobre os caracteres ENVIADOS; o header `character-cost` da ElevenLabs mede créditos/quota da assinatura (outra unidade) e só é guardado para auditoria. Validação real: 169 caracteres, `character-cost` 85, US$0,00845 (docs/TASKS.md). Vozes em [src/config/voices.ts](src/config/voices.ts) — são vozes padrão multilíngues; para sotaque brasileiro nativo, troque o voiceId por uma voz pt-BR da Voice Library.
 
 Antes de usar em campanha, valide uma vez:
 ```bash

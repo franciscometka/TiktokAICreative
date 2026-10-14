@@ -123,7 +123,8 @@ runGeneration (lock da campanha)
   ├─ generateNarration
   │    buildNarrationScript(cenas) → texto FALADO (pt-BR normalizado) + mapa para o escrito
   │    provider.generateAudio(texto, voz do SpeakerProfile)     UMA chamada, sem retry
-  │    ledger ← custo real (character-cost × preço)            mesmo que salvar falhe depois
+  │    ledger ← custo real (caracteres enviados × preço)        mesmo que salvar falhe depois
+  │    character-cost (créditos) → providerCharacterCost         só auditoria, nunca no custo
   │    storeNarration: CharacterTiming → TimedWord[] (+ janelas por cena), AudioFit,
   │                    AudioAssetStore.save → outputs/audio/<c>/<k>/vN/{narration.mp3,timing.json,metadata.json}
   └─ afterNarration: fit.action = review → audio_review (espera o usuário) | senão → rendering

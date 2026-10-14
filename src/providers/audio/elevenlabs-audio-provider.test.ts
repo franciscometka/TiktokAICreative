@@ -48,12 +48,21 @@ describe("ElevenLabsAudioProvider (transporte falso)", () => {
     expect(calls[0]?.body).not.toHaveProperty("language_code");
   });
 
-  it("converte a resposta para tipos internos: bytes, timing por caractere, request id, caracteres cobrados", async () => {
-    const { p } = provider({ requestId: "req_abc", characterCost: 38 });
+  it("converte a resposta para tipos internos: bytes, timing, request id; character-cost fica à parte", async () => {
+    // Caso real (2026-10-14): 169 caracteres enviados, character-cost = 85.
+    const { p } = provider({ requestId: "req_abc", characterCost: 85 });
     const { ref, result } = await generate(p);
     expect(ref.providerJobId).toBe("req_abc");
-    expect(result).toMatchObject({ isMock: false, mimeType: "audio/mpeg", requestId: "req_abc", billedCharacters: 38, extension: "mp3" });
-    expect(result.billedUsage).toMatchObject({ characters: 38, generations: 1 });
+    expect(result).toMatchObject({
+      isMock: false,
+      mimeType: "audio/mpeg",
+      requestId: "req_abc",
+      inputCharacters: REQUEST.text.length,
+      providerCharacterCost: 85,
+      extension: "mp3",
+    });
+    // O custo usa os caracteres ENVIADOS; o character-cost (créditos) nunca vira base de preço.
+    expect(result.billedUsage).toMatchObject({ characters: REQUEST.text.length, generations: 1 });
     expect(result.data?.length).toBeGreaterThan(400);
     expect(result.characterTiming?.characters.join("")).toBe(REQUEST.text);
     expect(result.characterTiming?.startSeconds[0]).toBe(0);
@@ -62,15 +71,16 @@ describe("ElevenLabsAudioProvider (transporte falso)", () => {
     expect(result.durationSeconds).toBeCloseTo(REQUEST.text.length * 0.06 + 0.3, 1);
   });
 
-  it("sem header character-cost, cobra o tamanho do texto enviado", async () => {
+  it("sem header character-cost: mesmo custo (texto enviado) e consumo do provider ausente", async () => {
     const { p } = provider({ characterCost: null });
     const { result } = await generate(p);
     expect(result.billedUsage.characters).toBe(REQUEST.text.length);
+    expect(result.providerCharacterCost).toBeUndefined();
   });
 
-  it("estimativa usa o preço oficial do modelo (US$0,04/1K no Flash, US$0,08/1K no Multilingual)", () => {
-    expect(provider().p.estimateCost({ ...REQUEST, text: "x".repeat(1000) }).costUsd).toBeCloseTo(0.04, 10);
-    expect(provider({}, multilingual).p.estimateCost({ ...REQUEST, text: "x".repeat(500) }).costUsd).toBeCloseTo(0.04, 10);
+  it("estimativa usa o preço da API (US$0,05/1K no Flash, US$0,10/1K no Multilingual)", () => {
+    expect(provider().p.estimateCost({ ...REQUEST, text: "x".repeat(1000) }).costUsd).toBeCloseTo(0.05, 10);
+    expect(provider({}, multilingual).p.estimateCost({ ...REQUEST, text: "x".repeat(500) }).costUsd).toBeCloseTo(0.05, 10);
     expect(flash.isPlaceholder).toBe(false);
   });
 
@@ -104,7 +114,7 @@ describe("ElevenLabsAudioProvider (transporte falso)", () => {
     const { p } = provider({ invalidBody: true, characterCost: 41 });
     const error = (await p.generateAudio(REQUEST).catch((e: unknown) => e)) as ProviderError;
     expect(error).toBeInstanceOf(ProviderError);
-    expect(error.billedUsage?.characters).toBe(41);
+    expect(error.billedUsage?.characters).toBe(REQUEST.text.length);
   });
 
   it("timeout e erro de rede: uma única tentativa, mensagem avisa de possível cobrança", async () => {

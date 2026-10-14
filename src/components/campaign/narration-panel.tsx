@@ -82,6 +82,10 @@ export function NarrationPanel({ jobId, narration }: { jobId: string | undefined
             {n.model ?? "—"}
             {n.attempts > 1 && <span className="text-zinc-500"> · {n.attempts} tentativas (todas no custo real)</span>}
             {n.version && <span className="text-zinc-500"> · versão {n.version}</span>}
+            {n.inputCharacters !== null && <span className="text-zinc-500"> · {n.inputCharacters} caracteres enviados</span>}
+            {n.providerCharacterCost !== null && (
+              <span className="text-zinc-500"> · consumo informado pela ElevenLabs: {n.providerCharacterCost} (créditos, outra unidade)</span>
+            )}
           </dd>
         </div>
       </dl>

@@ -11,7 +11,7 @@ Custo é preocupação central; nada pago de mídia acontece sem aprovação exp
 - Lotes 0 a 4 concluídos. Lote 4 = narração real pt-BR com ElevenLabs (opcional), legendas com timing real, AudioFit/revisão, áudio versionado e MP4 com AAC. Lote 2 = experiência `/create` → `/campaigns/[id]` (planejar, revisar, custo, aprovar). Lote 3 = render real do MP4 com Remotion (local, R$0).
 - Planejamento: `LLM_PROVIDER=mock` (padrão, sem custo) ou `anthropic` (Claude real, pago).
 - Renderer: `RENDERER=mock` (padrão, sem arquivo) ou `remotion` (MP4 real). Narração: `AUDIO_PROVIDER=mock` (padrão, "MODO DE TESTE", sem som) ou `elevenlabs` (real, paga). Vídeo IA continua **mock** (placeholder "MOCK · VÍDEO IA").
-- Prompt ativo: `campaign-plan@1.0.1` (1.0.0 + regras da D42). A 1.0.0 foi validada com o Claude real em 2026-10-14; a 1.0.1 ainda não. ElevenLabs validada só com transporte falso (sem chave neste ambiente).
+- Prompt ativo: `campaign-plan@1.0.1` (1.0.0 + regras da D42). A 1.0.0 foi validada com o Claude real em 2026-10-14; a 1.0.1 ainda não. ElevenLabs validada com UMA chamada real em 2026-10-14 (D68).
 - **Não avance de lote sem instrução do usuário.** Ver `docs/TASKS.md`.
 
 ## Comandos
@@ -97,7 +97,7 @@ Para ver a tela de processamento com o mock: `MOCK_PLANNER_DELAY_MS=20000` em `.
 
 ## Narração (Lote 4)
 - Narração CONTÍNUA por criativo (D55): uma chamada, um timing. Texto enviado = texto FALADO normalizado; a legenda usa o escrito (D59).
-- Estimativa por caracteres falados × preço oficial; custo real = `character-cost` do provider. Toda tentativa cobrada vai ao ledger.
+- Estimativa e custo real = caracteres ENVIADOS × preço da API (US$0,05 Flash / US$0,10 Multilingual). `character-cost` (créditos/quota) fica em `providerCharacterCost`, só auditoria — nunca multiplicar pelo preço (D67). Toda tentativa cobrada vai ao ledger.
 - Sem retry automático (nem de transporte). Timeout: tentativa falha com aviso de possível cobrança.
 - Fala muito mais longa → `audio_review` (aceitar/gerar de novo/cancelar). Nunca cortar fala; nunca regerar sozinho (D61).
 - Áudio é asset independente do renderer (`AudioAssetStore`), versionado, servido por IDs.

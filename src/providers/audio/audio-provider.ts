@@ -24,8 +24,13 @@ export interface AudioResult extends MediaResult {
   characterTiming?: CharacterTiming;
   requestId?: string;
   voiceId?: string;
-  /** Caracteres cobrados informados pelo provider. */
-  billedCharacters?: number;
+  /** Caracteres REALMENTE enviados ao TTS (base do custo monetário pela tabela de preço). */
+  inputCharacters?: number;
+  /**
+   * Valor BRUTO de consumo informado pelo provider (ElevenLabs: header `character-cost`, em
+   * créditos/quota da assinatura). NÃO é caractere cobrado nem dinheiro: só auditoria.
+   */
+  providerCharacterCost?: number;
 }
 
 /** Contrato de qualquer provider de áudio/TTS (Mock, ElevenLabs...). Mesma regra de chamada paga do vídeo. */

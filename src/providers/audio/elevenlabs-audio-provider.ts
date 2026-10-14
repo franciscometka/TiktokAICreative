@@ -31,6 +31,7 @@ import { mp3DurationSeconds } from "./mp3";
  * - UMA requisição por narração; nenhum retry automático (nem de transporte).
  * - Falha HTTP (4xx/5xx) não é cobrada pela ElevenLabs → sem billedUsage.
  * - Resposta 200 inválida → falha COM billedUsage (a geração provavelmente foi cobrada).
+ * - Custo = caracteres enviados × preço; `character-cost` (créditos) só vai para auditoria.
  * - Timeout → falha sem billedUsage, mas a mensagem avisa da possível cobrança não confirmada.
  * A API key fica em campo privado e nunca entra em mensagens, logs ou resultados.
  */
@@ -128,8 +129,11 @@ export class ElevenLabsAudioProvider implements AudioProvider {
     const requestId = response.headers.get("request-id") ?? response.headers.get("x-request-id") ?? undefined;
     if (!response.ok) throw new ProviderError(await this.httpErrorMessage(response), requestId);
 
-    const billedCharacters = parseCharacterCost(response.headers.get("character-cost")) ?? text.length;
-    const billedUsage = this.usageFor(billedCharacters);
+    // Custo monetário = caracteres ENVIADOS × preço da API. O header `character-cost` é consumo de
+    // créditos/quota da assinatura (outra unidade; ex.: 85 para 169 caracteres no Flash) — guardado
+    // à parte, nunca multiplicado pelo preço (seria desconto duplicado).
+    const providerCharacterCost = parseCharacterCost(response.headers.get("character-cost"));
+    const billedUsage = this.usageFor(text.length);
     let parsed: z.infer<typeof ResponseSchema>;
     let data: Uint8Array;
     try {
@@ -155,7 +159,8 @@ export class ElevenLabsAudioProvider implements AudioProvider {
       characterTiming,
       requestId,
       voiceId: voice.voiceId,
-      billedCharacters,
+      inputCharacters: text.length,
+      providerCharacterCost,
     });
     return { providerJobId };
   }

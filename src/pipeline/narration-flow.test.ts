@@ -62,8 +62,8 @@ describe("narração real (ElevenLabs com transporte falso)", () => {
     expect(attempt.narration).toMatchObject({
       speakerProfileId: "rafael",
       requestId: "req_narr_1",
-      characters: sent.length,
-      billedCharacters: sent.length,
+      inputCharacters: sent.length,
+      providerCharacterCost: sent.length, // transporte falso ecoa o tamanho; na API real é outra unidade
       version: "v1",
       captionTiming: "alignment",
       language: "pt-BR",
@@ -73,7 +73,7 @@ describe("narração real (ElevenLabs com transporte falso)", () => {
     const audioCost = (await h.ledger.list({ jobId })).filter((e) => e.category === "audio");
     expect(audioCost).toHaveLength(1);
     expect(audioCost[0]).toMatchObject({ simulated: false, operation: "audio_generation", attemptId: attempt.id });
-    expect(audioCost[0]!.costUsd).toBeCloseTo((sent.length / 1000) * 0.04, 8);
+    expect(audioCost[0]!.costUsd).toBeCloseTo((sent.length / 1000) * 0.05, 8);
 
     const manifest = job.manifest!;
     expect(manifest.captionSource).toBe("alignment");
@@ -104,6 +104,18 @@ describe("narração real (ElevenLabs com transporte falso)", () => {
     expect(done.manifest!.extendedSeconds).toBeCloseTo(fit.extendSeconds, 3);
     expect(done.manifest!.warnings.map((w) => w.code)).toContain("timeline_extended");
     expect(http.calls).toHaveLength(1); // aceitar não chama nada pago
+  });
+
+  it("character-cost menor que o texto (caso real 169 → 85) NÃO reduz o custo: sem desconto duplicado", async () => {
+    const { h } = setup({ characterCost: 85 });
+    const { jobId, creative } = await approved(h);
+    await h.service.generate(jobId);
+    const job = await h.store.getJob(jobId);
+    const chars = spokenNarrationCharacters(creative);
+    expect(job.audioAttempts[0]!.narration).toMatchObject({ inputCharacters: chars, providerCharacterCost: 85 });
+    const audio = (await h.ledger.list({ jobId })).find((e) => e.category === "audio")!;
+    expect(audio.quantity).toBe(chars); // caracteres ENVIADOS, não o character-cost
+    expect(audio.costUsd).toBeCloseTo((chars / 1000) * 0.05, 8);
   });
 
   it("excede pouco: estende o fim localmente, sem revisão e sem chamada extra", async () => {

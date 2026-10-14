@@ -86,8 +86,8 @@ async function main() {
     requestId: result.requestId,
     model: pricing.model,
     speakerProfileId: speaker.id,
-    characters: script.spoken.length,
-    billedCharacters: result.billedCharacters,
+    inputCharacters: script.spoken.length,
+    providerCharacterCost: result.providerCharacterCost,
     costUsd: real.costUsd,
     costBrl: real.costUsd * config.exchangeRate.rate,
     durationSeconds: result.durationSeconds,
@@ -98,7 +98,10 @@ async function main() {
     audio: stored.uri,
   };
   await writeFile(join("data", "manual", "tts", "manual", `tts_${stamp}`, stored.version, "result.json"), JSON.stringify(summary, null, 2));
-  console.log(`\nOK · request ${summary.requestId ?? "—"} · ${summary.billedCharacters} caracteres cobrados · US$${real.costUsd.toFixed(5)} ≈ ${formatBrl(summary.costBrl)}`);
+  console.log(
+    `\nOK · request ${summary.requestId ?? "—"} · ${summary.inputCharacters} caracteres enviados · US${real.costUsd.toFixed(5)} ≈ ${formatBrl(summary.costBrl)} (tabela da API)`,
+  );
+  console.log(`character-cost (créditos/quota da ElevenLabs, outra unidade): ${summary.providerCharacterCost ?? "—"}`);
   console.log(`Duração ${result.durationSeconds}s · fala até ${summary.speechEndSeconds ?? "—"}s · ${elapsedMs} ms · encaixe: ${fit.status}`);
   for (const c of summary.captions) console.log(`  [${c.startSeconds.toFixed(2)}–${c.endSeconds.toFixed(2)}] ${c.text}`);
   console.log(`Arquivos: ${stored.uri}`);

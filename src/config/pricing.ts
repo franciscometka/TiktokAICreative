@@ -67,26 +67,26 @@ export const PRICING_TABLE: readonly ProviderPricing[] = [
     isPlaceholder: true,
   },
 
-  // ---- Áudio / TTS: ElevenLabs (preço OFICIAL da API, cobrado em USD por caractere) ----
-  // elevenlabs.io/pricing/api, verificado em 2026-10-14. Planos de assinatura usam créditos e
-  // podem sair diferentes: este é o preço de API pay-as-you-go.
+  // ---- Áudio / TTS: ElevenLabs (preço da API em USD por 1.000 caracteres ENVIADOS) ----
+  // Tabela vigente da API (elevenlabs.io/pricing/api), confirmada em 2026-10-14 na validação real.
+  // Créditos/quota da assinatura (e o header `character-cost`) são OUTRA unidade: não entram aqui.
   {
     provider: ELEVENLABS_PROVIDER,
     model: ELEVENLABS_MODELS.flash,
     unit: "per_1000_characters",
-    priceUsd: 0.04,
+    priceUsd: 0.05,
     updatedAt: "2026-10-14",
     isPlaceholder: false,
-    source: "ElevenLabs API pricing — Flash/Turbo",
+    source: "elevenlabs.io/pricing/api — Flash/Turbo (tabela vigente, 2026-10-14)",
   },
   {
     provider: ELEVENLABS_PROVIDER,
     model: ELEVENLABS_MODELS.multilingual,
     unit: "per_1000_characters",
-    priceUsd: 0.08,
+    priceUsd: 0.1,
     updatedAt: "2026-10-14",
     isPlaceholder: false,
-    source: "ElevenLabs API pricing — Multilingual v2",
+    source: "elevenlabs.io/pricing/api — Multilingual v2 (tabela vigente, 2026-10-14)",
   },
 
   // ---- Renderização local (Remotion na máquina do usuário) ----
