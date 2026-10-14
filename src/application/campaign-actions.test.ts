@@ -35,7 +35,7 @@ async function setup(storage?: HarnessOptions["storage"], ids?: HarnessOptions["
   let planner!: GatedPlanner;
   const h = createHarness({ planner: (gen) => (planner = new GatedPlanner(gen)), storage, ids });
   const { uploads } = await tempUploads();
-  const deps: AppDeps = { service: h.service, uploads };
+  const deps: AppDeps = { service: h.service, uploads, rendersDir: "outputs/renders" };
   return { h, planner, deps, uploads };
 }
 
@@ -85,7 +85,7 @@ describe("criar campanha (action)", () => {
   it("recusa antes de criar a campanha quando o Claude não está configurado", async () => {
     const h = createHarness({ planner: () => new UnavailablePlanner("anthropic", new LlmError("missing_credentials")) });
     const { uploads } = await tempUploads();
-    const deps = { service: h.service, uploads };
+    const deps = { service: h.service, uploads, rendersDir: "outputs/renders" };
     const result = await startCampaignPlanning(deps, formInput());
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe("not_configured");
@@ -222,7 +222,9 @@ describe("aprovação (action)", () => {
     const { deps, view: v, campaignId } = await plannedCampaign();
     const creative = v.creatives[0]!;
     const result = ok(await approveCreative(deps, { jobId: creative.jobId!, estimateId: creative.estimate!.estimateId }));
-    expect(result).toEqual({ kind: "completed" });
+    // A action volta logo; geração + render seguem em background no processo.
+    expect(result).toEqual({ kind: "started" });
+    await until(async () => (await view(deps, campaignId)).creatives[0]?.jobStatus === "completed");
     const after = (await view(deps, campaignId)).creatives[0]!;
     expect(after.jobStatus).toBe("completed");
     expect(after.result?.simulated).toBe(true);
@@ -275,7 +277,8 @@ describe("aprovação (action)", () => {
     const second = ok(
       await approveCreative(deps, { jobId: creative.jobId!, estimateId: creative.estimate!.estimateId, authorizeOverBudget: true }),
     );
-    expect(second).toEqual({ kind: "completed" });
+    expect(second).toEqual({ kind: "started" });
+    await until(async () => (await h.store.getJob(creative.jobId!)).status === "completed");
     expect(h.video.generateCalls.length).toBeGreaterThan(0);
   });
 

@@ -6,6 +6,7 @@ import {
   approveCreative,
   cancelCreative,
   removeProductImage,
+  rerenderCreative,
   resolveCreativeBudget,
   retryCampaignPlanning,
   startCampaignPlanning,
@@ -70,4 +71,10 @@ export async function removeImageAction(input: unknown): Promise<ActionResult<{ 
   const parsed = RemoveImageInput.safeParse(input);
   if (!parsed.success) return badInput();
   return removeProductImage(getRuntime().deps, parsed.data);
+}
+
+export async function rerenderCreativeAction(jobId: unknown): Promise<ActionResult<GenerationResultView>> {
+  const parsed = id.safeParse(jobId);
+  if (!parsed.success) return badInput();
+  return rerenderCreative(getRuntime().deps, parsed.data);
 }

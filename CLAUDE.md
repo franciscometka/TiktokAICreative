@@ -8,9 +8,9 @@ produto → análise/hooks/conceitos/roteiro/cenas (Claude) → validação + aj
 Custo é preocupação central; nada pago de mídia acontece sem aprovação explícita.
 
 ## Estado atual
-- Lotes 0, 1 e 2 concluídos. Lote 2 = experiência `/create` → `/campaigns/[id]` (planejar, revisar, custo, aprovar).
+- Lotes 0, 1, 2 e 3 concluídos. Lote 2 = experiência `/create` → `/campaigns/[id]` (planejar, revisar, custo, aprovar). Lote 3 = render real do MP4 com Remotion (local, R$0).
 - Planejamento: `LLM_PROVIDER=mock` (padrão, sem custo) ou `anthropic` (Claude real, pago).
-- Vídeo, áudio e renderer continuam **mocks** (aprovação roda em MODO DE TESTE). Remotion real = Lote 3.
+- Renderer: `RENDERER=mock` (padrão, sem arquivo) ou `remotion` (MP4 real). Vídeo IA e áudio continuam **mocks**: placeholder "MOCK · VÍDEO IA" e vídeo sem som.
 - Prompt `campaign-plan@1.0.0` validado com o Claude real em 2026-10-14 (economy, 1 criativo, válido na 1ª tentativa, US$0,0414). Antes de mídia real, aplicar as regras de conteúdo da D42 (`campaign-plan@1.0.1`).
 - **Não avance de lote sem instrução do usuário.** Ver `docs/TASKS.md`.
 
@@ -24,6 +24,8 @@ npm run check             # lint + typecheck + test (obrigatório antes de encer
 npm run build             # build de produção
 npm run plan:real         # validação manual com Claude real: sem --confirm só mostra o pior caso
 npm run test:integration  # testes PAGOS; só rodam com RUN_PAID_TESTS=1 e ANTHROPIC_API_KEY
+npm run render:setup      # baixa o Chrome Headless Shell do Remotion (1× por máquina)
+npm run test:render       # teste PESADO: MP4 real de 3s (fora do npm test e do check)
 ```
 Para ver a tela de processamento com o mock: `MOCK_PLANNER_DELAY_MS=20000` em `.env.local`.
 
@@ -39,7 +41,9 @@ Para ver a tela de processamento com o mock: `MOCK_PLANNER_DELAY_MS=20000` em `.
 - `src/providers/` — `VideoProvider`/`AudioProvider`, mocks, factories, polling com limite.
 - `src/pipeline/` — estados, guards, contexto de orçamento, `PipelineService`, raiz de composição.
 - `src/storage/` — `FilePipelineStore`, `FileCostLedger`, `FileLlmCallLog` (JSON/JSONL atômicos em `DATA_DIR`), `LocalUploadStore` (`UPLOADS_DIR`) e versões em memória.
-- `src/render/` — `buildRenderManifest` (puro), `MockRenderer`.
+- `src/render/` — `buildRenderManifest`, `timeline`, `captions`, `scene-strategy`, `composition-props` (puros); `AssetResolver`; `output-paths` (versões vN); `createRenderer` (**único lugar que escolhe o renderer**); `remotion/` (`RemotionRenderer`, servidor de assets; **único lugar do app que importa `@remotion/*`**).
+- `remotion/` — composição `TikTokCreative`, componentes, tema (safe areas, tokens), fontes locais. Imports relativos (sem `@/`). Contrato em `remotion/types/props.ts`.
+- `src/app/api/renders/[campaignId]/[creativeId]/[renderId]` — player/download por IDs.
 - `scripts/plan-real.ts` — validação manual com o Claude real.
 
 ## Modelos Claude
@@ -78,7 +82,14 @@ Para ver a tela de processamento com o mock: `MOCK_PLANNER_DELAY_MS=20000` em `.
 - `BUDGET_EXCEEDED` → UI oferece Cancelar/Autorizar. `allowOverBudget` = usuário **pode** autorizar, até o total mostrado.
 - Regeneração: limite `MAX_ATTEMPTS_PER_SCENE`, custo anterior vira "descartado" mas continua no total.
 - Operações por campanha são serializadas (lock). Um processo por `DATA_DIR`.
-- UI aprova por criativo via `approveCreative` (requestApproval → approve(estimateId) → generate). O diálogo de orçamento só mostra "Autorizar" se `canAuthorizeOverBudget`.
+- UI aprova por criativo via `approveCreative` (requestApproval → approve(estimateId) → `startGeneration`, em background). O diálogo de orçamento só mostra "Autorizar" se `canAuthorizeOverBudget`.
+
+## Renderização (Lote 3)
+- Aprovar/retomar/renderizar de novo voltam logo; trabalho roda no processo (`activeJobs`), UI faz polling. Render em 3 fases (lock → sem lock → lock).
+- Progresso só com frames reais. `generating`/`rendering` sem execução = interrompido; nada retoma sozinho.
+- Saída `outputs/renders/<campanha>/<criativo>/v<N>/` + `manifest.json`; nunca sobrescreve. Render custa R$0 (ledger `rendering`, `simulated: false`).
+- Mudou `remotion/`? Reinicie o servidor (bundle em cache por processo). Windows com pasta funda: `RENDER_BROWSER_EXECUTABLE` (D53).
+- Licença do Remotion: empresas com mais de 3 pessoas precisam da Company License (D54).
 
 ## Padrões
 - TypeScript estrito. `import type` para tipos (lint exige).
@@ -98,6 +109,9 @@ Para ver a tela de processamento com o mock: `MOCK_PLANNER_DELAY_MS=20000` em `.
 - Não criar re-tentativas automáticas pagas nem loops sem limite (inclui fallbacks server-side).
 - Não apagar/editar custos (ledger append-only).
 - Não logar, serializar ou enviar ao browser a `ANTHROPIC_API_KEY`; não commitar `.env*` nem `data/`.
-- Não adicionar banco externo, integração TikTok, providers de mídia reais ou Remotion real sem instrução do lote.
-- Não aceitar caminhos de arquivo vindos do browser (só IDs gerados: `SAFE_PRODUCT_ID`, `STORED_IMAGE_NAME`); não servir arquivos fora de `UPLOADS_DIR`.
+- Não adicionar banco externo, integração TikTok, providers de mídia reais, TTS ou render em nuvem sem instrução do lote.
+- Não importar `@remotion/*` fora de `src/render/remotion/` (e `scripts/render-setup.ts`); não usar `@/` dentro de `remotion/`.
+- Não sobrescrever nem apagar renders; não servir arquivo de render que não esteja registrado no job; não aceitar caminho de render vindo do browser.
+- Não apresentar placeholder como vídeo gerado; não sintetizar voz (Web Speech/TTS) nem inventar progresso de render.
+- Não aceitar caminhos de arquivo vindos do browser (só IDs gerados: `SAFE_PRODUCT_ID`, `STORED_IMAGE_NAME`, `SAFE_ENTITY_ID`, `RENDER_ID`); não servir arquivos fora de `UPLOADS_DIR`/`RENDERS_DIR`.
 - Não colocar regra de negócio/custo em componentes ou Server Actions; não serializar `AppConfig` para o cliente (use `getPublicConfig`).

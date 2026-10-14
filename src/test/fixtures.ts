@@ -12,7 +12,7 @@ import { fixedClock } from "@/lib/clock";
 import { sequentialIds } from "@/lib/ids";
 import { MockAudioProvider, type MockAudioProviderOptions } from "@/providers/audio/mock-audio-provider";
 import { MockVideoProvider, type MockVideoProviderOptions } from "@/providers/video/mock-video-provider";
-import { MockRenderer } from "@/render/renderer";
+import { MockRenderer, type Renderer } from "@/render/renderer";
 import { InMemoryLlmCallLog } from "@/storage/llm-call-log";
 import { InMemoryPipelineStore } from "@/storage/pipeline-store";
 import type { CreativePlanner } from "@/ai/planner";
@@ -128,6 +128,8 @@ export interface HarnessOptions {
   planner?: (ids: IdGenerator) => CreativePlanner;
   storage?: { store: PipelineStore; ledger: CostLedger; llmCallLog: LlmCallLog };
   ids?: IdGenerator;
+  /** Renderer controlável (testes de render em andamento/falha). Padrão: MockRenderer. */
+  renderer?: Renderer;
 }
 
 /** Pipeline completo com mocks compartilhados para inspeção nos testes. */
@@ -136,7 +138,7 @@ export function createHarness(options: HarnessOptions = {}) {
   const ids = options.ids ?? sequentialIds();
   const video = new MockVideoProvider({ pricing: catalog.requireOne(settings.video), ...options.video });
   const audio = new MockAudioProvider({ pricing: catalog.requireOne(settings.audio), ...options.audio });
-  const renderer = new MockRenderer();
+  const renderer = options.renderer ?? new MockRenderer();
   const { store, ledger, llmCallLog } = options.storage ?? {
     store: new InMemoryPipelineStore(),
     ledger: new InMemoryCostLedger(),

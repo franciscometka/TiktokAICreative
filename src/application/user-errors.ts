@@ -17,7 +17,9 @@ export type UserErrorCode =
   | "attempt_limit"
   | "not_found"
   | "corrupted"
-  | "upload";
+  | "upload"
+  | "job_in_progress"
+  | "render_security";
 
 export interface UserError {
   code: UserErrorCode;
@@ -151,6 +153,17 @@ export function toUserError(error: unknown): UserError {
   }
   if (named(error, "NotFoundError")) {
     return make("not_found", "Campanha não encontrada", "Esta campanha não existe ou foi removida da pasta de dados.");
+  }
+  if (named(error, "JobInProgressError")) {
+    return make("job_in_progress", "Já em andamento", "Este criativo já está sendo gerado ou renderizado. Aguarde terminar.");
+  }
+  if (named(error, "AssetSecurityError", "InvalidRenderPathError")) {
+    console.error("[render: segurança]", error.message);
+    return make("render_security", "Asset recusado", "Uma referência de arquivo do criativo não é permitida. Nada foi renderizado; veja o log do servidor.");
+  }
+  if (named(error, "AssetCorruptedError")) {
+    console.error("[render: asset corrompido]", error.message);
+    return make("corrupted", "Imagem corrompida", "Uma imagem do produto não pôde ser lida. Remova e envie de novo.");
   }
   if (named(error, "UploadValidationError")) return make("upload", "Imagem recusada", error.message);
   if (named(error, "InvalidUploadPathError")) return make("upload", "Imagem recusada", "Referência de imagem inválida.");

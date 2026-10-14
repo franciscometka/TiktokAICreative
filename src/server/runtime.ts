@@ -29,7 +29,11 @@ export function getRuntime(): Runtime {
     const config = loadAppConfig();
     g[KEY] = {
       config,
-      deps: { service: createPipelineService(config), uploads: new LocalUploadStore(config.uploadsDir) },
+      deps: {
+        service: createPipelineService(config),
+        uploads: new LocalUploadStore(config.uploadsDir),
+        rendersDir: config.rendersDir,
+      },
     };
   }
   return g[KEY];
@@ -41,6 +45,8 @@ export interface PublicAppConfig {
   planningAvailable: boolean;
   /** true enquanto vídeo e áudio usam providers mock (nada real é gerado ou cobrado). */
   mediaIsMock: boolean;
+  /** "remotion" = o render gera MP4 real; "mock" = nenhum arquivo é gerado. */
+  renderer: "mock" | "remotion";
   defaultBudget: CostBudget;
   exchangeRate: { rate: number; source: string };
 }
@@ -51,6 +57,7 @@ export function getPublicConfig(): PublicAppConfig {
     planner: config.llmProvider,
     planningAvailable: deps.service.planningAvailable(),
     mediaIsMock: config.videoProvider === "mock" && config.audioProvider === "mock",
+    renderer: config.renderer.id,
     defaultBudget: config.defaultBudget,
     exchangeRate: { rate: config.exchangeRate.rate, source: config.exchangeRate.source },
   };

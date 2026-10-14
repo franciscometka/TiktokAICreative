@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { stat } from "node:fs/promises";
+import { join } from "node:path";
 import type { ActualCostSummary } from "@/costs/ledger";
 import { SAFE_PRODUCT_ID } from "@/domain/upload";
-import type { GenerationOutcome, PipelineService } from "@/pipeline/pipeline-service";
+import type { PipelineService } from "@/pipeline/pipeline-service";
 import { StaleEstimateError } from "@/pipeline/guards";
+import { FINAL_FILE, RENDER_ID, renderDir, SAFE_ENTITY_ID } from "@/render/output-paths";
 import type { LocalUploadStore } from "@/storage/upload-store";
 import { parseCampaignForm, toCampaignRequest, type FieldErrors } from "./campaign-form";
 import {
@@ -11,6 +14,7 @@ import {
   imagePreviewUrl,
   type CampaignListItem,
   type CampaignView,
+  type JobActivity,
 } from "./campaign-view";
 import { presentBudgetDecision, type BudgetDecisionPresentation } from "./cost-presentation";
 import { toUserError, type UserError } from "./user-errors";
@@ -24,6 +28,8 @@ import { toUserError, type UserError } from "./user-errors";
 export interface AppDeps {
   service: PipelineService;
   uploads: LocalUploadStore;
+  /** Pasta dos renders (RENDERS_DIR), para servir os MP4 por ID. */
+  rendersDir: string;
 }
 
 export type ActionResult<T> =
@@ -90,13 +96,18 @@ export async function getCampaignView(deps: AppDeps, campaignId: string): Promis
     const campaign = await service.getCampaign(campaignId);
     const jobs = await service.listJobs(campaignId);
     const jobActuals = new Map<string, ActualCostSummary>();
-    for (const job of jobs) jobActuals.set(job.id, (await service.getJobCostReport(job.id)).actual);
+    const jobActivity = new Map<string, JobActivity>();
+    for (const job of jobs) {
+      jobActuals.set(job.id, (await service.getJobCostReport(job.id)).actual);
+      jobActivity.set(job.id, { active: service.isJobActive(job.id), progress: service.getRenderProgress(job.id) });
+    }
     const view = buildCampaignView({
       campaign,
       jobs,
       planningActive: service.isPlanningActive(campaignId),
       campaignActual: await service.getCampaignCostReport(campaignId),
       jobActuals,
+      jobActivity,
     });
     return { ok: true, value: view };
   } catch (error) {
@@ -129,25 +140,19 @@ export async function listCampaigns(deps: AppDeps, limit = 50): Promise<Campaign
 // ---------------------------------------------------------------- aprovação
 
 export type GenerationResultView =
+  | { kind: "started" }
   | { kind: "completed" }
   | { kind: "budget_exceeded"; source: "approval" | "generation"; decision: BudgetDecisionPresentation }
   | { kind: "failed"; message: string }
   | { kind: "cancelled" };
 
-function fromGeneration(outcome: GenerationOutcome): GenerationResultView {
-  switch (outcome.kind) {
-    case "COMPLETED":
-      return { kind: "completed" };
-    case "BUDGET_EXCEEDED":
-      return { kind: "budget_exceeded", source: "generation", decision: presentBudgetDecision(outcome.decision) };
-    case "FAILED":
-      return outcome.job.status === "cancelled" ? { kind: "cancelled" } : { kind: "failed", message: outcome.error };
-  }
+function logBackground(jobId: string, completion: Promise<unknown>): void {
+  completion.catch((error: unknown) => console.error(`[geração/render ${jobId}]`, error));
 }
 
 /**
  * Botão "Gerar por aproximadamente R$X": aprova a estimativa MOSTRADA (estimateId) e inicia a
- * geração. Com providers mock, nada real é gerado nem cobrado.
+ * geração + render EM BACKGROUND (a tela acompanha pelo status). Vídeo IA e áudio continuam mock.
  * Se o orçamento for excedido, devolve a decisão para o diálogo (nada é gerado).
  */
 export async function approveCreative(
@@ -172,7 +177,23 @@ export async function approveCreative(
         value: { kind: "budget_exceeded", source: "approval", decision: presentBudgetDecision(approval.decision) },
       };
     }
-    return { ok: true, value: fromGeneration(await service.generate(job.id)) };
+    const { completion } = await service.startGeneration(job.id);
+    logBackground(job.id, completion);
+    return { ok: true, value: { kind: "started" } };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+/**
+ * "Renderizar novamente" / retomar após interrupção. Ação explícita; cria uma NOVA versão do MP4
+ * (as anteriores ficam). Render local: sem custo de API.
+ */
+export async function rerenderCreative(deps: AppDeps, jobId: string): Promise<ActionResult<GenerationResultView>> {
+  try {
+    const { completion } = await deps.service.startRerender(jobId);
+    logBackground(jobId, completion);
+    return { ok: true, value: { kind: "started" } };
   } catch (error) {
     return fail(error);
   }
@@ -184,7 +205,10 @@ export async function resolveCreativeBudget(
   input: { jobId: string; choice: "cancel" | "authorize" },
 ): Promise<ActionResult<GenerationResultView>> {
   try {
-    return { ok: true, value: fromGeneration(await deps.service.resolveBudgetDecision(input.jobId, input.choice)) };
+    const { job, completion } = await deps.service.startBudgetResolution(input.jobId, input.choice);
+    if (job.status === "cancelled") return { ok: true, value: { kind: "cancelled" } };
+    logBackground(input.jobId, completion);
+    return { ok: true, value: { kind: "started" } };
   } catch (error) {
     return fail(error);
   }
@@ -241,5 +265,45 @@ export async function removeProductImage(
     return { ok: true, value: { removed: await deps.uploads.remove(input.productId, input.imageId) } };
   } catch (error) {
     return fail(error);
+  }
+}
+
+// ---------------------------------------------------------------- vídeos renderizados
+
+export interface RenderFile {
+  absolutePath: string;
+  sizeBytes: number;
+  fileName: string;
+}
+
+/**
+ * Resolve o MP4 de um render a partir de IDs. Só serve versões REGISTRADAS no job como concluídas
+ * (nada de listar pastas ou aceitar caminhos), e o caminho final passa por renderDir()
+ * (regex dos IDs + contenção na pasta de renders).
+ */
+export async function resolveRenderFile(
+  deps: AppDeps,
+  ids: { campaignId: string; creativeId: string; renderId: string },
+): Promise<RenderFile | undefined> {
+  if (!SAFE_ENTITY_ID.test(ids.campaignId) || !SAFE_ENTITY_ID.test(ids.creativeId) || !RENDER_ID.test(ids.renderId)) {
+    return undefined;
+  }
+  let jobs;
+  try {
+    jobs = await deps.service.listJobs(ids.campaignId);
+  } catch {
+    return undefined;
+  }
+  const record = jobs
+    .find((j) => j.creativeId === ids.creativeId)
+    ?.renders.find((r) => r.renderId === ids.renderId && r.status === "completed" && !r.isMock);
+  if (!record) return undefined;
+  const absolutePath = join(renderDir(deps.rendersDir, ids.campaignId, ids.creativeId, ids.renderId), FINAL_FILE);
+  try {
+    const info = await stat(absolutePath);
+    if (!info.isFile()) return undefined;
+    return { absolutePath, sizeBytes: info.size, fileName: `criativo-${ids.creativeId}-${ids.renderId}.mp4` };
+  } catch {
+    return undefined;
   }
 }

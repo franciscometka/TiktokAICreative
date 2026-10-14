@@ -7,8 +7,8 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
-    // Testes que chamam APIs pagas ficam fora da suíte padrão (npm run test:integration).
-    exclude: ["src/**/*.integration.test.ts", "node_modules/**"],
+    include: ["src/**/*.test.ts", "remotion/**/*.test.ts"],
+    // Fora da suíte padrão: testes PAGOS (npm run test:integration) e renders reais (npm run test:render).
+    exclude: ["src/**/*.integration.test.ts", "src/**/*.render.test.ts", "node_modules/**"],
   },
 });

@@ -2,7 +2,7 @@
 
 Transforma informações de um produto em criativos verticais de venda (MP4 1080x1920) para TikTok Shop, com **estimativa de custo e aprovação humana antes de qualquer geração paga**.
 
-> **Status: Lote 2.** Interface de criação (`/create`), revisão do plano, custo e aprovação. Planejamento mock (padrão) ou Claude real (`LLM_PROVIDER=anthropic`). Vídeo, áudio e renderização ainda são **mocks**: a aprovação roda em modo de teste. Veja [docs/TASKS.md](docs/TASKS.md).
+> **Status: Lote 3.** Interface de criação (`/create`), revisão do plano, custo, aprovação e **renderização real do MP4 com Remotion** (local, sem custo de API). Planejamento mock (padrão) ou Claude real (`LLM_PROVIDER=anthropic`). Vídeo IA e áudio ainda são **mocks**: as cenas de IA aparecem como placeholder "MOCK · VÍDEO IA" e o vídeo sai sem som. Veja [docs/TASKS.md](docs/TASKS.md).
 
 ## Requisitos
 - Node.js 22+ (testado com 24)
@@ -21,6 +21,7 @@ Abra http://localhost:3000 e clique em **Criar campanha**. Funciona sem nenhuma 
 3. **Planejamento**: roda em background; a página acompanha o estado. Se o servidor reiniciar no meio, a campanha aparece como *interrompida* e pode ser planejada de novo (com confirmação).
 4. **Revisão**: análise, hooks, conceitos, criativos, cenas e prompts (recolhidos).
 5. **Custo e aprovação**: já utilizado (real) × futuro estimado × total projetado; "Gerar por aproximadamente R$X" por criativo; diálogo de orçamento excedido.
+6. **Render**: depois da aprovação, geração (mock) e render rodam em segundo plano: "Preparando assets → Renderizando (frames reais) → Concluído". O MP4 aparece num player com **Assistir**, **Baixar MP4** e **Renderizar novamente** (nova versão; nada é sobrescrito). Avisos do render (placeholder de IA, imagem ausente, sem áudio) ficam visíveis.
 
 Histórico em `/campaigns`. Para ver a tela de processamento com o mock, use `MOCK_PLANNER_DELAY_MS=20000` em `.env.local`.
 
@@ -35,6 +36,8 @@ Histórico em `/campaigns`. Para ver a tela de processamento com o mock, use `MO
 | `npm run build` | Build de produção |
 | `npm run plan:real` | Validação manual com o Claude real (sem `--confirm` só mostra o pior caso) |
 | `npm run test:integration` | Testes pagos (só com `RUN_PAID_TESTS=1` e `ANTHROPIC_API_KEY`) |
+| `npm run render:setup` | Baixa o Chrome Headless Shell do Remotion (uma vez por máquina) |
+| `npm run test:render` | Teste PESADO: renderiza um MP4 real de 3s (fora do `npm test`) |
 
 ## Planejamento com Claude
 
@@ -57,10 +60,25 @@ npm run plan:real -- --confirm # faz a chamada real
 ```
 O resultado, o custo real e as chamadas ficam em `data/manual/`.
 
+## Renderização (Remotion)
+
+```bash
+npm run render:setup   # 1ª vez na máquina: baixa o Chrome Headless Shell (~100 MB) para node_modules/.remotion
+# .env.local
+RENDERER=remotion
+```
+Com `RENDERER=mock` (padrão) nada é renderizado. Com `remotion`, cada criativo aprovado vira `outputs/renders/<campanha>/<criativo>/v<N>/final.mp4` (1080x1920, 30 fps, H.264 yuv420p, sem áudio) + `manifest.json` (props, versões, avisos). Render local: **R$ 0,00**, sem chamada de API; o 1º render do processo empacota a composição (mais lento). Mudou algo em `remotion/`? Reinicie o servidor.
+
+**Em outro PC**: `npm install` → `cp .env.example .env.local` → `npm run render:setup` → `RENDERER=remotion` → `npm run dev`. Nada além do Node é preciso (FFmpeg vem no pacote do Remotion; a fonte Inter é local). Windows com o projeto numa pasta muito funda: se o render falhar com `ENOENT` ao abrir o Chrome, copie `node_modules/.remotion/chrome-headless-shell/win64/chrome-headless-shell-win64` para um caminho curto e defina `RENDER_BROWSER_EXECUTABLE` com o `chrome-headless-shell.exe` (ver D53).
+
+**Licença**: o Remotion é gratuito para pessoas físicas e empresas com até 3 pessoas; empresas maiores precisam da Company License (`REMOTION_LICENSE_KEY`, ver D54).
+
 ## Dados locais
 `DATA_DIR` (padrão `data/`, fora do git): `campaigns/*.json`, `jobs/*.json`, `ledger.jsonl` (custo real), `llm-calls.jsonl` (auditoria das chamadas ao Claude). Escrita atômica; use um processo por diretório.
 
 `UPLOADS_DIR` (padrão `outputs/uploads/`, fora do git): imagens em `{productId}/img_<uuid>.<ext>`. JPG, PNG ou WebP, até 8 MB e 6 imagens por produto; o tipo é conferido pelo conteúdo do arquivo.
+
+`RENDERS_DIR` (padrão `outputs/renders/`, fora do git): `<campanha>/<criativo>/v<N>/final.mp4` + `manifest.json`. Versões nunca são sobrescritas nem apagadas automaticamente.
 
 ## Configuração
 Veja [.env.example](.env.example). Preços ficam em [src/config/pricing.ts](src/config/pricing.ts) e presets em [src/config/quality-presets.ts](src/config/quality-presets.ts).

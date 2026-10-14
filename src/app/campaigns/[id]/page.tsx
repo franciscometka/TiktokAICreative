@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getCampaignView } from "@/application/campaign-actions";
 import type { CampaignView } from "@/application/campaign-view";
 import { formatSecondsRange } from "@/application/cost-presentation";
+import { AutoRefresh } from "@/components/campaign/auto-refresh";
 import { CampaignCostSummary, CostApprovalSection } from "@/components/campaign/cost-sections";
 import { CreativeSection } from "@/components/campaign/creative-section";
 import { PlanningFailure } from "@/components/campaign/planning-failure";
@@ -30,7 +31,7 @@ function stepStates(view: CampaignView): StepState[] {
     case "failed":
       return ["done", "done", "error"];
     case "planned": {
-      const open = view.creatives.some((c) => c.canApprove || c.budgetDecision);
+      const open = view.creatives.some((c) => c.canApprove || c.budgetDecision || c.activity || c.interrupted);
       // Revisão e aprovação ficam na mesma página; a etapa atual é a aprovação enquanto houver o que decidir.
       return ["done", "done", "done", "done", open ? "current" : "done"];
     }
@@ -131,6 +132,8 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
         </div>
       )}
 
+      {planned && view.creatives.some((c) => c.activity) && <AutoRefresh />}
+
       {planned && (
         <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
           <div className="min-w-0 space-y-10">
@@ -148,7 +151,11 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
                 ))}
               </div>
             </section>
-            <CostApprovalSection creatives={view.creatives} mediaIsMock={publicConfig.mediaIsMock} />
+            <CostApprovalSection
+              creatives={view.creatives}
+              mediaIsMock={publicConfig.mediaIsMock}
+              rendererIsReal={publicConfig.renderer === "remotion"}
+            />
           </div>
 
           <aside className="order-first space-y-4 lg:order-none">

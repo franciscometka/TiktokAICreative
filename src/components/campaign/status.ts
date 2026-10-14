@@ -2,7 +2,9 @@ import type { CampaignState } from "@/application/campaign-view";
 import type { JobStatus } from "@/domain/pipeline";
 import type { Tone } from "../ui/primitives";
 
-export function jobStatusTone(status: JobStatus): Tone {
+/** `interrupted`: generating/rendering sem execução no processo — atenção, não "em andamento". */
+export function jobStatusTone(status: JobStatus, interrupted = false): Tone {
+  if (interrupted) return "amber";
   switch (status) {
     case "completed":
       return "green";

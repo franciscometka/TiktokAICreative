@@ -17,10 +17,13 @@ src/
                 saída estruturada com retry limitado, LlmCreativePlanner, MockCreativePlanner.
   providers/    VideoProvider / AudioProvider (interfaces), mocks, factories, polling.
   pipeline/     Máquinas de estado, guards, contexto de orçamento, PipelineService, raiz de composição.
-  render/       RenderManifest (função pura) + Renderer (interface) + MockRenderer.
+  render/       RenderManifest (puro), timeline/captions/estratégia/props (puros), AssetResolver,
+                caminhos de saída, Renderer (interface), MockRenderer, createRenderer,
+                remotion/ (RemotionRenderer + servidor de assets: único uso de @remotion/* no app).
   storage/      PipelineStore/CostLedger/LlmCallLog em arquivos (JSON + JSONL atômicos) ou memória.
   lib/          Utilitários genéricos: ids, clock, money, result.
   test/         Fixtures compartilhadas de teste.
+remotion/       Composição Remotion (TikTokCreative, componentes, tema, fontes). Imports relativos.
 outputs/        Arquivos gerados (ignorados pelo git).
 docs/           SPEC, TASKS, DECISIONS, ARCHITECTURE.
 ```
@@ -86,6 +89,27 @@ retryPlanning:  ação explícita; planning→failed(interrupted) se preciso →
 
 Não é fila durável: se o processo cair, nada retoma sozinho.
 
+## Renderização (Lote 3)
+
+```
+GenerationJob(rendering)
+  └─ PipelineService.renderPhase
+       1. (lock)  buildRenderManifest(plano, produto, assets ativos) → RenderRecord "rendering"
+       2. (livre) renderer.render(manifest, { preferredVersion, onProgress })
+                    RemotionRenderer:
+                      AssetResolver (raízes autorizadas) → allocateRenderDir (vN atômico)
+                      → servidor de assets 127.0.0.1 (tokens) → buildCompositionProps (puro)
+                      → bundle (1×/processo) → selectComposition → renderMedia (h264, yuv420p, muted)
+                      → final.partial.mp4 → final.mp4 + manifest.json
+       3. (lock)  RenderRecord completed|failed, outputUri, avisos; ledger "rendering" R$0
+UI: AutoRefresh (polling) → getCampaignView (activity, progress real, interrupted, renders)
+    → <video src="/api/renders/<campanha>/<criativo>/<vN>"> | ?download=1
+```
+
+- Composição: camadas cenas → texto da cena → hook → legendas → CTA → barra de progresso. Props em frames; nenhuma lógica de timing na composição.
+- `remotion/types/props.ts` é o contrato entre os dois lados (sem dependências).
+- Ver DECISIONS D43–D54.
+
 ## Persistência
 
 ```
@@ -96,6 +120,8 @@ DATA_DIR/
   llm-calls.jsonl       auditoria das chamadas ao LLM
 UPLOADS_DIR/            (padrão outputs/uploads)
   <productId>/img_<uuid>.<jpg|png|webp>   imagens do produto; servidas só por GET /api/uploads/<productId>/<arquivo>
+RENDERS_DIR/            (padrão outputs/renders)
+  <campaignId>/<creativeId>/v<N>/final.mp4 + manifest.json   nunca sobrescritos; servidos só por GET /api/renders/...
 ```
 
 ## Fluxo
@@ -110,8 +136,9 @@ GenerationJob ──estimateCost──▶ cost_estimated   (CostEstimate kind="e
                    para cada chamada paga: guard (status+aprovação) → checagem de orçamento
                    → provider → ledger (GenerationCost kind="actual") → tentativa registrada
                    | budget_exceeded ──resolveBudgetDecision(cancel|authorize)
-              ──▶ rendering ──▶ completed (RenderManifest + outputUri)
+              ──▶ rendering ──▶ completed (RenderManifest + outputUri + RenderRecord vN)
 completed ──regenerateScene──▶ (checa limite de tentativas e orçamento) ──▶ completed
+completed|failed ──startRerender (mídia completa)──▶ rendering ──▶ completed (vN+1)
 ```
 
 ## Estados
@@ -126,13 +153,13 @@ Job (`pipeline/states.ts`):
 | generating | rendering, budget_exceeded, failed, cancelled, completed* |
 | budget_exceeded | generating, cancelled |
 | rendering | completed, failed |
-| completed | generating (regeneração) |
-| failed | cost_estimated, cancelled |
+| completed | generating (regeneração), rendering (renderizar de novo) |
+| failed | cost_estimated, cancelled, rendering (renderizar de novo, só com mídia completa) |
 | cancelled | — |
 
 \* só quando uma regeneração falha e o vídeo anterior é mantido.
 
-Campanha: `draft → planning → planned | failed`, `failed → planning`. Na interface, `planning` sem execução no processo aparece como **interrompida** (estado derivado, não persistido).
+Campanha: `draft → planning → planned | failed`, `failed → planning`. Na interface, `planning` sem execução no processo aparece como **interrompida** (estado derivado, não persistido). O mesmo vale para job em `generating`/`rendering` sem execução: badge "Interrompido" e retomada só por ação explícita.
 
 ## Sistema de custos
 

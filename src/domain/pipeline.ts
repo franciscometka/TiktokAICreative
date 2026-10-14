@@ -10,7 +10,7 @@ import { CreativeStyleSchema } from "./creative";
 import { CreativeReviewSchema } from "./plan-evaluation";
 import { ProductInputSchema } from "./product";
 import { GenerationQualitySchema, QualitySettingsSchema } from "./quality";
-import { RenderManifestSchema } from "./render";
+import { RenderManifestSchema, RenderRecordSchema } from "./render";
 
 const nonEmpty = z.string().trim().min(1);
 
@@ -156,6 +156,8 @@ export const GenerationJobSchema = z.object({
   pendingBudgetDecision: BudgetExceededDecisionSchema.optional(),
   manifest: RenderManifestSchema.optional(),
   outputUri: z.string().optional(),
+  /** Histórico de renderizações (Lote 3). A última concluída é a de outputUri. */
+  renders: z.array(RenderRecordSchema).default([]),
   error: z.string().optional(),
   createdAt: nonEmpty,
   updatedAt: nonEmpty,

@@ -55,13 +55,15 @@ import { ProviderError, type MediaResult, type ProviderJobRef } from "@/provider
 import type { VideoProviderFactory } from "@/providers/video";
 import type { VideoProvider } from "@/providers/video/video-provider";
 import { buildRenderManifest } from "@/render/manifest";
-import type { Renderer } from "@/render/renderer";
+import type { RenderProgress, Renderer, RenderResult } from "@/render/renderer";
+import type { RenderManifest, RenderRecord } from "@/domain/render";
 import type { LlmCallLog } from "@/storage/llm-call-log";
 import type { PipelineStore } from "@/storage/pipeline-store";
 import { budgetSnapshot, remainingEstimateBrl, sceneEstimateBrl } from "./budget-context";
 import {
   activeAttempt,
   assertApprovalValid,
+  mediaComplete,
   assertAttemptsAvailable,
   assertCanStartPaidCall,
   assertStatus,
@@ -94,6 +96,10 @@ export class PlanningBudgetError extends Error {
 
 export class PlanningInProgressError extends Error {
   override name = "PlanningInProgressError";
+}
+
+export class JobInProgressError extends Error {
+  override name = "JobInProgressError";
 }
 
 export type BudgetExceededOutcome = { kind: "BUDGET_EXCEEDED"; decision: BudgetExceededDecision; job: GenerationJob };
@@ -141,6 +147,9 @@ export class PipelineService {
    * fica em "planning" sem entrada aqui e passa a ser vista como interrompida.
    */
   private readonly activePlanning = new Map<string, Promise<Campaign>>();
+  /** Gerações/renders em execução NESTE processo (mesma regra: não é fila durável). */
+  private readonly activeJobs = new Map<string, Promise<GenerationOutcome>>();
+  private readonly renderProgress = new Map<string, RenderProgress>();
 
   constructor(private readonly deps: PipelineDeps) {}
 
@@ -456,45 +465,115 @@ export class PipelineService {
 
   // ---------------------------------------------------------------- geração
 
-  /** Inicia geração de mídia. Exige aprovação válida para a estimativa atual. */
-  async generate(jobId: string): Promise<GenerationOutcome> {
-    return this.withJobLock(jobId, async () => {
+  /**
+   * Inicia geração de mídia + render EM BACKGROUND neste processo e retorna logo após persistir
+   * "generating". Exige aprovação válida para a estimativa atual. `completion` termina com o
+   * desfecho (COMPLETED, FAILED ou BUDGET_EXCEEDED).
+   */
+  async startGeneration(jobId: string): Promise<{ job: GenerationJob; completion: Promise<GenerationOutcome> }> {
+    const job = await this.withJobLock(jobId, async () => {
+      this.assertJobIdle(jobId);
       const ctx = await this.load(jobId);
       assertStatus(ctx.job, "awaiting_approval");
       assertApprovalValid(ctx.job);
-      const job = transitionJob(ctx.job, "generating", this.deps.clock());
-      await this.deps.store.saveJob(job);
-      return this.runGeneration({ ...ctx, job });
+      const next = transitionJob(ctx.job, "generating", this.deps.clock());
+      await this.deps.store.saveJob(next);
+      return next;
     });
+    return { job, completion: this.launchJob(jobId, () => this.continueGeneration(jobId)) };
   }
 
-  /** Resolve uma pausa por orçamento: cancelar ou autorizar explicitamente o excedente. */
-  async resolveBudgetDecision(jobId: string, choice: "cancel" | "authorize"): Promise<GenerationOutcome> {
-    return this.withJobLock(jobId, async () => {
+  /** Como startGeneration, mas espera o desfecho (scripts e testes). */
+  async generate(jobId: string): Promise<GenerationOutcome> {
+    const { completion } = await this.startGeneration(jobId);
+    return completion;
+  }
+
+  /** Resolve uma pausa por orçamento: cancelar ou autorizar explicitamente o excedente (e seguir em background). */
+  async startBudgetResolution(
+    jobId: string,
+    choice: "cancel" | "authorize",
+  ): Promise<{ job: GenerationJob; completion: Promise<GenerationOutcome> }> {
+    const job = await this.withJobLock(jobId, async () => {
+      this.assertJobIdle(jobId);
       const ctx = await this.load(jobId);
       assertStatus(ctx.job, "budget_exceeded");
       const pending = ctx.job.pendingBudgetDecision;
       if (!pending) throw new UnexpectedStatusError("Job em budget_exceeded sem decisão pendente");
-
-      if (choice === "cancel") {
-        const job = { ...transitionJob(ctx.job, "cancelled", this.deps.clock()), pendingBudgetDecision: undefined };
-        await this.deps.store.saveJob(job);
-        return { kind: "FAILED", job, error: "Cancelado pelo usuário por orçamento" };
-      }
-
-      const job: GenerationJob = {
-        ...transitionJob(ctx.job, "generating", this.deps.clock()),
-        overBudgetAuthorization: authorizeOverBudget(
-          pending,
-          ctx.campaign.request.budget,
-          this.deps.clock(),
-          ctx.job.overBudgetAuthorization,
-        ),
-        pendingBudgetDecision: undefined,
-      };
-      await this.deps.store.saveJob(job);
-      return this.runGeneration({ ...ctx, job });
+      const next: GenerationJob =
+        choice === "cancel"
+          ? { ...transitionJob(ctx.job, "cancelled", this.deps.clock()), pendingBudgetDecision: undefined }
+          : {
+              ...transitionJob(ctx.job, "generating", this.deps.clock()),
+              overBudgetAuthorization: authorizeOverBudget(
+                pending,
+                ctx.campaign.request.budget,
+                this.deps.clock(),
+                ctx.job.overBudgetAuthorization,
+              ),
+              pendingBudgetDecision: undefined,
+            };
+      await this.deps.store.saveJob(next);
+      return next;
     });
+    if (choice === "cancel") {
+      const cancelled: GenerationOutcome = { kind: "FAILED", job, error: "Cancelado pelo usuário por orçamento" };
+      return { job, completion: Promise.resolve(cancelled) };
+    }
+    return { job, completion: this.launchJob(jobId, () => this.continueGeneration(jobId)) };
+  }
+
+  async resolveBudgetDecision(jobId: string, choice: "cancel" | "authorize"): Promise<GenerationOutcome> {
+    const { completion } = await this.startBudgetResolution(jobId, choice);
+    return completion;
+  }
+
+  /**
+   * Ação EXPLÍCITA do usuário: renderiza de novo (nova versão, nada é sobrescrito) ou retoma um
+   * job interrompido (processo caiu em "generating"/"rendering"). Nunca acontece sozinho.
+   * Render local não tem custo de API; geração retomada só refaz cenas sem asset ativo e checa o
+   * orçamento antes de cada chamada.
+   */
+  async startRerender(jobId: string): Promise<{ job: GenerationJob; completion: Promise<GenerationOutcome> }> {
+    let resumeGeneration = false;
+    const job = await this.withJobLock(jobId, async () => {
+      this.assertJobIdle(jobId);
+      const ctx = await this.load(jobId);
+      let next = ctx.job;
+      assertApprovalValid(next);
+      if (next.status === "generating") {
+        resumeGeneration = true; // interrompido durante a geração: continua de onde parou
+        return next;
+      }
+      if (next.status === "rendering") {
+        next = { ...this.markInterruptedRender(next), error: "Renderização interrompida (o servidor parou)." };
+        next = transitionJob(next, "failed", this.deps.clock());
+      }
+      assertStatus(next, "completed", "failed");
+      if (!mediaComplete(next)) {
+        throw new UnexpectedStatusError("A geração deste criativo não terminou; não há o que renderizar");
+      }
+      next = { ...transitionJob(next, "rendering", this.deps.clock()), error: undefined };
+      await this.deps.store.saveJob(next);
+      return next;
+    });
+    const run = resumeGeneration ? () => this.continueGeneration(jobId) : () => this.renderPhase(jobId);
+    return { job, completion: this.launchJob(jobId, run) };
+  }
+
+  /** true se ESTE processo está gerando/renderizando o job. */
+  isJobActive(jobId: string): boolean {
+    return this.activeJobs.has(jobId);
+  }
+
+  /** Job em "generating"/"rendering" sem execução neste processo = interrompido (derivado). */
+  isJobInterrupted(job: GenerationJob): boolean {
+    return (job.status === "generating" || job.status === "rendering") && !this.isJobActive(job.id);
+  }
+
+  /** Progresso REAL de frames do render em andamento (só em memória). */
+  getRenderProgress(jobId: string): RenderProgress | undefined {
+    return this.renderProgress.get(jobId);
   }
 
   /**
@@ -506,7 +585,8 @@ export class PipelineService {
     sceneId: string,
     options: { authorizeOverBudget?: boolean } = {},
   ): Promise<RegenerationOutcome> {
-    return this.withJobLock(jobId, async () => {
+    const generated = await this.withJobLock(jobId, async (): Promise<RegenerationOutcome | { kind: "READY_TO_RENDER" }> => {
+      this.assertJobIdle(jobId);
       const ctx = await this.load(jobId);
       let job = ctx.job;
       assertStatus(job, "completed");
@@ -546,9 +626,13 @@ export class PipelineService {
         await this.deps.store.saveJob(job);
         return { kind: "FAILED", job, error };
       }
-      const rendered = await this.render({ ...ctx, job });
-      return rendered.kind === "COMPLETED" ? { kind: "REGENERATED", job: rendered.job } : rendered;
+      job = transitionJob(job, "rendering", this.deps.clock());
+      await this.deps.store.saveJob(job);
+      return { kind: "READY_TO_RENDER" };
     });
+    if (generated.kind !== "READY_TO_RENDER") return generated;
+    const rendered = await this.launchJob(jobId, () => this.renderPhase(jobId));
+    return rendered.kind === "COMPLETED" ? { kind: "REGENERATED", job: rendered.job } : rendered;
   }
 
   async cancel(jobId: string): Promise<GenerationJob> {
@@ -576,7 +660,14 @@ export class PipelineService {
 
   // ---------------------------------------------------------------- internos
 
-  private async runGeneration(ctx: JobContext): Promise<GenerationOutcome> {
+  /** Geração (sob o lock da campanha: chamadas pagas + orçamento) e depois render (fora do lock). */
+  private async continueGeneration(jobId: string): Promise<GenerationOutcome> {
+    const outcome = await this.withJobLock(jobId, async () => this.runGeneration(await this.load(jobId)));
+    if (outcome.kind !== "READY_TO_RENDER") return outcome;
+    return this.renderPhase(jobId);
+  }
+
+  private async runGeneration(ctx: JobContext): Promise<GenerationOutcome | { kind: "READY_TO_RENDER" }> {
     let job = ctx.job;
     const video = this.deps.videoProviderFactory(ctx.pricing.video);
     const audio = this.deps.audioProviderFactory(ctx.pricing.audio);
@@ -605,7 +696,9 @@ export class PipelineService {
       if (result.attempt.status === "failed") return this.fail(job, result.attempt.error);
     }
 
-    return this.render({ ...ctx, job });
+    job = transitionJob(job, "rendering", this.deps.clock());
+    await this.deps.store.saveJob(job);
+    return { kind: "READY_TO_RENDER" };
   }
 
   /** Checagem de orçamento antes de CADA chamada paga, com base no gasto real até aqui. */
@@ -773,57 +866,147 @@ export class PipelineService {
     return { job, attempt };
   }
 
-  private async render(ctx: JobContext): Promise<GenerationOutcome> {
-    let job = transitionJob(ctx.job, "rendering", this.deps.clock());
-    await this.deps.store.saveJob(job);
-    try {
+  /**
+   * Render em três passos para não segurar o lock da campanha durante minutos:
+   * 1. (lock) monta o manifest e registra o RenderRecord "rendering";
+   * 2. (sem lock) renderer.render() — Remotion local, sem custo de API;
+   * 3. (lock) grava o desfecho: completed + output, ou failed + erro. Custo local (R$0) no ledger.
+   */
+  private async renderPhase(jobId: string): Promise<GenerationOutcome> {
+    const { clock, ids, renderer } = this.deps;
+    const prepared = await this.withJobLock(jobId, async () => {
+      const ctx = await this.load(jobId);
+      let job = ctx.job;
+      assertStatus(job, "rendering");
       const sceneVideos = new Map<string, string>();
       for (const s of job.scenes) {
         const active = activeAttempt(s.attempts);
         if (active?.assetUri) sceneVideos.set(s.sceneId, active.assetUri);
       }
       const narration = activeAttempt(job.audioAttempts);
-      const manifest = buildRenderManifest({
-        campaignId: ctx.campaign.id,
-        plan: ctx.creative,
-        product: ctx.campaign.request.product,
-        sceneVideos,
-        narration: narration?.assetUri
-          ? { uri: narration.assetUri, durationSeconds: narration.durationSeconds ?? 0 }
-          : undefined,
-        outputDir: this.deps.outputDir,
+      let manifest: RenderManifest;
+      try {
+        manifest = buildRenderManifest({
+          campaignId: ctx.campaign.id,
+          plan: ctx.creative,
+          product: ctx.campaign.request.product,
+          sceneVideos,
+          narration: narration?.assetUri
+            ? { uri: narration.assetUri, durationSeconds: narration.durationSeconds ?? 0 }
+            : undefined,
+          outputDir: this.deps.outputDir,
+        });
+      } catch (error) {
+        return { kind: "failed" as const, outcome: await this.fail(job, messageOf(error)) };
+      }
+      const record: RenderRecord = {
+        id: ids("render"),
+        status: "rendering",
+        renderer: renderer.id,
+        isMock: renderer.isMock,
+        startedAt: clock(),
+        warnings: [],
+      };
+      const preferredVersion = job.renders.filter((r) => r.renderId).length + 1;
+      job = { ...job, manifest, renders: [...job.renders, record], updatedAt: clock() };
+      await this.deps.store.saveJob(job);
+      return { kind: "ready" as const, ctx, manifest, recordId: record.id, preferredVersion };
+    });
+    if (prepared.kind === "failed") return prepared.outcome;
+
+    let result: RenderResult | undefined;
+    let renderError: unknown;
+    try {
+      result = await renderer.render(prepared.manifest, {
+        preferredVersion: prepared.preferredVersion,
+        onProgress: (p) => this.renderProgress.set(jobId, p),
       });
-      const result = await this.deps.renderer.render(manifest);
+    } catch (error) {
+      renderError = error;
+    } finally {
+      this.renderProgress.delete(jobId);
+    }
+
+    return this.withJobLock(jobId, async () => {
+      let job = await this.deps.store.getJob(jobId);
+      const finishedAt = clock();
+      const updateRecord = (patch: Partial<RenderRecord>) =>
+        job.renders.map((r) => (r.id === prepared.recordId ? { ...r, ...patch, finishedAt } : r));
+
+      if (!result) {
+        const error = messageOf(renderError);
+        console.error(`[render] job=${jobId} creative=${job.creativeId} falhou: ${error}`);
+        job = { ...job, renders: updateRecord({ status: "failed", error }) };
+        return this.fail(job, error);
+      }
+
       const rate = (await this.deps.exchangeRates.getUsdBrl()).rate;
       await this.deps.ledger.record(
         buildActualCost({
-          id: this.deps.ids("cost"),
-          campaignId: ctx.campaign.id,
+          id: ids("cost"),
+          campaignId: job.campaignId,
           jobId: job.id,
-          creativeId: ctx.creative.id,
+          creativeId: job.creativeId,
           sceneId: null,
           attemptId: null,
           operation: "render",
           category: "rendering",
-          description: "Renderização",
-          pricing: ctx.pricing.rendering,
+          description: result.renderId ? `Renderização ${result.renderId} (${renderer.id})` : `Renderização (${renderer.id})`,
+          pricing: prepared.ctx.pricing.rendering,
           usage: result.usage,
           exchangeRate: rate,
           simulated: result.isMock,
-          createdAt: this.deps.clock(),
+          createdAt: clock(),
         }),
       );
+      console.warn(
+        `[render] job=${jobId} campaign=${job.campaignId} creative=${job.creativeId} render=${result.renderId ?? "mock"} ` +
+          `frames=${result.totalFrames ?? "-"} duracao=${result.durationSeconds ?? "-"}s tempo=${result.renderMs ?? "-"}ms ` +
+          `saida=${result.outputUri} avisos=${result.warnings.length}`,
+      );
       job = {
-        ...transitionJob(job, "completed", this.deps.clock()),
-        manifest,
+        ...transitionJob(job, "completed", clock()),
+        renders: updateRecord({
+          status: "completed",
+          renderId: result.renderId,
+          outputUri: result.outputUri,
+          manifestUri: result.manifestUri,
+          sizeBytes: result.sizeBytes,
+          durationSeconds: result.durationSeconds,
+          totalFrames: result.totalFrames,
+          renderMs: result.renderMs,
+          warnings: result.warnings,
+        }),
         outputUri: result.outputUri,
         error: undefined,
       };
       await this.deps.store.saveJob(job);
       return { kind: "COMPLETED", job };
-    } catch (error) {
-      return this.fail(job, messageOf(error));
-    }
+    });
+  }
+
+  private markInterruptedRender(job: GenerationJob): GenerationJob {
+    const finishedAt = this.deps.clock();
+    return {
+      ...job,
+      renders: job.renders.map((r) =>
+        r.status === "rendering"
+          ? { ...r, status: "failed", error: "Interrompido: o servidor parou durante o render", finishedAt }
+          : r,
+      ),
+    };
+  }
+
+  private assertJobIdle(jobId: string): void {
+    if (this.activeJobs.has(jobId)) throw new JobInProgressError("Este criativo já está sendo gerado ou renderizado");
+  }
+
+  private launchJob(jobId: string, fn: () => Promise<GenerationOutcome>): Promise<GenerationOutcome> {
+    const run = fn().finally(() => {
+      if (this.activeJobs.get(jobId) === run) this.activeJobs.delete(jobId);
+    });
+    this.activeJobs.set(jobId, run);
+    return run;
   }
 
   private async fail(job: GenerationJob, error = "Falha desconhecida"): Promise<GenerationOutcome> {
@@ -883,6 +1066,7 @@ export class PipelineService {
         attempts: [],
       })),
       audioAttempts: [],
+      renders: [],
       createdAt: now,
       updatedAt: now,
     };

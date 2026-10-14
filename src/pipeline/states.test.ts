@@ -28,8 +28,10 @@ describe("máquina de estados do job", () => {
     expect(canTransitionJob("cost_estimated", "generating")).toBe(false);
   });
 
-  it("falha não retoma geração sozinha: exige nova estimativa", () => {
-    expect(JOB_TRANSITIONS.failed).toEqual(["cost_estimated", "cancelled"]);
+  it("falha não retoma geração paga sozinha: exige nova estimativa (re-render local é permitido)", () => {
+    expect(JOB_TRANSITIONS.failed).toEqual(["cost_estimated", "cancelled", "rendering"]);
+    expect(JOB_TRANSITIONS.failed).not.toContain("generating");
+    expect(JOB_TRANSITIONS.completed).toEqual(["generating", "rendering"]);
   });
 
   it("cancelled é terminal", () => {

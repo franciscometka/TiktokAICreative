@@ -45,6 +45,7 @@ function job(over: Partial<GenerationJob> = {}): GenerationJob {
     status: "planned",
     scenes: [],
     audioAttempts: [],
+    renders: [],
     createdAt: "t",
     updatedAt: "t",
     ...over,

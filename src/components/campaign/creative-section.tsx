@@ -105,7 +105,7 @@ export function CreativeSection({ creative }: { creative: CreativeView }) {
               Criativo {n} · {creative.concept.formatLabel}
             </p>
             {creative.jobStatus && (
-              <Badge tone={jobStatusTone(creative.jobStatus)} dot>
+              <Badge tone={jobStatusTone(creative.jobStatus, creative.interrupted)} dot>
                 {creative.jobStatusLabel}
               </Badge>
             )}

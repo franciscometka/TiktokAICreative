@@ -3,6 +3,7 @@ import type { CampaignView, CreativeView } from "@/application/campaign-view";
 import { formatBrl } from "@/lib/money";
 import { Badge, InfoTip, Notice, Panel, ProvisionalBadge, SectionHeading } from "../ui/primitives";
 import { ApprovalControls } from "./approval-controls";
+import { RenderPanel } from "./render-panel";
 import { jobStatusTone } from "./status";
 
 /**
@@ -30,7 +31,15 @@ function SimulatedTag() {
   );
 }
 
-export function CreativeCostCard({ creative, mediaIsMock }: { creative: CreativeView; mediaIsMock: boolean }) {
+export function CreativeCostCard({
+  creative,
+  mediaIsMock,
+  rendererIsReal,
+}: {
+  creative: CreativeView;
+  mediaIsMock: boolean;
+  rendererIsReal: boolean;
+}) {
   const estimate = creative.estimate;
   const n = String(creative.number).padStart(2, "0");
   return (
@@ -41,7 +50,7 @@ export function CreativeCostCard({ creative, mediaIsMock }: { creative: Creative
           <p className="truncate font-medium text-zinc-900">{creative.concept.title}</p>
         </div>
         {creative.jobStatus && (
-          <Badge tone={jobStatusTone(creative.jobStatus)} dot>
+          <Badge tone={jobStatusTone(creative.jobStatus, creative.interrupted)} dot>
             {creative.jobStatusLabel}
           </Badge>
         )}
@@ -96,13 +105,7 @@ export function CreativeCostCard({ creative, mediaIsMock }: { creative: Creative
             </dl>
           </div>
 
-          {creative.result && (
-            <Notice tone="green" title={creative.result.simulated ? "Concluído em modo de teste" : "Concluído"}>
-              {creative.result.simulated
-                ? `Fluxo validado com providers simulados (${creative.result.assetCount} trechos, ${formatSeconds(creative.result.durationSeconds)}). Nenhum MP4 real foi gerado.`
-                : `Vídeo de ${formatSeconds(creative.result.durationSeconds)} renderizado.`}
-            </Notice>
-          )}
+          <RenderPanel creative={creative} rendererIsReal={rendererIsReal} />
           {creative.actual && (
             <dl className="rounded-md border border-zinc-200 px-4 py-2">
               <Line
@@ -127,6 +130,7 @@ export function CreativeCostCard({ creative, mediaIsMock }: { creative: Creative
               canApprove={creative.canApprove}
               canCancel={creative.canCancel}
               mediaIsMock={mediaIsMock}
+              rendererIsReal={rendererIsReal}
               pendingDecision={creative.budgetDecision}
             />
           )}
@@ -138,7 +142,15 @@ export function CreativeCostCard({ creative, mediaIsMock }: { creative: Creative
   );
 }
 
-export function CostApprovalSection({ creatives, mediaIsMock }: { creatives: CreativeView[]; mediaIsMock: boolean }) {
+export function CostApprovalSection({
+  creatives,
+  mediaIsMock,
+  rendererIsReal,
+}: {
+  creatives: CreativeView[];
+  mediaIsMock: boolean;
+  rendererIsReal: boolean;
+}) {
   return (
     <section id="custo" className="scroll-mt-20 space-y-4">
       <SectionHeading
@@ -148,7 +160,7 @@ export function CostApprovalSection({ creatives, mediaIsMock }: { creatives: Cre
       />
       <div className="space-y-4">
         {creatives.map((c) => (
-          <CreativeCostCard key={c.id} creative={c} mediaIsMock={mediaIsMock} />
+          <CreativeCostCard key={c.id} creative={c} mediaIsMock={mediaIsMock} rendererIsReal={rendererIsReal} />
         ))}
       </div>
     </section>

@@ -19,9 +19,11 @@ export const JOB_TRANSITIONS: Readonly<Record<JobStatus, readonly JobStatus[]>> 
   budget_exceeded: ["generating", "cancelled"],
   rendering: ["completed", "failed"],
   // completed → generating: regeneração explícita de cena (com checagem de orçamento)
-  completed: ["generating"],
-  // após falha: nunca retomar sozinho; exige nova estimativa e nova aprovação
-  failed: ["cost_estimated", "cancelled"],
+  // completed → rendering: "Renderizar novamente" (nova versão; render local não tem chamada paga)
+  completed: ["generating", "rendering"],
+  // após falha: nunca retomar sozinho; mídia paga exige nova estimativa e nova aprovação.
+  // failed → rendering: só re-render explícito com toda a mídia já gerada (guard mediaComplete)
+  failed: ["cost_estimated", "cancelled", "rendering"],
   cancelled: [],
 };
 

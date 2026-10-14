@@ -55,20 +55,39 @@ Uma execução de `npm run plan:real -- --confirm` (nenhuma outra chamada à Ant
 
 Conclusão: o prompt `campaign-plan@1.0.0` funciona estruturalmente (schema, limites do preset, custos). A revisão do conteúdo gerou duas regras novas de honestidade (DECISIONS D42; SPEC "Regras de conteúdo"), a aplicar no prompt antes de qualquer mídia real.
 
+## Lote 3 — Renderização real com Remotion ✅
+- [x] Remotion 4.0.531 (versões fixas), composição `TikTokCreative` 1080x1920 @30fps, duração vinda do manifest (`calculateMetadata`)
+- [x] Timing puro em frames sem erro acumulado (`render/timeline.ts`)
+- [x] `VisualSource` → estratégia (`scene-strategy.ts`), placeholder "MOCK · VÍDEO IA" para vídeo IA mock
+- [x] `AssetResolver` (raízes autorizadas, anti traversal, conteúdo conferido) + servidor de assets efêmero em 127.0.0.1
+- [x] Imagem real com movimento leve, cover/contain sem distorção; legendas da narração; hook; CTA com nome/preço uma vez
+- [x] Safe areas e tokens de tema; Inter local (render offline); transições cut-first que não mudam a duração
+- [x] `RemotionRenderer` + `createRenderer` (`RENDERER=mock|remotion`), H.264 yuv420p bt709, sem áudio
+- [x] Versões `v<N>` sem sobrescrever + `manifest.json`; render em background em 3 fases sem lock; `RenderRecord` persistido
+- [x] Progresso real de frames; interrompido derivado, retomada explícita; `completed/failed → rendering`
+- [x] UI: etapas do render, player 9:16, Assistir / Baixar MP4 / Renderizar novamente, versões anteriores, avisos, custo R$0,00 (local)
+- [x] Rota `/api/renders/...` por IDs (Range, nosniff, Content-Disposition)
+- [x] Testes unitários (timing, captions, estratégia, resolver/traversal, props, safe areas, caminhos/versões, factory, fluxo de render, download) + `npm run test:render` (MP4 real de 3s)
+
+### Validação manual do Lote 3 ✅ (2026-10-14)
+`LLM_PROVIDER=mock`, `RENDERER=remotion`, preset econômico, 1 criativo, imagem real enviada pelo wizard (PNG 900x1200). Nenhuma chamada à Anthropic nem a providers de vídeo/áudio.
+- v1: 25s, 750 frames, 1080x1920, H.264, 2,1 MB, 81,4s de render (inclui o empacotamento do 1º render do processo).
+- "Renderizar novamente" → servidor parado no meio → página mostra "Interrompido", nada recomeça; retomada explícita → v3 (v2 ficou vazia e foi pulada): 2,6 MB, 119,9s. v1 continua acessível em "Versões anteriores".
+- Player (`Range` 206), download (`attachment`), avisos (3 cenas de IA em placeholder + sem áudio). Layout conferido em 1440, 768 e 375 px sem rolagem horizontal.
+- Frames inspecionados: hook, placeholder marcado, imagem sem distorção, legendas legíveis, CTA com nome/preço uma vez, tudo dentro das safe areas.
+
 ## Roadmap (próximos lotes — não iniciar sem autorização)
 
 ### Pré-requisito antes de mídia real (Lotes 4 e 5)
 - [ ] Prompt `campaign-plan@1.0.1` com as regras de conteúdo da D42: (1) não inventar experiência pessoal, depoimento ou teste feito pelo narrador/ator; (2) não transformar alegações temporais ou características informadas pelo vendedor em falsa prova visual. Correção mínima, com testes do texto do prompt; nova validação real só com autorização.
 
-### Lote 3 — Renderização com Remotion
-- [ ] Composição 1080x1920 e componentes (captions, headline, CTA, progress, nome, preço, cenas de vídeo/imagem, transições)
-- [ ] `RemotionRenderer`; assets placeholder locais para os mocks; `screenshot`/`existing_asset` reais
-
 ### Lote 4 — Áudio real (ex.: ElevenLabs)
 - [ ] `AudioProvider` real + preço oficial (remove o placeholder de áudio)
+- [ ] Mixar a narração no render (`<Audio>`), legendas com timing real da fala
 
 ### Lote 5 — Primeiro provider de vídeo real (ex.: Veo/Runway/Kling)
-- [ ] `VideoProvider` real + preço oficial; geração fora da request HTTP (worker/fila local)
+- [ ] `VideoProvider` real + preço oficial; vídeo real substitui o placeholder no nível do asset
+- [ ] Upload de `screenshot`/`existing_asset` (hoje caem para imagem do produto/card de texto)
 
 ### Lote 6 — Operação em escala
 - [ ] Campanhas em volume, fila de execução, persistência mais robusta (SQLite) quando necessária, múltiplos processos
@@ -80,7 +99,12 @@ Conclusão: o prompt `campaign-plan@1.0.0` funciona estruturalmente (schema, lim
 - Sem transação entre arquivos (custo pode ser gravado e o estado do job não, se o processo cair entre as duas escritas). Migrar para SQLite quando houver worker/UI concorrente.
 - Um único processo por `DATA_DIR` (o lock e o registro de planejamentos em execução são só do processo).
 - Planejamento roda dentro do processo do Next (não é fila durável). Se o processo cair, a campanha fica "interrompida" e a chamada já feita ao Claude pode ter sido cobrada sem registro no ledger (o `usage` só chega no fim).
-- Geração de mídia (mock) ainda roda dentro da Server Action; com providers reais precisa ir para background (Lote 5).
+- Geração e render rodam em background DENTRO do processo do Next (não é fila durável); se o processo cair, o job aparece como interrompido e só retoma com ação explícita.
+- Bundle do Remotion em cache na memória do processo: mudanças em `remotion/` exigem reiniciar o servidor.
+- Render interrompido pode deixar uma pasta de versão vazia (pulada na próxima versão); renders antigos não são limpos automaticamente.
+- Progresso de render só em memória (some num restart; o estado persistido é o `RenderRecord`). Durante a codificação final a barra fica em 100% dos frames até o MP4 ficar pronto.
+- Windows + projeto em pasta funda: Chrome do Remotion pode exceder MAX_PATH (usar `RENDER_BROWSER_EXECUTABLE`).
+- `npm run test:render` deixa os MP4 de teste em `outputs/.test-render/` (ignorado pelo git) para inspeção.
 - `listJobs` lê arquivos um a um; `/campaigns` lê todas as campanhas e o ledger a cada request (ok para uso local).
 - Estimativa de tokens de entrada para o pior caso é heurística (caracteres/3 × 2).
 - `fitPlanToPreset` reduz segundos de clipe sem reescrever narração/prompt da cena; o render precisará preencher o restante com movimento.

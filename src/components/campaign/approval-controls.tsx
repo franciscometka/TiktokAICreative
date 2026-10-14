@@ -23,6 +23,7 @@ export function ApprovalControls({
   canApprove,
   canCancel,
   mediaIsMock,
+  rendererIsReal,
   pendingDecision,
 }: {
   jobId: string;
@@ -31,6 +32,7 @@ export function ApprovalControls({
   canApprove: boolean;
   canCancel: boolean;
   mediaIsMock: boolean;
+  rendererIsReal: boolean;
   pendingDecision: Decision | undefined;
 }) {
   const router = useRouter();
@@ -86,8 +88,10 @@ export function ApprovalControls({
   return (
     <div className="space-y-3">
       {mediaIsMock && showControls && (
-        <Notice tone="amber" title="MODO DE TESTE — nenhuma mídia real será gerada ou cobrada.">
-          Vídeo e áudio usam providers simulados. A aprovação valida o fluxo de ponta a ponta; nenhum MP4 verdadeiro é produzido.
+        <Notice tone="amber" title="MODO DE TESTE — nenhuma mídia de IA real será gerada ou cobrada.">
+          {rendererIsReal
+            ? "Vídeo IA e narração usam providers simulados. O MP4 final é renderizado de verdade, nesta máquina (sem custo de API): cenas de IA aparecem como placeholder marcado e o vídeo sai sem som."
+            : "Vídeo e áudio usam providers simulados e RENDERER=mock: a aprovação valida o fluxo, mas nenhum MP4 é produzido."}
         </Notice>
       )}
 

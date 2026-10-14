@@ -68,5 +68,15 @@ Produto → Claude → análise (resumo, público, dores, benefícios, diferenci
 - BUDGET_EXCEEDED: diálogo com limite, custo atual, próxima geração, projetado e excedente; "Autorizar até R$X" só quando o domínio permite.
 - Funciona inteiramente com LLM/vídeo/áudio mock e sem chaves.
 
-## Fora do escopo do Lote 2
-Vídeo/áudio reais, Remotion real, banco de dados, TikTok API, analytics de performance e vendas.
+## Lote 3 — renderização real
+- Plano aprovado → `RenderManifest` → composição Remotion 1080x1920 @30fps → MP4 real local (H.264, yuv420p), com duração calculada do manifest.
+- Cenas pelo `VisualSource` do domínio: vídeo IA (placeholder explícito "MOCK · VÍDEO IA" enquanto o provider é mock), imagem real do produto com movimento leve (cover/contain sem distorção), composição de texto. Screenshot/asset existente ainda sem upload: fallback declarado em aviso.
+- Hook no início, legendas da narração (trechos curtos, determinísticos, sem karaokê), texto da cena, CTA no fim com nome e preço uma única vez ("R$ 79,90"). Textos dentro das safe areas.
+- Sem áudio: o MP4 sai sem trilha e com aviso; nenhuma voz sintetizada.
+- Render em segundo plano com progresso real de frames; interrompido nunca recomeça sozinho; "Renderizar novamente" cria uma nova versão.
+- Saída em `outputs/renders/<campanha>/<criativo>/v<N>/` com `manifest.json`; nunca sobrescreve.
+- Player e download por IDs; o browser nunca envia caminhos.
+- Custo do render local: R$0,00, sem alterar orçamento.
+
+## Fora do escopo do Lote 3
+Vídeo/áudio reais (ElevenLabs, Veo, Runway, Kling), TTS, publicação/TikTok API, analytics, banco/fila externos, render em nuvem (Lambda) e qualquer chamada paga nova.

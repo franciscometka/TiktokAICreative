@@ -4,6 +4,8 @@ import type { ProductAnalysis } from "@/domain/campaign";
 import type { CostBudget } from "@/domain/cost";
 import type { CreativePlan, VisualSource } from "@/domain/creative";
 import type { Campaign, GenerationJob, JobStatus, StyleSelection } from "@/domain/pipeline";
+import type { RenderRecord } from "@/domain/render";
+import { mediaComplete } from "@/pipeline/guards";
 import type { CreativeReview } from "@/domain/plan-evaluation";
 import type { Range } from "@/domain/quality";
 import { STORED_IMAGE_NAME } from "@/domain/upload";
@@ -67,6 +69,44 @@ export interface PresetAdjustmentView {
   messages: string[];
 }
 
+export interface RenderView {
+  renderId: string;
+  videoUrl: string;
+  downloadUrl: string;
+  sizeBytes: number | null;
+  durationSeconds: number | null;
+  totalFrames: number | null;
+  renderMs: number | null;
+  finishedAt: string | null;
+  warnings: string[];
+}
+
+/** URL do vídeo por IDs (nunca caminho). O route handler resolve e valida no servidor. */
+export function renderVideoUrl(campaignId: string, creativeId: string, renderId: string, download = false): string {
+  const base = `/api/renders/${encodeURIComponent(campaignId)}/${encodeURIComponent(creativeId)}/${encodeURIComponent(renderId)}`;
+  return download ? `${base}?download=1` : base;
+}
+
+function renderView(record: RenderRecord, campaignId: string, creativeId: string): RenderView | undefined {
+  if (record.status !== "completed" || !record.renderId || !record.outputUri || record.isMock) return undefined;
+  return {
+    renderId: record.renderId,
+    videoUrl: renderVideoUrl(campaignId, creativeId, record.renderId),
+    downloadUrl: renderVideoUrl(campaignId, creativeId, record.renderId, true),
+    sizeBytes: record.sizeBytes ?? null,
+    durationSeconds: record.durationSeconds ?? null,
+    totalFrames: record.totalFrames ?? null,
+    renderMs: record.renderMs ?? null,
+    finishedAt: record.finishedAt ?? null,
+    warnings: record.warnings.map((w) => w.message),
+  };
+}
+
+export interface JobActivity {
+  active: boolean;
+  progress?: { renderedFrames: number; totalFrames: number };
+}
+
 export interface CreativeView {
   number: number;
   id: string;
@@ -87,6 +127,19 @@ export interface CreativeView {
   budgetDecision: { source: "approval" | "generation"; decision: BudgetDecisionPresentation } | undefined;
   actual: ActualCostPresentation | undefined;
   result: { outputUri: string; simulated: boolean; durationSeconds: number; assetCount: number } | undefined;
+  /** Geração/render acontecendo agora neste processo. Progresso só quando o renderer informa frames reais. */
+  activity:
+    | { phase: "generating" | "rendering"; renderedFrames: number | null; totalFrames: number | null }
+    | undefined;
+  /** Job em generating/rendering sem execução no processo (servidor caiu/reiniciou). */
+  interrupted: boolean;
+  /** Último render real concluído (MP4 em disco), para player e download. */
+  latestRender: RenderView | undefined;
+  /** Versões anteriores concluídas (mais nova primeiro, sem a última). */
+  previousRenders: RenderView[];
+  /** Último render que falhou depois do último sucesso (para mostrar o erro). */
+  lastRenderError: string | undefined;
+  canRerender: boolean;
   error: string | undefined;
   canApprove: boolean;
   canCancel: boolean;
@@ -203,9 +256,19 @@ function creativeView(
   campaign: Campaign,
   job: GenerationJob | undefined,
   jobActual: ActualCostSummary | undefined,
+  activity: JobActivity | undefined,
 ): CreativeView {
   const review = campaign.reviews?.find((r) => r.creativeId === creative.id);
   const status = job?.status;
+  const running = status === "generating" || status === "rendering";
+  const active = running && activity?.active === true;
+  const interrupted = running && !active;
+  const renders = (job?.renders ?? [])
+    .map((r) => (job ? renderView(r, campaign.id, job.creativeId) : undefined))
+    .filter((r): r is RenderView => r !== undefined)
+    .reverse();
+  const lastCompletedIndex = (job?.renders ?? []).findLastIndex((r) => r.status === "completed");
+  const failedAfter = (job?.renders ?? []).slice(lastCompletedIndex + 1).findLast((r) => r.status === "failed");
   const pending = job?.pendingBudgetDecision;
   const completed = status === "completed" && job?.outputUri !== undefined && job.manifest !== undefined;
   return {
@@ -213,7 +276,7 @@ function creativeView(
     id: creative.id,
     jobId: job?.id,
     jobStatus: status,
-    jobStatusLabel: status ? JOB_STATUS_NAMES[status] : "Sem job",
+    jobStatusLabel: interrupted ? "Interrompido" : status ? JOB_STATUS_NAMES[status] : "Sem job",
     concept: {
       title: creative.concept.title,
       angle: creative.concept.angle,
@@ -249,6 +312,22 @@ function creativeView(
           }
         : undefined,
     error: job?.error,
+    activity: active
+      ? {
+          phase: status === "rendering" ? "rendering" : "generating",
+          renderedFrames: activity?.progress?.renderedFrames ?? null,
+          totalFrames: activity?.progress?.totalFrames ?? null,
+        }
+      : undefined,
+    interrupted,
+    latestRender: renders[0],
+    previousRenders: renders.slice(1),
+    lastRenderError: failedAfter?.error,
+    // Re-render só com toda a mídia pronta (completed/failed) ou para retomar uma interrupção.
+    canRerender:
+      job !== undefined &&
+      job.approval !== undefined &&
+      (interrupted || ((status === "completed" || status === "failed") && mediaComplete(job))),
     canApprove: status !== undefined && APPROVABLE.includes(status) && job?.estimate !== undefined,
     canCancel: status !== undefined && CANCELLABLE.includes(status),
   };
@@ -260,6 +339,8 @@ export interface BuildCampaignViewInput {
   planningActive: boolean;
   campaignActual: ActualCostSummary;
   jobActuals: ReadonlyMap<string, ActualCostSummary>;
+  /** Execução de cada job neste processo (para "interrompido" e progresso). */
+  jobActivity?: ReadonlyMap<string, JobActivity>;
 }
 
 export function buildCampaignView({
@@ -268,6 +349,7 @@ export function buildCampaignView({
   planningActive,
   campaignActual,
   jobActuals,
+  jobActivity = new Map(),
 }: BuildCampaignViewInput): CampaignView {
   const state = campaignState(campaign, planningActive);
   const request = campaign.request;
@@ -277,7 +359,14 @@ export function buildCampaignView({
 
   const creatives = (plan?.creatives ?? []).map((creative, i) => {
     const job = jobByCreative.get(creative.id);
-    return creativeView(creative, i, campaign, job, job ? jobActuals.get(job.id) : undefined);
+    return creativeView(
+      creative,
+      i,
+      campaign,
+      job,
+      job ? jobActuals.get(job.id) : undefined,
+      job ? jobActivity.get(job.id) : undefined,
+    );
   });
 
   const pendingJobs = jobs.filter((j) => PENDING_FUTURE.includes(j.status) && j.estimate);

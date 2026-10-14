@@ -13,6 +13,11 @@ export const DEFAULT_MAX_ATTEMPTS_PER_SCENE = 3;
 
 /** Imagens enviadas pelo usuário (fora do código-fonte e do git). */
 export const DEFAULT_UPLOADS_DIR = "outputs/uploads";
+/** Vídeos renderizados: <RENDERS_DIR>/<campaignId>/<creativeId>/v<N>/final.mp4 */
+export const DEFAULT_RENDERS_DIR = "outputs/renders";
+
+/** Renderer: "mock" (padrão; não gera arquivo) ou "remotion" (MP4 real, local, sem custo de API). */
+export const RENDERER_IDS = ["mock", "remotion"] as const;
 
 /** Política de retry do LLM (ver docs/DECISIONS.md D23). */
 export const DEFAULT_LLM_POLICY = {
@@ -51,6 +56,11 @@ const EnvSchema = z.object({
   STORAGE: z.preprocess(emptyToUndefined, z.enum(["file", "memory"]).default("file")),
   DATA_DIR: z.preprocess(emptyToUndefined, z.string().default("data")),
   UPLOADS_DIR: z.preprocess(emptyToUndefined, z.string().default(DEFAULT_UPLOADS_DIR)),
+  RENDERS_DIR: z.preprocess(emptyToUndefined, z.string().default(DEFAULT_RENDERS_DIR)),
+  RENDERER: z.preprocess(emptyToUndefined, z.enum(RENDERER_IDS).default("mock")),
+  RENDER_CONCURRENCY: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(16).optional()),
+  RENDER_DEBUG: z.preprocess(emptyToUndefined, z.enum(["true", "false"]).default("false")),
+  RENDER_BROWSER_EXECUTABLE: z.preprocess(emptyToUndefined, z.string().optional()),
   VIDEO_PROVIDER: z.preprocess(emptyToUndefined, z.enum(VIDEO_PROVIDER_IDS).default("mock")),
   AUDIO_PROVIDER: z.preprocess(emptyToUndefined, z.enum(AUDIO_PROVIDER_IDS).default("mock")),
   USD_BRL_EXCHANGE_RATE: optionalPositiveNumber,
@@ -72,6 +82,14 @@ export interface AppConfig {
   storage: "file" | "memory";
   dataDir: string;
   uploadsDir: string;
+  rendersDir: string;
+  renderer: {
+    id: (typeof RENDERER_IDS)[number];
+    concurrency: number | null;
+    debug: boolean;
+    /** Chrome/Chrome Headless Shell alternativo (ex.: quando o caminho do projeto é longo demais no Windows). */
+    browserExecutable: string | null;
+  };
   videoProvider: (typeof VIDEO_PROVIDER_IDS)[number];
   audioProvider: (typeof AUDIO_PROVIDER_IDS)[number];
   exchangeRate: ExchangeRate;
@@ -104,6 +122,13 @@ export function loadAppConfig(
     storage: e.STORAGE,
     dataDir: e.DATA_DIR,
     uploadsDir: e.UPLOADS_DIR,
+    rendersDir: e.RENDERS_DIR,
+    renderer: {
+      id: e.RENDERER,
+      concurrency: e.RENDER_CONCURRENCY ?? null,
+      debug: e.RENDER_DEBUG === "true",
+      browserExecutable: e.RENDER_BROWSER_EXECUTABLE ?? null,
+    },
     videoProvider: e.VIDEO_PROVIDER,
     audioProvider: e.AUDIO_PROVIDER,
     exchangeRate:
@@ -126,4 +151,13 @@ export function loadAppConfig(
 export function readAnthropicApiKey(env: Record<string, string | undefined> = process.env): string | undefined {
   const key = env.ANTHROPIC_API_KEY?.trim();
   return key ? key : undefined;
+}
+
+/**
+ * Chave de licença do Remotion (Company License), lida SOMENTE do ambiente pela fábrica do
+ * renderer. Ausente = nenhuma telemetria de licença é enviada. Nunca logar nem enviar ao browser.
+ */
+export function readRemotionLicenseKey(env: Record<string, string | undefined> = process.env): string | null {
+  const key = env.REMOTION_LICENSE_KEY?.trim();
+  return key ? key : null;
 }

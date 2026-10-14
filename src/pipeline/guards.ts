@@ -59,3 +59,9 @@ export function discardedAttemptIds(job: GenerationJob): Set<string> {
   const all = [...job.scenes.flatMap((s) => s.attempts), ...job.audioAttempts];
   return new Set(all.filter((a) => !a.active).map((a) => a.id));
 }
+
+/** Todas as cenas com vídeo IA e a narração têm asset ativo: dá para (re)renderizar sem chamada paga. */
+export function mediaComplete(job: GenerationJob): boolean {
+  const scenesDone = job.scenes.every((s) => !s.requiresGeneratedVideo || activeAttempt(s.attempts) !== undefined);
+  return scenesDone && activeAttempt(job.audioAttempts) !== undefined;
+}
