@@ -11,7 +11,7 @@ Custo é preocupação central; nada pago de mídia acontece sem aprovação exp
 - Lotes 0, 1 e 2 concluídos. Lote 2 = experiência `/create` → `/campaigns/[id]` (planejar, revisar, custo, aprovar).
 - Planejamento: `LLM_PROVIDER=mock` (padrão, sem custo) ou `anthropic` (Claude real, pago).
 - Vídeo, áudio e renderer continuam **mocks** (aprovação roda em MODO DE TESTE). Remotion real = Lote 3.
-- Validação real do prompt `campaign-plan@1.0.0` ainda **pendente** (sem chave nas sessões até agora).
+- Prompt `campaign-plan@1.0.0` validado com o Claude real em 2026-10-14 (economy, 1 criativo, válido na 1ª tentativa, US$0,0414). Antes de mídia real, aplicar as regras de conteúdo da D42 (`campaign-plan@1.0.1`).
 - **Não avance de lote sem instrução do usuário.** Ver `docs/TASKS.md`.
 
 ## Comandos

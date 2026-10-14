@@ -179,3 +179,10 @@ Tema claro (o app era só escuro), Inter via `next/font`, escala zinc com um tom
 
 ## D41 — Atraso opcional do planner mock
 `MOCK_PLANNER_DELAY_MS` (padrão 0, só com `LLM_PROVIDER=mock`) simula a demora do Claude para exercitar a tela de processamento, o polling e a recuperação após restart sem custo.
+
+## D42 — Validação real do `campaign-plan@1.0.0` e duas regras de conteúdo
+Contexto: em 2026-10-14 foi feita UMA validação real (`npm run plan:real -- --confirm`, preset economy, 1 criativo). Resultado: `claude-sonnet-5-5` (esforço medium), válido na 1ª tentativa; 613 tokens de entrada, 2.801 de saída e 4.867 de escrita de cache; 25,5s; custo real US$0,0414 (≈ R$0,23). Plano: 24s finais, 9s de vídeo IA (permitido 8–12s), nenhum ajuste de `fitPlanToPreset`; futuro estimado R$4,05, total projetado R$4,28, com preços de mídia ainda provisórios. Estruturalmente o prompt está correto. A leitura do conteúdo mostrou dois riscos de honestidade que o prompt atual não cobre explicitamente.
+Decisão: duas regras de conteúdo passam a fazer parte da especificação (SPEC, "Regras de conteúdo") e devem entrar no prompt como `campaign-plan@1.0.1` ANTES de qualquer geração de mídia real:
+1. **Sem experiência inventada**: o narrador/ator não afirma uso pessoal, depoimento, teste realizado ou resultado vivido ("testei por uma semana", "uso todo dia", "minha água ficou gelada até a noite") que não esteja nas informações fornecidas.
+2. **Sem falsa prova visual**: alegações temporais ou características informadas pelo vendedor (ex.: "gelado por 24h", "não vaza") são apresentadas como informação do produto (texto/narração), nunca encenadas como se a cena comprovasse o fato (ex.: relógio passando de 8h para 20h com a bebida ainda gelada, timelapse de "24 horas depois", teste de vazamento demonstrado como prova).
+Consequência: o prompt NÃO foi alterado neste commit (sem nova chamada à Anthropic). A `1.0.1` será uma correção mínima e documentada; uma nova validação real só com autorização.

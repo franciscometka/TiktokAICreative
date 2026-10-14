@@ -17,6 +17,7 @@
 - [x] `evaluatePlanAgainstPreset` + ajuste determinístico `fitPlanToPreset`
 - [x] Custo real do Claude no ledger; estimativa incorrido × futuro × projetado
 - [x] Script `npm run plan:real` (validação manual, exige `--confirm`) e suíte de integração paga separada
+- [x] Validação manual real com o Claude (2026-10-14): válida na 1ª tentativa, US$0,0414 — resultados na seção do Lote 2
 
 ## Lote 2 — Experiência de criação `/create` ✅
 - [x] `/create` em etapas (Produto → Estratégia) com stepper; rascunho local no navegador (restaurar/descartar)
@@ -31,17 +32,33 @@
 - [x] Estados de erro: formulário, Claude não configurado, falha, rate limit, timeout, resposta inválida, resposta cortada, corrompido, orçamento, interrompido
 - [x] Home com CTA e campanhas recentes; `/campaigns` com histórico mínimo
 - [x] Camada `application/` (form, view model, apresentação de custos, erros, casos de uso) + Server Actions finas
-- [ ] **Validação manual real do prompt `campaign-plan@1.0.0` com `ANTHROPIC_API_KEY`** — pendente: a chave não estava disponível nesta sessão (ver "Etapa 0" abaixo)
+- [x] **Validação manual real do prompt `campaign-plan@1.0.0`** (Lote 1) — concluída em 2026-10-14, ver abaixo
 
-### Etapa 0 — validação real (pendente)
-Com a chave em `.env.local`, rodar **uma** vez:
-```bash
-npm run plan:real              # mostra o pior caso, não chama nada
-npm run plan:real -- --confirm # UMA validação real
-```
-Registrar: modelo servido, tokens, custo real, duração, resultado do schema, nº de hooks e conceitos, duração dos criativos, segundos de IA e ajustes de `fitPlanToPreset`. Correção de prompt, se necessária, deve ser mínima e virar `campaign-plan@1.0.1` (documentada em DECISIONS).
+### Validação manual real do Lote 1 ✅ (2026-10-14)
+Uma execução de `npm run plan:real -- --confirm` (nenhuma outra chamada à Anthropic):
+
+| Item | Resultado |
+|---|---|
+| Preset | economy |
+| Modelo servido | `claude-sonnet-5-5` (esforço medium) |
+| Criativos | 1 |
+| Tentativas | 1 — válido na primeira tentativa (JSON + Zod) |
+| Tokens | entrada 613 · saída 2.801 · escrita de cache 4.867 |
+| Duração | 25,5s |
+| Custo real do Claude | US$0,0414 (≈ R$0,23) |
+| Duração final planejada | 24s |
+| Vídeo IA | 9s (permitido 8–12s) |
+| Ajustes de `fitPlanToPreset` | nenhum |
+| Custo futuro estimado | R$4,05 |
+| Total projetado | R$4,28 |
+| Preços de mídia | ainda provisórios (`unassigned-*`) |
+
+Conclusão: o prompt `campaign-plan@1.0.0` funciona estruturalmente (schema, limites do preset, custos). A revisão do conteúdo gerou duas regras novas de honestidade (DECISIONS D42; SPEC "Regras de conteúdo"), a aplicar no prompt antes de qualquer mídia real.
 
 ## Roadmap (próximos lotes — não iniciar sem autorização)
+
+### Pré-requisito antes de mídia real (Lotes 4 e 5)
+- [ ] Prompt `campaign-plan@1.0.1` com as regras de conteúdo da D42: (1) não inventar experiência pessoal, depoimento ou teste feito pelo narrador/ator; (2) não transformar alegações temporais ou características informadas pelo vendedor em falsa prova visual. Correção mínima, com testes do texto do prompt; nova validação real só com autorização.
 
 ### Lote 3 — Renderização com Remotion
 - [ ] Composição 1080x1920 e componentes (captions, headline, CTA, progress, nome, preço, cenas de vídeo/imagem, transições)
@@ -70,7 +87,8 @@ Registrar: modelo servido, tokens, custo real, duração, resultado do schema, n
 - O enum dos campos (ex.: `shotType`) vai na descrição do JSON Schema (comportamento do helper do SDK); a validação Zod cobre, mas uma violação custa uma tentativa.
 - Fallbacks server-side da Anthropic não habilitados (decisão de custo); recusa vira erro tipado.
 - Re-estimativa após falha recalcula o criativo inteiro; mocks retornam URIs `mock://`; cotação estática.
-- Prompt `campaign-plan@1.0.0` ainda não foi avaliado com o modelo real (falta a validação manual).
-- AUTO envia todos os formatos ao prompt sem instrução extra de "escolha os melhores" (evita mudar o prompt antes da validação real).
+- Prompt `campaign-plan@1.0.0` validado só com 1 criativo no preset economy; high/premium e vários criativos ainda não foram testados com o modelo real.
+- Prompt ainda sem as regras de conteúdo da D42 (pendente para `1.0.1`, antes de mídia real).
+- AUTO envia todos os formatos ao prompt sem instrução extra de "escolha os melhores" (pode entrar junto com a `1.0.1`).
 - Uploads órfãos (imagens enviadas sem campanha planejada) não são limpos automaticamente.
 - Sem testes de componentes React (só lógica em `application/`); o fluxo visual foi verificado manualmente.

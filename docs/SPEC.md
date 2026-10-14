@@ -36,6 +36,17 @@ O vídeo final é mais longo que o trecho gerado por IA: o restante usa imagens 
 5. Sem loops de regeneração ilimitados; sem re-tentativa paga automática após falha.
 6. Preços e cotação USD→BRL centralizados e configuráveis.
 
+## Regras de conteúdo (obrigatórias)
+Já no prompt `campaign-plan@1.0.0`:
+1. Usar só fatos presentes nas informações do produto: sem números, medidas, prazos, depoimentos, avaliações, certificações, comparações ou resultados inventados.
+2. Sem alegações de saúde, cura, emagrecimento, garantia de resultado ou "100%"; riscos vão para `communicationRisks`.
+3. Antes/depois só quando a mudança é visível, verdadeira e demonstrável.
+4. Informação que falta vai para `missingInformation`, em vez de ser suposta.
+
+A aplicar em `campaign-plan@1.0.1`, **antes de qualquer mídia real** (DECISIONS D42):
+5. **Sem experiência inventada:** o narrador/ator não afirma uso pessoal, depoimento, teste realizado ou resultado vivido que não esteja nas informações fornecidas.
+6. **Sem falsa prova visual:** alegações temporais ou características informadas pelo vendedor (ex.: "gelado por 24h", "não vaza") aparecem como informação do produto, nunca encenadas como se a cena comprovasse o fato (relógio/timelapse de "24 horas depois", teste demonstrado como prova).
+
 ## Lote 1 — planejamento real
 Produto → Claude → análise (resumo, público, dores, benefícios, diferenciais, objeções, riscos de comunicação, informações ausentes) → hooks distintos → conceitos → criativos (hook, ângulo, roteiro, CTA, duração) → cenas (ordem, duração, narração, texto na tela, descrição visual, prompt de geração, enquadramento, transição, fonte visual, movimento, vídeo IA sim/não, segundos de IA) → validação Zod → adequação ao preset → estimativa.
 - Modelo por preset: Sonnet 5.5 (econômico, alta), Opus 5.5 (premium).

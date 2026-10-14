@@ -47,6 +47,8 @@ export class GatedPlanner implements CreativePlanner {
   calls = 0;
   private readonly inner: MockCreativePlanner;
   private gates: { resolve: () => void; reject: (e: unknown) => void }[] = [];
+  /** Liberações/falhas pedidas antes de o plan() chegar à trava (evita corrida no teste). */
+  private early: ({ ok: true } | { ok: false; error: unknown })[] = [];
 
   constructor(ids: IdGenerator) {
     this.inner = new MockCreativePlanner(ids);
@@ -58,16 +60,25 @@ export class GatedPlanner implements CreativePlanner {
 
   async plan(request: PlanningRequest): Promise<PlanningResult> {
     this.calls++;
-    await new Promise<void>((resolve, reject) => this.gates.push({ resolve, reject }));
+    const early = this.early.shift();
+    if (early) {
+      if (!early.ok) throw early.error;
+    } else {
+      await new Promise<void>((resolve, reject) => this.gates.push({ resolve, reject }));
+    }
     return this.inner.plan(request);
   }
 
   release(): void {
-    this.gates.shift()?.resolve();
+    const gate = this.gates.shift();
+    if (gate) gate.resolve();
+    else this.early.push({ ok: true });
   }
 
   fail(error: unknown): void {
-    this.gates.shift()?.reject(error);
+    const gate = this.gates.shift();
+    if (gate) gate.reject(error);
+    else this.early.push({ ok: false, error });
   }
 }
 
