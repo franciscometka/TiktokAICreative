@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { PRESET_ORDER, type PresetQuality } from "@/config/quality-presets";
+import { DEFAULT_SPEAKER_PROFILE_ID, isKnownSpeakerProfile } from "@/config/voices";
 import { CREATIVE_STYLES, type CreativeStyle } from "@/domain/creative";
 import type { CampaignRequest, StyleSelection } from "@/domain/pipeline";
 import type { ProductImage } from "@/domain/product";
@@ -39,6 +40,8 @@ export interface CampaignFormInput {
   styleMode: StyleSelection;
   styles: string[];
   quality: string;
+  /** Perfil de voz da narração (config/voices.ts). Ausente = padrão. */
+  speakerProfileId?: string;
   budget: { maxCostPerCreativeBrl: string; maxCostPerCampaignBrl: string; allowOverBudget: boolean };
 }
 
@@ -59,6 +62,7 @@ export interface ParsedCampaignForm {
   styleSelection: StyleSelection;
   styles: CreativeStyle[];
   quality: PresetQuality;
+  speakerProfileId: string;
   budget: { maxCostPerCreativeBrl: number; maxCostPerCampaignBrl: number; allowOverBudget: boolean };
 }
 
@@ -131,6 +135,10 @@ const FormSchema = z
     quality: z.string().refine((q): q is PresetQuality => (PRESET_ORDER as readonly string[]).includes(q), {
       message: "Escolha um nível de qualidade.",
     }),
+    speakerProfileId: z
+      .string()
+      .optional()
+      .refine((id) => id === undefined || id === "" || isKnownSpeakerProfile(id), { message: "Escolha uma voz da lista." }),
     budget: z.object({
       maxCostPerCreativeBrl: money("o limite por criativo", true),
       maxCostPerCampaignBrl: money("o limite por campanha", true),
@@ -182,6 +190,7 @@ export function parseCampaignForm(input: unknown): Result<ParsedCampaignForm, Fi
     styleSelection: f.styleMode,
     styles,
     quality: f.quality as PresetQuality,
+    speakerProfileId: f.speakerProfileId || DEFAULT_SPEAKER_PROFILE_ID,
     budget: {
       // Os dois foram validados como obrigatórios acima.
       maxCostPerCreativeBrl: f.budget.maxCostPerCreativeBrl ?? 0,
@@ -211,6 +220,7 @@ export function toCampaignRequest(form: ParsedCampaignForm, images: readonly Pro
     creativeCount: form.creativeCount,
     quality: form.quality,
     budget: form.budget,
+    speakerProfileId: form.speakerProfileId,
   };
 }
 
@@ -233,6 +243,7 @@ export function formInputFromRequest(request: CampaignRequest): CampaignFormInpu
     styleMode: request.styleSelection ?? "manual",
     styles: request.styleSelection === "auto" ? [] : request.styles,
     quality: request.quality === "custom" ? "economy" : request.quality,
+    speakerProfileId: request.speakerProfileId ?? DEFAULT_SPEAKER_PROFILE_ID,
     budget: {
       maxCostPerCreativeBrl: toInput(request.budget.maxCostPerCreativeBrl),
       maxCostPerCampaignBrl: toInput(request.budget.maxCostPerCampaignBrl),

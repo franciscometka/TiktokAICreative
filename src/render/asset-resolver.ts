@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve, sep } from "node:path";
 import { detectImageType, type ImageContentType } from "@/domain/upload";
+import { isMp3 } from "@/providers/audio/mp3";
 import { imageDimensions, type ImageSize } from "./image-dimensions";
 
 /**
@@ -14,8 +15,11 @@ import { imageDimensions, type ImageSize } from "./image-dimensions";
 
 export type ResolvedAsset =
   | { kind: "mock"; uri: string }
-  | { kind: "file"; uri: string; absolutePath: string; contentType: ImageContentType; size: ImageSize }
+  | { kind: "file"; media: "image"; uri: string; absolutePath: string; contentType: ImageContentType; size: ImageSize }
+  | { kind: "file"; media: "audio"; uri: string; absolutePath: string; contentType: AudioContentType }
   | { kind: "missing"; uri: string };
+
+export type AudioContentType = "audio/mpeg" | "audio/wav";
 
 export class AssetSecurityError extends Error {
   override name = "AssetSecurityError";
@@ -28,6 +32,7 @@ export class AssetCorruptedError extends Error {
 const MOCK_SCHEME = "mock://";
 const HAS_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 const IMAGE_EXTENSION = /\.(jpe?g|png|webp)$/i;
+const AUDIO_EXTENSION = /\.(mp3|wav)$/i;
 
 export class AssetResolver {
   private readonly roots: string[];
@@ -51,7 +56,7 @@ export class AssetResolver {
     if (!this.roots.some((root) => full.startsWith(root + sep))) {
       throw new AssetSecurityError("Asset fora das pastas autorizadas");
     }
-    if (!IMAGE_EXTENSION.test(full)) throw new AssetSecurityError("Tipo de asset não suportado");
+    if (!IMAGE_EXTENSION.test(full) && !AUDIO_EXTENSION.test(full)) throw new AssetSecurityError("Tipo de asset não suportado");
     return full;
   }
 
@@ -65,10 +70,17 @@ export class AssetResolver {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return { kind: "missing", uri };
       throw error;
     }
+    if (AUDIO_EXTENSION.test(absolutePath)) {
+      // Conteúdo precisa bater com a extensão (MP3: ID3/frame sync; WAV: RIFF....WAVE).
+      const wav = bytes.length > 12 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WAVE";
+      const expectsWav = /\.wav$/i.test(absolutePath);
+      if (expectsWav ? !wav : !isMp3(bytes)) throw new AssetCorruptedError(`Arquivo não é um áudio válido: ${uri}`);
+      return { kind: "file", media: "audio", uri, absolutePath, contentType: expectsWav ? "audio/wav" : "audio/mpeg" };
+    }
     const contentType = detectImageType(bytes);
     if (!contentType) throw new AssetCorruptedError(`Arquivo não é uma imagem válida: ${uri}`);
     const size = imageDimensions(bytes, contentType);
     if (!size) throw new AssetCorruptedError(`Não foi possível ler as dimensões da imagem: ${uri}`);
-    return { kind: "file", uri, absolutePath, contentType, size };
+    return { kind: "file", media: "image", uri, absolutePath, contentType, size };
   }
 }

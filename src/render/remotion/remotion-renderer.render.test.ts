@@ -4,6 +4,7 @@ import { getVideoMetadata } from "@remotion/renderer";
 import { describe, expect, it } from "vitest";
 import { RenderManifestSchema, type RenderManifest } from "@/domain/render";
 import { makePng } from "@/test/png";
+import { makeWav } from "@/test/wav";
 import { RemotionRenderer } from "./remotion-renderer";
 
 /*
@@ -75,6 +76,32 @@ describe("RemotionRenderer (render real curto)", () => {
     const second = await renderer.render(manifest, { preferredVersion: 1 });
     expect(second.renderId).toBe("v2");
     expect((await stat(first.outputUri)).size).toBe(info.size);
+  }, 600_000);
+
+  it("com narração real (fixture WAV local, sem ElevenLabs) o MP4 sai com trilha AAC", async () => {
+    const base = await fixture();
+    const audioUri = `${UPLOADS.replaceAll("\\", "/")}/prod_test/narration_fixture.wav`;
+    await writeFile(audioUri, makeWav(2.5));
+    const manifest = RenderManifestSchema.parse({
+      ...base,
+      creativeId: "creative_render_audio",
+      output: { ...base.output, path: `${RENDERS}/campaign_render_test/creative_render_audio` },
+      audio: [{ kind: "narration", uri: audioUri, startSeconds: 0, durationSeconds: 2.5, isMock: false, speechEndSeconds: 2.4 }],
+      captionSource: "alignment",
+    });
+    const renderer = new RemotionRenderer({ rendersDir: RENDERS, allowedAssetRoots: [UPLOADS], browserExecutable: process.env.RENDER_BROWSER_EXECUTABLE ?? null });
+    const result = await renderer.render(manifest);
+
+    const meta = await getVideoMetadata(result.outputUri);
+    expect(meta.width).toBe(1080);
+    expect(meta.height).toBe(1920);
+    expect(meta.fps).toBe(30);
+    expect(meta.codec).toBe("h264");
+    expect(meta.audioCodec).toBe("aac");
+    expect(result.warnings.map((w) => w.code)).not.toContain("audio_unavailable");
+    const saved = JSON.parse(await readFile(result.manifestUri!, "utf8"));
+    expect(saved.output.audio).toBe("aac");
+    expect(saved.props.audio[0].src).toBe(`asset:${audioUri}`);
   }, 600_000);
 
   it("recusa asset fora das pastas autorizadas sem gerar arquivo", async () => {

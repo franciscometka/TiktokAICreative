@@ -15,8 +15,11 @@ export const JOB_TRANSITIONS: Readonly<Record<JobStatus, readonly JobStatus[]>> 
   // voltar para cost_estimated = plano/preço mudou → nova estimativa invalida a aprovação
   awaiting_approval: ["generating", "cost_estimated", "cancelled"],
   // generating → completed: regeneração de cena falhou e o vídeo anterior foi mantido
-  generating: ["rendering", "budget_exceeded", "failed", "cancelled", "completed"],
+  // generating → audio_review: narração real muito mais longa que o planejado (decisão explícita)
+  generating: ["rendering", "budget_exceeded", "audio_review", "failed", "cancelled", "completed"],
   budget_exceeded: ["generating", "cancelled"],
+  // aceitar (renderiza com o fim estendido) | gerar a narração de novo (paga, explícita) | cancelar
+  audio_review: ["rendering", "generating", "cancelled"],
   rendering: ["completed", "failed"],
   // completed → generating: regeneração explícita de cena (com checagem de orçamento)
   // completed → rendering: "Renderizar novamente" (nova versão; render local não tem chamada paga)

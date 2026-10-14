@@ -67,9 +67,21 @@ export interface WizardProps {
   fromCampaign: boolean;
   planner: "mock" | "anthropic";
   planningAvailable: boolean;
+  /** Perfis de voz (só id/nome/descrição; o voiceId do provider nunca vem ao browser). */
+  voices: { id: string; name: string; description: string }[];
+  audioProvider: "mock" | "elevenlabs";
 }
 
-export function CampaignWizard({ presets, initial, initialImages, fromCampaign, planner, planningAvailable }: WizardProps) {
+export function CampaignWizard({
+  presets,
+  initial,
+  initialImages,
+  fromCampaign,
+  planner,
+  planningAvailable,
+  voices,
+  audioProvider,
+}: WizardProps) {
   const router = useRouter();
   const [form, setForm] = useState<CampaignFormInput>(initial);
   const [images, setImages] = useState<ImageView[]>(initialImages);
@@ -376,6 +388,47 @@ export function CampaignWizard({ presets, initial, initialImages, fromCampaign, 
               <QualitySelector presets={presets} value={form.quality} onChange={(q) => update("quality", q)} />
               {errors.quality && <p className="mt-1.5 text-xs font-medium text-red-600">{errors.quality}</p>}
             </div>
+          </Panel>
+
+          <Panel className="p-5 sm:p-6">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-lg font-semibold tracking-tight">Voz da narração</h2>
+              <span
+                className={
+                  audioProvider === "elevenlabs"
+                    ? "rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700"
+                    : "rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800"
+                }
+              >
+                {audioProvider === "elevenlabs" ? "Narração real · ElevenLabs" : "MODO DE TESTE"}
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-zinc-600">
+              {audioProvider === "elevenlabs"
+                ? "A narração é gerada em português do Brasil depois da sua aprovação e entra no custo estimado."
+                : "Narração simulada (AUDIO_PROVIDER=mock): nenhuma voz é gerada e nada é cobrado."}
+            </p>
+            <div className="mt-4 grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Voz da narração">
+              {voices.map((voice) => {
+                const selected = (form.speakerProfileId ?? voices[0]?.id) === voice.id;
+                return (
+                  <button
+                    key={voice.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => update("speakerProfileId", voice.id)}
+                    className={`rounded-md border px-3 py-2.5 text-left transition-colors ${
+                      selected ? "border-zinc-900 bg-zinc-50 ring-1 ring-zinc-900" : "border-zinc-200 hover:border-zinc-400"
+                    }`}
+                  >
+                    <span className="block text-sm font-medium text-zinc-900">{voice.name}</span>
+                    <span className="block text-xs text-zinc-600">{voice.description}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {errors.speakerProfileId && <p className="mt-1.5 text-xs font-medium text-red-600">{errors.speakerProfileId}</p>}
           </Panel>
 
           <Panel className="p-5 sm:p-6">

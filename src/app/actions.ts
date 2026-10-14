@@ -3,9 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import {
+  acceptNarration,
   approveCreative,
   cancelCreative,
   removeProductImage,
+  regenerateNarration,
   rerenderCreative,
   resolveCreativeBudget,
   retryCampaignPlanning,
@@ -77,4 +79,18 @@ export async function rerenderCreativeAction(jobId: unknown): Promise<ActionResu
   const parsed = id.safeParse(jobId);
   if (!parsed.success) return badInput();
   return rerenderCreative(getRuntime().deps, parsed.data);
+}
+
+export async function acceptNarrationAction(jobId: unknown): Promise<ActionResult<GenerationResultView>> {
+  const parsed = id.safeParse(jobId);
+  if (!parsed.success) return badInput();
+  return acceptNarration(getRuntime().deps, parsed.data);
+}
+
+const regenerateNarrationInput = z.object({ jobId: id, authorizeOverBudget: z.boolean().optional() });
+
+export async function regenerateNarrationAction(input: unknown): Promise<ActionResult<GenerationResultView>> {
+  const parsed = regenerateNarrationInput.safeParse(input);
+  if (!parsed.success) return badInput();
+  return regenerateNarration(getRuntime().deps, parsed.data);
 }

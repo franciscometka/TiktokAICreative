@@ -3,6 +3,7 @@ import type { CampaignView, CreativeView } from "@/application/campaign-view";
 import { formatBrl } from "@/lib/money";
 import { Badge, InfoTip, Notice, Panel, ProvisionalBadge, SectionHeading } from "../ui/primitives";
 import { ApprovalControls } from "./approval-controls";
+import { NarrationPanel } from "./narration-panel";
 import { RenderPanel } from "./render-panel";
 import { jobStatusTone } from "./status";
 
@@ -105,6 +106,7 @@ export function CreativeCostCard({
             </dl>
           </div>
 
+          <NarrationPanel jobId={creative.jobId} narration={creative.narration} />
           <RenderPanel creative={creative} rendererIsReal={rendererIsReal} />
           {creative.actual && (
             <dl className="rounded-md border border-zinc-200 px-4 py-2">
@@ -130,6 +132,7 @@ export function CreativeCostCard({
               canApprove={creative.canApprove}
               canCancel={creative.canCancel}
               mediaIsMock={mediaIsMock}
+              audioIsReal={creative.narration.isReal}
               rendererIsReal={rendererIsReal}
               pendingDecision={creative.budgetDecision}
             />

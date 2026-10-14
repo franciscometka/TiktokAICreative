@@ -118,3 +118,17 @@ describe("toCampaignRequest / formInputFromRequest", () => {
     expect(valueOf(back)).toEqual(form);
   });
 });
+
+describe("voz da narração no formulário", () => {
+  it("sem escolha usa o perfil padrão; escolha válida vai para o pedido", () => {
+    const parsed = parseCampaignForm(formInput());
+    expect(parsed.ok && parsed.value.speakerProfileId).toBe("clara");
+    const chosen = parseCampaignForm(formInput({ speakerProfileId: "lucas" }));
+    if (!chosen.ok) throw new Error("esperava sucesso");
+    expect(toCampaignRequest(chosen.value, []).speakerProfileId).toBe("lucas");
+  });
+
+  it("voz fora da lista é recusada no campo (o browser não escolhe voiceId)", () => {
+    expect(errorsOf(formInput({ speakerProfileId: "EXAVITQu4vr4xnSDxMaL" })).speakerProfileId).toBeDefined();
+  });
+});

@@ -52,7 +52,7 @@ async function setup(options: { mockRenderer?: boolean } = {}) {
   let planner!: GatedPlanner;
   const h = createHarness({ planner: (gen) => (planner = new GatedPlanner(gen)), renderer: options.mockRenderer ? undefined : renderer });
   const { uploads } = await tempUploads();
-  const deps: AppDeps = { service: h.service, uploads, rendersDir };
+  const deps: AppDeps = { service: h.service, uploads, rendersDir, audioDir: "outputs/audio" };
   const { campaignId } = ok(await startCampaignPlanning(deps, formInput()));
   planner.release();
   await settle();

@@ -185,7 +185,7 @@ Contexto: em 2026-10-14 foi feita UMA validação real (`npm run plan:real -- --
 Decisão: duas regras de conteúdo passam a fazer parte da especificação (SPEC, "Regras de conteúdo") e devem entrar no prompt como `campaign-plan@1.0.1` ANTES de qualquer geração de mídia real:
 1. **Sem experiência inventada**: o narrador/ator não afirma uso pessoal, depoimento, teste realizado ou resultado vivido ("testei por uma semana", "uso todo dia", "minha água ficou gelada até a noite") que não esteja nas informações fornecidas.
 2. **Sem falsa prova visual**: alegações temporais ou características informadas pelo vendedor (ex.: "gelado por 24h", "não vaza") são apresentadas como informação do produto (texto/narração), nunca encenadas como se a cena comprovasse o fato (ex.: relógio passando de 8h para 20h com a bebida ainda gelada, timelapse de "24 horas depois", teste de vazamento demonstrado como prova).
-Consequência: o prompt NÃO foi alterado neste commit (sem nova chamada à Anthropic). A `1.0.1` será uma correção mínima e documentada; uma nova validação real só com autorização.
+Consequência: o prompt NÃO foi alterado neste commit (sem nova chamada à Anthropic). A `1.0.1` será uma correção mínima e documentada; uma nova validação real só com autorização. **Atualização (Lote 4): `campaign-plan@1.0.1` criada e ativa — ver D65.**
 
 ## D43 — Remotion local, isolado e com versão fixa
 Decisão: renderização real com Remotion **4.0.531** (`remotion`, `@remotion/bundler`, `@remotion/renderer`, versões exatas no `package.json`), rodando na máquina do usuário. A composição vive em `remotion/` (imports relativos, sem `@/`, para o bundler do Remotion) e o único código do app que importa `@remotion/*` é `src/render/remotion/` (+ `scripts/render-setup.ts`). `createRenderer` (`render/create-renderer.ts`) é o ÚNICO ponto que escolhe `RENDERER=mock|remotion`; `LazyRemotionRenderer` só importa o Remotion no primeiro render, então testes e `RENDERER=mock` nem carregam o pacote. No Next, os pacotes do Remotion ficam em `serverExternalPackages`. Fora de escopo: Lambda, cloud render, render farm, fila externa.
@@ -222,3 +222,53 @@ Contexto: no Windows, o caminho do `chrome-headless-shell.exe` dentro de `node_m
 
 ## D54 — Licença do Remotion
 O Remotion é gratuito para pessoas físicas e empresas com até 3 pessoas; acima disso exige **Company License** (remotion.pro). `REMOTION_LICENSE_KEY` (opcional, lida só no servidor por `readRemotionLicenseKey`) é repassada ao `renderMedia`; sem chave, nada é enviado. Verificar a licença antes do uso comercial pela empresa.
+
+---
+
+# Lote 4 — Narração real (ElevenLabs)
+
+## D55 — Narração CONTÍNUA por criativo (não por cena)
+Contexto: a narração pode ser gerada cena a cena ou de uma vez para o criativo inteiro.
+Avaliação:
+| Critério | Por cena | Contínua (escolhida) |
+|---|---|---|
+| Naturalidade | prosódia reinicia a cada cena, emendas audíveis | entonação e ritmo de uma fala só |
+| Sincronização | precisa colar N arquivos e alinhar cada um | um arquivo, um timing; janelas por cena derivadas das palavras |
+| Regeneração | pode refazer só uma cena | refaz tudo (narração de 20–40s) |
+| Custo | igual em caracteres; N requisições | igual em caracteres; 1 requisição |
+| Robustez | N pontos de falha, estados parciais | 1 chamada, 1 desfecho; sem estado parcial |
+| Avatar / lip sync | N cortes de áudio | uma faixa contínua, ideal para lip sync |
+Decisão: uma chamada por criativo com o texto das cenas na ordem (`buildNarrationScript`). As janelas de fala de cada cena (`timing.scenes`) são derivadas do alinhamento e ficam salvas para uso futuro. Consequência: regenerar custa a narração inteira (≈ US$0,01–0,05 por criativo), aceitável pelo ganho de naturalidade e simplicidade.
+
+## D56 — ElevenLabs isolado em um provider, sem SDK
+Decisão: `ElevenLabsAudioProvider` (`providers/audio/elevenlabs-audio-provider.ts`) implementa `AudioProvider` e é o ÚNICO lugar que conhece a ElevenLabs: `POST /v1/text-to-speech/{voice_id}/with-timestamps?output_format=mp3_44100_128`, header `xi-api-key`, corpo, formato de resposta, headers (`request-id`, `character-cost`) e erros. Usa `fetch` direto (sem SDK): nenhuma dependência nova e controle total de retry (zero). Para fora sai só `AudioResult` em tipos internos (bytes, `CharacterTiming`, request id, caracteres cobrados). `AUDIO_PROVIDER=mock|elevenlabs`; a chave é lida só por `readElevenLabsApiKey()` na raiz de composição, fica em campo privado (`#apiKey`) e é redigida de qualquer mensagem de erro. Sem chave, a factory falha com erro claro na geração, ANTES de qualquer chamada paga (nem vídeo).
+
+## D57 — Modelos de TTS por preset e preço oficial
+`config/tts-models.ts` é o único lugar com IDs: economy → `eleven_flash_v2_5`; high/premium → `eleven_multilingual_v2`. `language_code: "pt"` só vai para o Flash (o Multilingual v2 não aceita e detecta pelo texto). Preço oficial da API (elevenlabs.io/pricing/api, verificado em 2026-10-14): Flash/Turbo US$0,04 e Multilingual v2 US$0,08 por 1.000 caracteres, `isPlaceholder: false`. Os placeholders `unassigned-audio` saíram da tabela. Atenção: assinaturas da ElevenLabs cobram em créditos e podem sair diferentes do preço de API; o ledger usa o preço de API.
+
+## D58 — SpeakerProfile independente da voz do provider
+`SpeakerProfile` (domain/audio.ts) descreve a voz do PRODUTO (nome amigável, idioma, gênero, idade, tom), sem voiceId. `config/voices.ts` lista os perfis pt-BR (Clara, Bia, Rafael, Lucas) e, separadamente, o mapa perfil → voz ElevenLabs (vozes padrão multilíngues; trocar por vozes pt-BR nativas da Voice Library muda só essa tabela). O pedido guarda `speakerProfileId` (opcional; padrão Clara). Futuro avatar UGC = `PresenterProfile` (aparência) + `SpeakerProfile` (voz), sem mudar este tipo. Sem voice cloning.
+
+## D59 — Texto falado normalizado (pt-BR) ligado ao texto escrito
+Decisão: `speech/narration-script.ts` converte o texto escrito em texto falado — dinheiro ("R$ 79,90" → "setenta e nove reais e noventa centavos"), números (com gênero do substantivo seguinte: "duas horas"), unidades (ml, kg, h…), porcentagem e decimais — guardando, para cada token escrito, o intervalo correspondente no texto falado. O TTS recebe o texto falado (não dependemos da normalização do provider, que no Flash é limitada); a legenda mostra o texto escrito. A estimativa de custo usa os caracteres do texto FALADO (é o que é cobrado). Determinístico.
+
+## D60 — Timing real → palavras → legendas
+Decisão: o alinhamento por caractere vira `CharacterTiming` (interno) no provider; `wordsFromAlignment` produz `TimedWord` (palavra escrita + início/fim reais + cena), monotônico; `captionsFromWords` agrupa com os limites do Lote 3 (≤30 caracteres, ≤6 palavras, quebra na pontuação e na troca de cena) e cada trecho começa quando sua primeira palavra é dita. O manifest marca `captionSource: "alignment"`. Se o alinhamento não bater com o texto enviado (ou não vier), `AlignmentMismatchError` → legendas estimadas do Lote 3 + aviso `captions_estimated`; nunca inventamos timing.
+
+## D61 — AudioFit e revisão explícita
+`evaluateAudioFit` compara a duração planejada com o fim REAL da fala (`config/audio-policy.ts`): |diferença| ≤ 0,5s → `fits`; fala mais curta → `too_short` (o vídeo segue o plano); mais longa até max(2s, 10%) → `extend` (a última cena/CTA ganha o excedente + 0,4s de respiro, localmente, sem nova chamada); mais longa que isso → `review`: o job vai para o novo estado `audio_review` e espera o usuário — aceitar (vídeo mais longo, sem custo), gerar a narração de novo (paga, nova versão) ou cancelar. Nunca cortamos fala; nunca há regeneração paga automática. Áudio mock (`measured: false`) nunca bloqueia. Arestas novas: `generating → audio_review`, `audio_review → rendering | generating | cancelled`.
+
+## D62 — Custos reais da narração
+Antes da chamada: a checagem de orçamento existente (`pauseIfOverBudget`) com a estimativa restante. Depois: `billedUsage.characters` = header `character-cost` (ou o tamanho do texto enviado) × preço do modelo → ledger (`audio_generation`, `simulated: false`, `attemptId`). Falha HTTP 4xx/5xx: a ElevenLabs não cobra → sem registro. Resposta 200 inválida: provavelmente cobrada → registra. Timeout: não sabemos → a tentativa falha com aviso de "possível cobrança não confirmada" e nada é re-tentado (mesmo princípio da D33). Se salvar o arquivo falhar depois da chamada, o custo continua registrado. "Gerar narração novamente" (`startNarrationRegeneration`) é explícito, checa limite de tentativas (`MAX_ATTEMPTS_PER_SCENE`) e orçamento com o custo da narração; com orçamento excedido devolve a decisão sem chamar; a tentativa anterior vira descartada mas continua no total; falha na nova chamada mantém a anterior.
+
+## D63 — Narração como asset versionado, independente do renderer
+`LocalAudioAssetStore` grava em `<AUDIO_DIR>/<campanha>/<criativo>/v<N>/` (`narration.mp3`, `timing.json`, `metadata.json`), mesma reserva atômica de versão dos renders (`allocateVersionDir`): nada é sobrescrito. O metadata guarda provider, modelo, voz, request id, caracteres, duração, AudioFit e os textos escrito/falado (sem segredo). A tentativa de áudio guarda só URIs relativas e `NarrationInfo`. O browser ouve por `GET /api/audio/<campanha>/<criativo>/<versão>` (IDs validados, só versões registradas no job, Range). O mesmo asset serve ao Remotion hoje e a lip sync/avatar/vídeo generativo no futuro.
+
+## D64 — Remotion com narração
+Quando o manifest tem áudio real resolvido (o `AssetResolver` aceita `.mp3`/`.wav` com conteúdo conferido, nas raízes `UPLOADS_DIR` e `AUDIO_DIR`), a composição toca `<Audio>` e o MP4 sai com trilha **AAC** (H.264, 1080x1920, 30 fps continuam). Sem áudio real, o comportamento do Lote 3 continua (sem trilha, aviso `audio_unavailable`). `remotion-renderer@1.1.0`, `tiktok-creative@1.1.0`.
+
+## D65 — campaign-plan@1.0.1
+A versão ativa do prompt é a 1.0.1 = 1.0.0 + as duas regras de honestidade da D42 (sem experiência inventada; sem falsa prova), inseridas na seção "Honestidade e conformidade". Schema, validação, mensagem do usuário e limites não mudam; a 1.0.0 continua registrada (deprecated). Nenhuma chamada à Anthropic foi feita para isso; a validação real da 1.0.1 fica para quando autorizada.
+
+## D66 — `npm test` offline por construção
+`src/test/no-network.ts` (setup do Vitest) faz qualquer `fetch` fora de localhost falhar. Providers reais recebem transporte falso nos testes (`src/test/elevenlabs-fake.ts`). A validação real é só pelo script `npm run tts:real` (sem `--confirm` não chama nada; com `--confirm`, UMA chamada curta).

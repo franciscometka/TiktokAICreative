@@ -33,6 +33,8 @@ export function getRuntime(): Runtime {
         service: createPipelineService(config),
         uploads: new LocalUploadStore(config.uploadsDir),
         rendersDir: config.rendersDir,
+        audioDir: config.audioDir,
+        audioProvider: config.audioProvider,
       },
     };
   }
@@ -45,6 +47,9 @@ export interface PublicAppConfig {
   planningAvailable: boolean;
   /** true enquanto vídeo e áudio usam providers mock (nada real é gerado ou cobrado). */
   mediaIsMock: boolean;
+  /** Provider de narração: "mock" (simulado) ou "elevenlabs" (real, cobrado). */
+  audioProvider: "mock" | "elevenlabs";
+  videoIsMock: boolean;
   /** "remotion" = o render gera MP4 real; "mock" = nenhum arquivo é gerado. */
   renderer: "mock" | "remotion";
   defaultBudget: CostBudget;
@@ -57,6 +62,8 @@ export function getPublicConfig(): PublicAppConfig {
     planner: config.llmProvider,
     planningAvailable: deps.service.planningAvailable(),
     mediaIsMock: config.videoProvider === "mock" && config.audioProvider === "mock",
+    audioProvider: config.audioProvider,
+    videoIsMock: config.videoProvider === "mock",
     renderer: config.renderer.id,
     defaultBudget: config.defaultBudget,
     exchangeRate: { rate: config.exchangeRate.rate, source: config.exchangeRate.source },

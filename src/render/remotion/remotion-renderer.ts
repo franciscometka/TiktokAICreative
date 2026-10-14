@@ -24,7 +24,7 @@ import { startAssetServer, type AssetServer } from "./asset-server";
  * → final.mp4 + manifest.json numa pasta de versão nova. Nenhuma regra de negócio aqui.
  */
 
-export const RENDERER_VERSION = "remotion-renderer@1.0.0";
+export const RENDERER_VERSION = "remotion-renderer@1.1.0";
 
 export interface RemotionRendererOptions {
   rendersDir: string;
@@ -85,6 +85,9 @@ export class RemotionRenderer implements Renderer {
     for (const asset of manifest.assets) {
       if (asset.uri && !resolved.has(asset.uri)) resolved.set(asset.uri, await this.resolver.resolve(asset.uri));
     }
+    for (const track of manifest.audio) {
+      if (!track.uri.startsWith("mock://") && !resolved.has(track.uri)) resolved.set(track.uri, await this.resolver.resolve(track.uri));
+    }
     const files = new Map(
       [...resolved].flatMap(([uri, r]) => (r.kind === "file" ? [[uri, { absolutePath: r.absolutePath, contentType: r.contentType }] as const] : [])),
     );
@@ -114,7 +117,9 @@ export class RemotionRenderer implements Renderer {
         // bt709 + range limitado: yuv420p "tv" (o padrão do Remotion sai yuvj420p full-range).
         colorSpace: "bt709",
         crf: this.options.crf ?? 20,
-        muted: true,
+        // Com narração real: trilha AAC. Sem áudio: MP4 sem trilha (como no Lote 3).
+        muted: props.audio.length === 0,
+        audioCodec: props.audio.length > 0 ? "aac" : null,
         outputLocation: partial,
         overwrite: false,
         concurrency: this.options.concurrency ?? null,
@@ -138,7 +143,7 @@ export class RemotionRenderer implements Renderer {
         renderId,
         renderedAt: new Date().toISOString(),
         renderMs,
-        output: { file: FINAL_FILE, codec: "h264", pixelFormat: "yuv420p", colorSpace: "bt709", audio: false, sizeBytes: size },
+        output: { file: FINAL_FILE, codec: "h264", pixelFormat: "yuv420p", colorSpace: "bt709", audio: props.audio.length > 0 ? "aac" : false, sizeBytes: size },
         fps: props.fps,
         width: props.width,
         height: props.height,

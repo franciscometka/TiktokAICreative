@@ -78,6 +78,7 @@ export const JOB_STATUS_NAMES: Record<JobStatus, string> = {
   awaiting_approval: "Aguardando aprovação",
   generating: "Gerando",
   budget_exceeded: "Orçamento excedido",
+  audio_review: "Revisar narração",
   rendering: "Renderizando",
   completed: "Concluído",
   failed: "Falhou",

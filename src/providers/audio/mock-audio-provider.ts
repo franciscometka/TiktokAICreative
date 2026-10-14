@@ -3,12 +3,11 @@ import type { ProviderPricing } from "@/domain/cost";
 import {
   ProviderError,
   type CostQuote,
-  type MediaResult,
   type ProviderDescriptor,
   type ProviderJobRef,
   type ProviderJobStatus,
 } from "../types";
-import type { AudioGenerationRequest, AudioProvider } from "./audio-provider";
+import type { AudioGenerationRequest, AudioProvider, AudioResult } from "./audio-provider";
 
 export interface MockAudioProviderOptions {
   pricing: ProviderPricing;
@@ -17,7 +16,10 @@ export interface MockAudioProviderOptions {
   fail?: boolean;
 }
 
-/** Provider de áudio FALSO. Não sintetiza voz. Retorna URI "mock://" e custo SIMULADO. */
+/**
+ * Provider de áudio FALSO. Não sintetiza voz nem gera arquivo: retorna URI "mock://", custo
+ * SIMULADO e nenhum timing (as legendas usam o fallback estimado do Lote 3).
+ */
 export class MockAudioProvider implements AudioProvider {
   readonly descriptor: ProviderDescriptor;
   readonly generateCalls: AudioGenerationRequest[] = [];
@@ -49,7 +51,7 @@ export class MockAudioProvider implements AudioProvider {
       : { providerJobId: ref.providerJobId, state: "succeeded" };
   }
 
-  async downloadResult(ref: ProviderJobRef): Promise<MediaResult> {
+  async downloadResult(ref: ProviderJobRef): Promise<AudioResult> {
     const request = this.requireJob(ref);
     if (this.options.fail) throw new ProviderError("Resultado indisponível", ref.providerJobId);
     return {
@@ -58,6 +60,7 @@ export class MockAudioProvider implements AudioProvider {
       durationSeconds: this.durationOf(request),
       billedUsage: this.usage(request),
       isMock: true,
+      requestId: ref.providerJobId,
     };
   }
 

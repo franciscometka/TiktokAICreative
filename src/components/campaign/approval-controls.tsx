@@ -23,6 +23,7 @@ export function ApprovalControls({
   canApprove,
   canCancel,
   mediaIsMock,
+  audioIsReal,
   rendererIsReal,
   pendingDecision,
 }: {
@@ -32,6 +33,8 @@ export function ApprovalControls({
   canApprove: boolean;
   canCancel: boolean;
   mediaIsMock: boolean;
+  /** Narração real (ElevenLabs): é cobrada; vídeo IA continua em modo de teste. */
+  audioIsReal: boolean;
   rendererIsReal: boolean;
   pendingDecision: Decision | undefined;
 }) {
@@ -87,6 +90,13 @@ export function ApprovalControls({
 
   return (
     <div className="space-y-3">
+      {audioIsReal && showControls && (
+        <Notice tone="blue" title="Narração real · ElevenLabs">
+          Ao aprovar, a narração é gerada de verdade (uma chamada, cobrada pelo valor estimado acima). O vídeo IA continua em MODO DE
+          TESTE: as cenas de IA aparecem como placeholder marcado.
+        </Notice>
+      )}
+
       {mediaIsMock && showControls && (
         <Notice tone="amber" title="MODO DE TESTE — nenhuma mídia de IA real será gerada ou cobrada.">
           {rendererIsReal

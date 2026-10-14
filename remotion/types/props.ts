@@ -5,7 +5,7 @@
  */
 
 export const COMPOSITION_ID = "TikTokCreative";
-export const COMPOSITION_VERSION = "tiktok-creative@1.0.0";
+export const COMPOSITION_VERSION = "tiktok-creative@1.1.0";
 
 /** Mesmos valores de SceneAssetKind / VisualSource / Motion / Transition do domínio. */
 export type SceneKind = "generated_video" | "product_image" | "text_card";
@@ -60,7 +60,7 @@ export interface CreativeProps {
   hook: { text: string; endFrame: number } | null;
   cta: { text: string; startFrame: number };
   product: { name: string; priceLabel: string | null; benefit: string | null };
-  /** Faixas de áudio reais. Vazio no Lote 3 (sem TTS): o vídeo sai sem som. */
+  /** Faixas de áudio reais (narração TTS, Lote 4). Vazio = vídeo sem som. */
   audio: { src: string; startFrame: number }[];
   /** Mostra descrições técnicas no placeholder (só para desenvolvimento). */
   debug: boolean;

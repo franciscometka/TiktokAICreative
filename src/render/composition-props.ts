@@ -42,7 +42,7 @@ export interface BuiltProps {
 }
 
 function imageProps(asset: ResolvedAsset | undefined, urlFor: (uri: string) => string): ImageProps | null {
-  if (asset?.kind !== "file") return null;
+  if (asset?.kind !== "file" || asset.media !== "image") return null;
   const aspect = asset.size.width / asset.size.height;
   return {
     src: urlFor(asset.uri),
@@ -133,16 +133,24 @@ export function buildCompositionProps({ manifest, assets, urlFor, debug = false 
     .filter((c) => c.startFrame < ctaStart && c.endFrame > c.startFrame)
     .map((c) => ({ ...c, endFrame: Math.min(c.endFrame, ctaStart) }));
 
-  // Lote 3: a composição ainda não toca áudio (TTS real = Lote 4). Nenhuma voz é sintetizada aqui.
-  const realAudio = manifest.audio.filter((a) => isRealAudio(a.uri));
-  warnings.push({
-    sceneId: null,
-    code: "audio_unavailable",
-    message:
-      realAudio.length === 0
-        ? "Sem narração real (áudio do provider mock): vídeo renderizado sem som."
-        : "Faixa de áudio real ignorada: o renderer ainda não mixa áudio (Lote 4). Vídeo sem som.",
+  // Áudio real (arquivo autorizado) entra na trilha; mock ou ausente → vídeo sem som + aviso.
+  // Nenhuma voz é sintetizada aqui.
+  const audio = manifest.audio.flatMap((a) => {
+    const resolved = isRealAudio(a.uri) ? assets.get(a.uri) : undefined;
+    return resolved?.kind === "file" && resolved.media === "audio"
+      ? [{ src: urlFor(a.uri), startFrame: secondsToFrames(a.startSeconds, fps) }]
+      : [];
   });
+  if (audio.length === 0) {
+    const missing = manifest.audio.some((a) => isRealAudio(a.uri));
+    warnings.push({
+      sceneId: null,
+      code: "audio_unavailable",
+      message: missing
+        ? "Arquivo da narração não encontrado: vídeo renderizado sem som."
+        : "Sem narração real (áudio do provider mock): vídeo renderizado sem som.",
+    });
+  }
 
   const props: CreativeProps = {
     meta: {
@@ -163,8 +171,7 @@ export function buildCompositionProps({ manifest, assets, urlFor, debug = false 
       priceLabel: manifest.overlays.priceBrl !== undefined ? formatBrl(manifest.overlays.priceBrl) : null,
       benefit: manifest.overlays.benefit ?? null,
     },
-    // Áudio real chega no Lote 4; até lá nenhuma faixa é passada (nem sintetizada).
-    audio: [],
+    audio,
     debug,
   };
   return { props, warnings };

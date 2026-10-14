@@ -6,6 +6,7 @@ import { SAFE_PRODUCT_ID } from "@/domain/upload";
 import type { PipelineService } from "@/pipeline/pipeline-service";
 import { StaleEstimateError } from "@/pipeline/guards";
 import { FINAL_FILE, RENDER_ID, renderDir, SAFE_ENTITY_ID } from "@/render/output-paths";
+import { LocalAudioAssetStore } from "@/storage/audio-asset-store";
 import type { LocalUploadStore } from "@/storage/upload-store";
 import { parseCampaignForm, toCampaignRequest, type FieldErrors } from "./campaign-form";
 import {
@@ -30,6 +31,10 @@ export interface AppDeps {
   uploads: LocalUploadStore;
   /** Pasta dos renders (RENDERS_DIR), para servir os MP4 por ID. */
   rendersDir: string;
+  /** Pasta das narrações (AUDIO_DIR), para servir o áudio por ID. */
+  audioDir: string;
+  /** Provider de narração configurado (só o id; nunca a chave). */
+  audioProvider?: "mock" | "elevenlabs";
 }
 
 export type ActionResult<T> =
@@ -108,6 +113,7 @@ export async function getCampaignView(deps: AppDeps, campaignId: string): Promis
       campaignActual: await service.getCampaignCostReport(campaignId),
       jobActuals,
       jobActivity,
+      audioProvider: deps.audioProvider,
     });
     return { ok: true, value: view };
   } catch (error) {
@@ -193,6 +199,41 @@ export async function rerenderCreative(deps: AppDeps, jobId: string): Promise<Ac
   try {
     const { completion } = await deps.service.startRerender(jobId);
     logBackground(jobId, completion);
+    return { ok: true, value: { kind: "started" } };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+/**
+ * Narração em revisão: aceitar o vídeo mais longo (fim estendido, sem cortar fala). Sem custo.
+ */
+export async function acceptNarration(deps: AppDeps, jobId: string): Promise<ActionResult<GenerationResultView>> {
+  try {
+    const { completion } = await deps.service.acceptNarration(jobId);
+    logBackground(jobId, completion);
+    return { ok: true, value: { kind: "started" } };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+/**
+ * Gerar a narração de novo: ação explícita, NOVA versão e NOVO custo (a anterior fica no total).
+ * Orçamento excedido volta como decisão (nada é chamado); autorizar exige um segundo clique.
+ */
+export async function regenerateNarration(
+  deps: AppDeps,
+  input: { jobId: string; authorizeOverBudget?: boolean },
+): Promise<ActionResult<GenerationResultView>> {
+  try {
+    const result = await deps.service.startNarrationRegeneration(input.jobId, {
+      authorizeOverBudget: input.authorizeOverBudget === true,
+    });
+    if (result.kind === "BUDGET_EXCEEDED") {
+      return { ok: true, value: { kind: "budget_exceeded", source: "generation", decision: presentBudgetDecision(result.decision) } };
+    }
+    logBackground(input.jobId, result.completion);
     return { ok: true, value: { kind: "started" } };
   } catch (error) {
     return fail(error);
@@ -306,4 +347,35 @@ export async function resolveRenderFile(
   } catch {
     return undefined;
   }
+}
+
+export interface NarrationFile {
+  absolutePath: string;
+  sizeBytes: number;
+  fileName: string;
+}
+
+/**
+ * Áudio da narração por IDs (nunca por caminho). Só versões registradas numa tentativa de áudio
+ * real do job; o caminho é recalculado e validado dentro de AUDIO_DIR.
+ */
+export async function resolveNarrationFile(
+  deps: AppDeps,
+  ids: { campaignId: string; creativeId: string; version: string },
+): Promise<NarrationFile | undefined> {
+  if (!SAFE_ENTITY_ID.test(ids.campaignId) || !SAFE_ENTITY_ID.test(ids.creativeId) || !RENDER_ID.test(ids.version)) {
+    return undefined;
+  }
+  let jobs;
+  try {
+    jobs = await deps.service.listJobs(ids.campaignId);
+  } catch {
+    return undefined;
+  }
+  const registered = jobs
+    .find((j) => j.creativeId === ids.creativeId)
+    ?.audioAttempts.some((a) => a.status === "succeeded" && !a.isMock && a.narration?.version === ids.version);
+  if (!registered) return undefined;
+  const file = await new LocalAudioAssetStore(deps.audioDir).resolveNarrationFile(ids);
+  return file ? { ...file, fileName: `narracao-${ids.creativeId}-${ids.version}.mp3` } : undefined;
 }

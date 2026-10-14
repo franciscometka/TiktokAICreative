@@ -43,7 +43,7 @@ Já no prompt `campaign-plan@1.0.0`:
 3. Antes/depois só quando a mudança é visível, verdadeira e demonstrável.
 4. Informação que falta vai para `missingInformation`, em vez de ser suposta.
 
-A aplicar em `campaign-plan@1.0.1`, **antes de qualquer mídia real** (DECISIONS D42):
+Em `campaign-plan@1.0.1` (ativa desde o Lote 4, DECISIONS D42/D65):
 5. **Sem experiência inventada:** o narrador/ator não afirma uso pessoal, depoimento, teste realizado ou resultado vivido que não esteja nas informações fornecidas.
 6. **Sem falsa prova visual:** alegações temporais ou características informadas pelo vendedor (ex.: "gelado por 24h", "não vaza") aparecem como informação do produto, nunca encenadas como se a cena comprovasse o fato (relógio/timelapse de "24 horas depois", teste demonstrado como prova).
 
@@ -77,6 +77,19 @@ Produto → Claude → análise (resumo, público, dores, benefícios, diferenci
 - Saída em `outputs/renders/<campanha>/<criativo>/v<N>/` com `manifest.json`; nunca sobrescreve.
 - Player e download por IDs; o browser nunca envia caminhos.
 - Custo do render local: R$0,00, sem alterar orçamento.
+
+## Lote 4 — narração real
+- CreativePlan → estimativa de áudio (caracteres do texto FALADO × preço oficial do modelo) → aprovação/orçamento existentes → ElevenLabs (`AUDIO_PROVIDER=elevenlabs`) → áudio + timing por caractere → palavras → legendas sincronizadas → RenderManifest → Remotion → MP4 com narração (AAC).
+- Narração CONTÍNUA por criativo (uma chamada), em pt-BR, com perfil de voz escolhido pelo usuário (SpeakerProfile, independente do voiceId do provider).
+- Texto normalizado para fala ("R$ 79,90" → "setenta e nove reais e noventa centavos"); a legenda mostra o texto escrito.
+- Sem timing confiável: legendas estimadas do Lote 3, com aviso.
+- AudioFit: fala real × duração planejada (fits / too_short / too_long). Pouco mais longa: o fim é estendido localmente. Muito mais longa: revisão explícita. Nunca corta fala, nunca regera sozinho.
+- Custo real e request id no ledger; toda tentativa cobrada fica registrada, inclusive as descartadas. Regenerar a narração é explícito, cria nova versão e novo custo.
+- Áudio versionado fora do git (`outputs/audio/...`), servido por IDs; asset reutilizável (Remotion hoje; lip sync/avatar/vídeo generativo no futuro).
+- Mock continua funcionando sem chaves ("MODO DE TESTE", sem som).
+
+## Fora do escopo do Lote 4
+Vídeo IA real, avatar/apresentador, voice cloning, lip sync, publicação/TikTok API, banco/fila externos.
 
 ## Fora do escopo do Lote 3
 Vídeo/áudio reais (ElevenLabs, Veo, Runway, Kling), TTS, publicação/TikTok API, analytics, banco/fila externos, render em nuvem (Lambda) e qualquer chamada paga nova.

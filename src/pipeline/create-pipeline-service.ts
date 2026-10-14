@@ -4,7 +4,7 @@ import { LlmCreativePlanner } from "@/ai/llm-planner";
 import { UnavailablePlanner } from "@/ai/unavailable-planner";
 import { MockCreativePlanner } from "@/ai/mock-planner";
 import type { CreativePlanner } from "@/ai/planner";
-import { readRemotionLicenseKey, type AppConfig } from "@/config/env";
+import { readElevenLabsApiKey, readRemotionLicenseKey, type AppConfig } from "@/config/env";
 import { PRICING_TABLE } from "@/config/pricing";
 import { StaticExchangeRateProvider } from "@/costs/exchange-rate";
 import { InMemoryCostLedger } from "@/costs/ledger";
@@ -15,6 +15,7 @@ import { createAudioProviderFactory } from "@/providers/audio";
 import { DEFAULT_POLL_OPTIONS } from "@/providers/poll";
 import { createVideoProviderFactory } from "@/providers/video";
 import { createRenderer } from "@/render/create-renderer";
+import { LocalAudioAssetStore } from "@/storage/audio-asset-store";
 import { FileCostLedger } from "@/storage/file-cost-ledger";
 import { FilePipelineStore } from "@/storage/file-pipeline-store";
 import { FileLlmCallLog, InMemoryLlmCallLog } from "@/storage/llm-call-log";
@@ -54,7 +55,8 @@ function createStorage(config: AppConfig): Pick<PipelineDeps, "store" | "ledger"
 
 /**
  * Raiz de composição: o ÚNICO lugar que escolhe implementações concretas.
- * Planner mock ou Claude (LLM_PROVIDER); renderer mock ou Remotion (RENDERER); mídia continua mock;
+ * Planner mock ou Claude (LLM_PROVIDER); renderer mock ou Remotion (RENDERER); áudio mock ou
+ * ElevenLabs (AUDIO_PROVIDER); vídeo continua mock;
  * persistência local em arquivos (STORAGE=file, padrão) ou memória.
  */
 export function createPipelineService(
@@ -66,10 +68,14 @@ export function createPipelineService(
   return new PipelineService({
     planner: overrides.planner ?? createPlanner(config, ids, env),
     videoProviderFactory: createVideoProviderFactory(config.videoProvider),
-    audioProviderFactory: createAudioProviderFactory(config.audioProvider),
+    audioProviderFactory: createAudioProviderFactory(config.audioProvider, {
+      elevenLabsApiKey: readElevenLabsApiKey(env),
+      ttsTimeoutMs: config.ttsTimeoutMs,
+    }),
+    audioAssets: new LocalAudioAssetStore(config.audioDir),
     renderer: createRenderer(config.renderer.id, {
       rendersDir: config.rendersDir,
-      allowedAssetRoots: [config.uploadsDir],
+      allowedAssetRoots: [config.uploadsDir, config.audioDir],
       concurrency: config.renderer.concurrency,
       debug: config.renderer.debug,
       browserExecutable: config.renderer.browserExecutable,

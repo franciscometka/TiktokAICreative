@@ -10,7 +10,8 @@ import type {
   PricingUnit,
   ProviderPricing,
 } from "@/domain/cost";
-import { generatedVideoSeconds, narrationCharacters, type CreativePlan, type ScenePlan } from "@/domain/creative";
+import { generatedVideoSeconds, type CreativePlan, type ScenePlan } from "@/domain/creative";
+import { spokenNarrationCharacters } from "@/speech/narration-script";
 import type { TokenUsage } from "@/domain/llm";
 import type { PricingRef, QualitySettings } from "@/domain/quality";
 import { roundBrl, roundUsd, usdToBrl } from "@/lib/money";
@@ -211,7 +212,8 @@ export function sceneVideoUsage(scene: Pick<ScenePlan, "estimatedGenerationSecon
 }
 
 export function narrationUsage(plan: Pick<CreativePlan, "scenes" | "duration">): Usage {
-  return { characters: narrationCharacters(plan), seconds: plan.duration, generations: 1 };
+  // Caracteres do texto FALADO (narração contínua normalizada): é o que o TTS cobra.
+  return { characters: spokenNarrationCharacters(plan), seconds: plan.duration, generations: 1 };
 }
 
 export function renderUsage(plan: Pick<CreativePlan, "duration">): Usage {

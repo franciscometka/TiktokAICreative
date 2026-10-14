@@ -27,6 +27,7 @@ import {
   TRANSITION_NAMES,
   VISUAL_SOURCE_NAMES,
 } from "./labels";
+import { buildNarrationView, type AudioProviderId, type NarrationView } from "./narration-view";
 import { planningUserError, type UserError } from "./user-errors";
 
 /**
@@ -140,6 +141,8 @@ export interface CreativeView {
   /** Último render que falhou depois do último sucesso (para mostrar o erro). */
   lastRenderError: string | undefined;
   canRerender: boolean;
+  /** Narração (Lote 4): voz, provider, custo estimado × real, status, encaixe, player. */
+  narration: NarrationView;
   error: string | undefined;
   canApprove: boolean;
   canCancel: boolean;
@@ -205,7 +208,7 @@ export function campaignState(campaign: Campaign, planningActive: boolean): Camp
 }
 
 const APPROVABLE: readonly JobStatus[] = ["cost_estimated", "awaiting_approval"];
-const CANCELLABLE: readonly JobStatus[] = ["planned", "cost_estimated", "awaiting_approval", "budget_exceeded"];
+const CANCELLABLE: readonly JobStatus[] = ["planned", "cost_estimated", "awaiting_approval", "budget_exceeded", "audio_review"];
 /** Jobs cujo custo futuro ainda pode acontecer (entram no "projetado" da campanha). */
 const PENDING_FUTURE: readonly JobStatus[] = ["planned", "cost_estimated", "awaiting_approval", "budget_exceeded"];
 
@@ -257,6 +260,7 @@ function creativeView(
   job: GenerationJob | undefined,
   jobActual: ActualCostSummary | undefined,
   activity: JobActivity | undefined,
+  audioProvider: AudioProviderId,
 ): CreativeView {
   const review = campaign.reviews?.find((r) => r.creativeId === creative.id);
   const status = job?.status;
@@ -328,6 +332,7 @@ function creativeView(
       job !== undefined &&
       job.approval !== undefined &&
       (interrupted || ((status === "completed" || status === "failed") && mediaComplete(job))),
+    narration: buildNarrationView({ campaign, job, jobActual, active, configuredProvider: audioProvider }),
     canApprove: status !== undefined && APPROVABLE.includes(status) && job?.estimate !== undefined,
     canCancel: status !== undefined && CANCELLABLE.includes(status),
   };
@@ -341,6 +346,8 @@ export interface BuildCampaignViewInput {
   jobActuals: ReadonlyMap<string, ActualCostSummary>;
   /** Execução de cada job neste processo (para "interrompido" e progresso). */
   jobActivity?: ReadonlyMap<string, JobActivity>;
+  /** Provider de narração configurado (antes da primeira geração). */
+  audioProvider?: AudioProviderId;
 }
 
 export function buildCampaignView({
@@ -350,6 +357,7 @@ export function buildCampaignView({
   campaignActual,
   jobActuals,
   jobActivity = new Map(),
+  audioProvider = "mock",
 }: BuildCampaignViewInput): CampaignView {
   const state = campaignState(campaign, planningActive);
   const request = campaign.request;
@@ -366,6 +374,7 @@ export function buildCampaignView({
       job,
       job ? jobActuals.get(job.id) : undefined,
       job ? jobActivity.get(job.id) : undefined,
+      audioProvider,
     );
   });
 

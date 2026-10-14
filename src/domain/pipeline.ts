@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { NarrationInfoSchema } from "./audio";
 import { CampaignPlanSchema } from "./campaign";
 import {
   BudgetExceededDecisionSchema,
@@ -31,6 +32,8 @@ export const JOB_STATUSES = [
   "awaiting_approval",
   "generating",
   "budget_exceeded",
+  /** Narração real bem mais longa que o planejado: espera decisão explícita (Lote 4). */
+  "audio_review",
   "rendering",
   "completed",
   "failed",
@@ -55,6 +58,8 @@ export const CampaignRequestSchema = z.object({
   /** Obrigatório quando quality = "custom". */
   customSettings: QualitySettingsSchema.optional(),
   budget: CostBudgetSchema,
+  /** Perfil de voz da narração (config/voices.ts). Ausente = perfil padrão. */
+  speakerProfileId: z.string().optional(),
 });
 export type CampaignRequest = z.infer<typeof CampaignRequestSchema>;
 
@@ -122,6 +127,8 @@ export const MediaAttemptSchema = z.object({
   durationSeconds: z.number().nonnegative().optional(),
   isMock: z.boolean(),
   error: z.string().optional(),
+  /** Só em tentativas de áudio (Lote 4+): voz, request id, versão, timing e AudioFit. */
+  narration: NarrationInfoSchema.optional(),
   createdAt: nonEmpty,
 });
 export type MediaAttempt = z.infer<typeof MediaAttemptSchema>;

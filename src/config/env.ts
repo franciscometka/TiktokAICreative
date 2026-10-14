@@ -15,6 +15,9 @@ export const DEFAULT_MAX_ATTEMPTS_PER_SCENE = 3;
 export const DEFAULT_UPLOADS_DIR = "outputs/uploads";
 /** Vídeos renderizados: <RENDERS_DIR>/<campaignId>/<creativeId>/v<N>/final.mp4 */
 export const DEFAULT_RENDERS_DIR = "outputs/renders";
+/** Narrações: <AUDIO_DIR>/<campaignId>/<creativeId>/v<N>/{narration.mp3, timing.json, metadata.json} */
+export const DEFAULT_AUDIO_DIR = "outputs/audio";
+export const DEFAULT_TTS_TIMEOUT_MS = 60_000;
 
 /** Renderer: "mock" (padrão; não gera arquivo) ou "remotion" (MP4 real, local, sem custo de API). */
 export const RENDERER_IDS = ["mock", "remotion"] as const;
@@ -28,10 +31,10 @@ export const DEFAULT_LLM_POLICY = {
   timeoutMs: 600_000,
 } as const;
 
-/** Providers disponíveis. Vídeo/áudio só têm mock nesta fase. */
+/** Providers disponíveis. Vídeo só tem mock; áudio: mock ou ElevenLabs (Lote 4). */
 export const LLM_PROVIDER_IDS = ["mock", "anthropic"] as const;
 export const VIDEO_PROVIDER_IDS = ["mock"] as const;
-export const AUDIO_PROVIDER_IDS = ["mock"] as const;
+export const AUDIO_PROVIDER_IDS = ["mock", "elevenlabs"] as const;
 
 const emptyToUndefined = (value: unknown) =>
   typeof value === "string" && value.trim() === "" ? undefined : value;
@@ -57,6 +60,8 @@ const EnvSchema = z.object({
   DATA_DIR: z.preprocess(emptyToUndefined, z.string().default("data")),
   UPLOADS_DIR: z.preprocess(emptyToUndefined, z.string().default(DEFAULT_UPLOADS_DIR)),
   RENDERS_DIR: z.preprocess(emptyToUndefined, z.string().default(DEFAULT_RENDERS_DIR)),
+  AUDIO_DIR: z.preprocess(emptyToUndefined, z.string().default(DEFAULT_AUDIO_DIR)),
+  TTS_TIMEOUT_MS: z.preprocess(emptyToUndefined, z.coerce.number().int().min(5_000).max(300_000).default(DEFAULT_TTS_TIMEOUT_MS)),
   RENDERER: z.preprocess(emptyToUndefined, z.enum(RENDERER_IDS).default("mock")),
   RENDER_CONCURRENCY: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(16).optional()),
   RENDER_DEBUG: z.preprocess(emptyToUndefined, z.enum(["true", "false"]).default("false")),
@@ -83,6 +88,9 @@ export interface AppConfig {
   dataDir: string;
   uploadsDir: string;
   rendersDir: string;
+  audioDir: string;
+  /** Timeout de UMA chamada de TTS (sem retry automático). */
+  ttsTimeoutMs: number;
   renderer: {
     id: (typeof RENDERER_IDS)[number];
     concurrency: number | null;
@@ -123,6 +131,8 @@ export function loadAppConfig(
     dataDir: e.DATA_DIR,
     uploadsDir: e.UPLOADS_DIR,
     rendersDir: e.RENDERS_DIR,
+    audioDir: e.AUDIO_DIR,
+    ttsTimeoutMs: e.TTS_TIMEOUT_MS,
     renderer: {
       id: e.RENDERER,
       concurrency: e.RENDER_CONCURRENCY ?? null,
@@ -157,6 +167,15 @@ export function readAnthropicApiKey(env: Record<string, string | undefined> = pr
  * Chave de licença do Remotion (Company License), lida SOMENTE do ambiente pela fábrica do
  * renderer. Ausente = nenhuma telemetria de licença é enviada. Nunca logar nem enviar ao browser.
  */
+/**
+ * Lê a API key da ElevenLabs SOMENTE do ambiente, pela fábrica do provider de áudio (servidor).
+ * Nunca logar, nunca serializar, nunca enviar ao browser.
+ */
+export function readElevenLabsApiKey(env: Record<string, string | undefined> = process.env): string | undefined {
+  const key = env.ELEVENLABS_API_KEY?.trim();
+  return key ? key : undefined;
+}
+
 export function readRemotionLicenseKey(env: Record<string, string | undefined> = process.env): string | null {
   const key = env.REMOTION_LICENSE_KEY?.trim();
   return key ? key : null;

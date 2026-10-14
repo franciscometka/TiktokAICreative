@@ -35,7 +35,7 @@ async function setup(storage?: HarnessOptions["storage"], ids?: HarnessOptions["
   let planner!: GatedPlanner;
   const h = createHarness({ planner: (gen) => (planner = new GatedPlanner(gen)), storage, ids });
   const { uploads } = await tempUploads();
-  const deps: AppDeps = { service: h.service, uploads, rendersDir: "outputs/renders" };
+  const deps: AppDeps = { service: h.service, uploads, rendersDir: "outputs/renders", audioDir: "outputs/audio" };
   return { h, planner, deps, uploads };
 }
 
@@ -85,7 +85,7 @@ describe("criar campanha (action)", () => {
   it("recusa antes de criar a campanha quando o Claude não está configurado", async () => {
     const h = createHarness({ planner: () => new UnavailablePlanner("anthropic", new LlmError("missing_credentials")) });
     const { uploads } = await tempUploads();
-    const deps = { service: h.service, uploads, rendersDir: "outputs/renders" };
+    const deps = { service: h.service, uploads, rendersDir: "outputs/renders", audioDir: "outputs/audio" };
     const result = await startCampaignPlanning(deps, formInput());
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe("not_configured");

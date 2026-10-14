@@ -8,10 +8,10 @@ produto → análise/hooks/conceitos/roteiro/cenas (Claude) → validação + aj
 Custo é preocupação central; nada pago de mídia acontece sem aprovação explícita.
 
 ## Estado atual
-- Lotes 0, 1, 2 e 3 concluídos. Lote 2 = experiência `/create` → `/campaigns/[id]` (planejar, revisar, custo, aprovar). Lote 3 = render real do MP4 com Remotion (local, R$0).
+- Lotes 0 a 4 concluídos. Lote 4 = narração real pt-BR com ElevenLabs (opcional), legendas com timing real, AudioFit/revisão, áudio versionado e MP4 com AAC. Lote 2 = experiência `/create` → `/campaigns/[id]` (planejar, revisar, custo, aprovar). Lote 3 = render real do MP4 com Remotion (local, R$0).
 - Planejamento: `LLM_PROVIDER=mock` (padrão, sem custo) ou `anthropic` (Claude real, pago).
-- Renderer: `RENDERER=mock` (padrão, sem arquivo) ou `remotion` (MP4 real). Vídeo IA e áudio continuam **mocks**: placeholder "MOCK · VÍDEO IA" e vídeo sem som.
-- Prompt `campaign-plan@1.0.0` validado com o Claude real em 2026-10-14 (economy, 1 criativo, válido na 1ª tentativa, US$0,0414). Antes de mídia real, aplicar as regras de conteúdo da D42 (`campaign-plan@1.0.1`).
+- Renderer: `RENDERER=mock` (padrão, sem arquivo) ou `remotion` (MP4 real). Narração: `AUDIO_PROVIDER=mock` (padrão, "MODO DE TESTE", sem som) ou `elevenlabs` (real, paga). Vídeo IA continua **mock** (placeholder "MOCK · VÍDEO IA").
+- Prompt ativo: `campaign-plan@1.0.1` (1.0.0 + regras da D42). A 1.0.0 foi validada com o Claude real em 2026-10-14; a 1.0.1 ainda não. ElevenLabs validada só com transporte falso (sem chave neste ambiente).
 - **Não avance de lote sem instrução do usuário.** Ver `docs/TASKS.md`.
 
 ## Comandos
@@ -24,6 +24,7 @@ npm run check             # lint + typecheck + test (obrigatório antes de encer
 npm run build             # build de produção
 npm run plan:real         # validação manual com Claude real: sem --confirm só mostra o pior caso
 npm run test:integration  # testes PAGOS; só rodam com RUN_PAID_TESTS=1 e ANTHROPIC_API_KEY
+npm run tts:real          # validação manual ElevenLabs: sem --confirm só mostra custo; com --confirm UMA chamada curta
 npm run render:setup      # baixa o Chrome Headless Shell do Remotion (1× por máquina)
 npm run test:render       # teste PESADO: MP4 real de 3s (fora do npm test e do check)
 ```
@@ -38,7 +39,10 @@ Para ver a tela de processamento com o mock: `MOCK_PLANNER_DELAY_MS=20000` em `.
 - `src/config/` — env validado, `llm-models.ts` (**único lugar com IDs de modelo Claude**), `pricing.ts` (**único lugar com preços**), `quality-presets.ts`.
 - `src/costs/` — cálculo puro, orçamento puro, `plan-evaluation.ts` (limite de segundos de IA), ledger, catálogo, câmbio.
 - `src/ai/` — `LlmClient` (abstrato), `anthropic/` (**único lugar que importa `@anthropic-ai/sdk`**), prompts versionados em `ai/prompts/`, `runStructuredPrompt`, `LlmCreativePlanner`, `MockCreativePlanner`.
-- `src/providers/` — `VideoProvider`/`AudioProvider`, mocks, factories, polling com limite.
+- `src/providers/` — `VideoProvider`/`AudioProvider`, mocks, factories, polling com limite; `audio/elevenlabs-audio-provider.ts` (**único lugar que conhece a ElevenLabs**).
+- `src/speech/` — narração pura: texto falado pt-BR (`narration-script.ts`), alinhamento → palavras (`alignment.ts`), legendas com timing (`timed-captions.ts`), `audio-fit.ts`.
+- `src/config/tts-models.ts` (**único lugar com IDs de modelo TTS**), `config/voices.ts` (SpeakerProfiles + mapa de vozes), `config/audio-policy.ts` (limites do AudioFit).
+- `src/storage/audio-asset-store.ts` — narrações versionadas em `AUDIO_DIR`; rota `src/app/api/audio/...`.
 - `src/pipeline/` — estados, guards, contexto de orçamento, `PipelineService`, raiz de composição.
 - `src/storage/` — `FilePipelineStore`, `FileCostLedger`, `FileLlmCallLog` (JSON/JSONL atômicos em `DATA_DIR`), `LocalUploadStore` (`UPLOADS_DIR`) e versões em memória.
 - `src/render/` — `buildRenderManifest`, `timeline`, `captions`, `scene-strategy`, `composition-props` (puros); `AssetResolver`; `output-paths` (versões vN); `createRenderer` (**único lugar que escolhe o renderer**); `remotion/` (`RemotionRenderer`, servidor de assets; **único lugar do app que importa `@remotion/*`**).
@@ -91,6 +95,13 @@ Para ver a tela de processamento com o mock: `MOCK_PLANNER_DELAY_MS=20000` em `.
 - Mudou `remotion/`? Reinicie o servidor (bundle em cache por processo). Windows com pasta funda: `RENDER_BROWSER_EXECUTABLE` (D53).
 - Licença do Remotion: empresas com mais de 3 pessoas precisam da Company License (D54).
 
+## Narração (Lote 4)
+- Narração CONTÍNUA por criativo (D55): uma chamada, um timing. Texto enviado = texto FALADO normalizado; a legenda usa o escrito (D59).
+- Estimativa por caracteres falados × preço oficial; custo real = `character-cost` do provider. Toda tentativa cobrada vai ao ledger.
+- Sem retry automático (nem de transporte). Timeout: tentativa falha com aviso de possível cobrança.
+- Fala muito mais longa → `audio_review` (aceitar/gerar de novo/cancelar). Nunca cortar fala; nunca regerar sozinho (D61).
+- Áudio é asset independente do renderer (`AudioAssetStore`), versionado, servido por IDs.
+
 ## Padrões
 - TypeScript estrito. `import type` para tipos (lint exige).
 - Funções puras para regras; serviços orquestram I/O; injeção de dependência (clock, ids, store, ledger, llm).
@@ -110,6 +121,8 @@ Para ver a tela de processamento com o mock: `MOCK_PLANNER_DELAY_MS=20000` em `.
 - Não apagar/editar custos (ledger append-only).
 - Não logar, serializar ou enviar ao browser a `ANTHROPIC_API_KEY`; não commitar `.env*` nem `data/`.
 - Não adicionar banco externo, integração TikTok, providers de mídia reais, TTS ou render em nuvem sem instrução do lote.
+- Não chamar a ElevenLabs fora de `ElevenLabsAudioProvider`; não espalhar IDs de modelo TTS/voz fora de `config/tts-models.ts`/`config/voices.ts`; não deixar estruturas da ElevenLabs saírem do provider.
+- Não logar, serializar ou enviar ao browser a `ELEVENLABS_API_KEY` nem voiceIds; não usar Web Speech/TTS improvisado.
 - Não importar `@remotion/*` fora de `src/render/remotion/` (e `scripts/render-setup.ts`); não usar `@/` dentro de `remotion/`.
 - Não sobrescrever nem apagar renders; não servir arquivo de render que não esteja registrado no job; não aceitar caminho de render vindo do browser.
 - Não apresentar placeholder como vídeo gerado; não sintetizar voz (Web Speech/TTS) nem inventar progresso de render.

@@ -76,14 +76,28 @@ Conclusão: o prompt `campaign-plan@1.0.0` funciona estruturalmente (schema, lim
 - Player (`Range` 206), download (`attachment`), avisos (3 cenas de IA em placeholder + sem áudio). Layout conferido em 1440, 768 e 375 px sem rolagem horizontal.
 - Frames inspecionados: hook, placeholder marcado, imagem sem distorção, legendas legíveis, CTA com nome/preço uma vez, tudo dentro das safe areas.
 
+## Lote 4 — Narração real com ElevenLabs ✅
+- [x] Prompt `campaign-plan@1.0.1` (regras da D42), ativo; sem chamada à Anthropic (D65)
+- [x] `ElevenLabsAudioProvider` isolado (`/with-timestamps`, sem SDK, sem retry), `AUDIO_PROVIDER=mock|elevenlabs`, `ELEVENLABS_API_KEY` só no servidor (D56)
+- [x] Modelos por preset em `config/tts-models.ts` (Flash v2.5 / Multilingual v2) e preço OFICIAL em `pricing.ts` (D57)
+- [x] `SpeakerProfile` + 4 vozes pt-BR com nomes amigáveis; escolha no wizard (D58)
+- [x] Narração contínua por criativo (D55) com texto falado normalizado pt-BR ligado ao texto escrito (D59)
+- [x] Timing real → `TimedWord` → `TimedCaption`; legendas sincronizadas; fallback estimado com aviso (D60)
+- [x] AudioFit + estado `audio_review` (aceitar / gerar de novo / cancelar); extensão local do fim (D61)
+- [x] Custo estimado antes, custo real + request id no ledger depois; regeneração explícita com orçamento e limite (D62)
+- [x] Áudio versionado em `outputs/audio/...` (mp3 + timing + metadata), rota `/api/audio/...` por IDs (D63)
+- [x] Remotion com `<Audio>` → MP4 com AAC; sem áudio continua como no Lote 3 (D64)
+- [x] UI: voz, provider ("MODO DE TESTE" / "Narração real · ElevenLabs"), custo estimado × real, status, encaixe, player, gerar de novo
+- [x] Testes: provider com transporte falso, config/modelos, SpeakerProfile, pricing, usage/request id, erros, timestamps, alinhamento → palavras → legendas, pt-BR/pontuação, "R$ 79,90", AudioFit, orçamento, sem retry pago, ledger, versionamento, traversal, Remotion com e sem áudio, mock; `npm test` com rede bloqueada (D66)
+- [x] `npm run tts:real` (sem `--confirm` não chama; com `--confirm`, UMA chamada curta)
+- [x] `npm run test:render` com fixture WAV local: MP4 com trilha AAC sem usar ElevenLabs
+
+### Validação do Lote 4 (2026-10-14)
+- Sem `ELEVENLABS_API_KEY` neste ambiente: **nenhuma chamada real à ElevenLabs foi feita**. O provider foi validado com transporte falso (formato oficial da API) e o MP4 com áudio foi validado com fixture local.
+- `npm run tts:real` (sem `--confirm`): Clara → "Sarah", `eleven_flash_v2_5`, 169 caracteres falados, US$0,00676 ≈ R$0,04.
+- Pendente com autorização: UMA `npm run tts:real -- --confirm` para conferir voz/sotaque, `character-cost` e alinhamento reais.
+
 ## Roadmap (próximos lotes — não iniciar sem autorização)
-
-### Pré-requisito antes de mídia real (Lotes 4 e 5)
-- [ ] Prompt `campaign-plan@1.0.1` com as regras de conteúdo da D42: (1) não inventar experiência pessoal, depoimento ou teste feito pelo narrador/ator; (2) não transformar alegações temporais ou características informadas pelo vendedor em falsa prova visual. Correção mínima, com testes do texto do prompt; nova validação real só com autorização.
-
-### Lote 4 — Áudio real (ex.: ElevenLabs)
-- [ ] `AudioProvider` real + preço oficial (remove o placeholder de áudio)
-- [ ] Mixar a narração no render (`<Audio>`), legendas com timing real da fala
 
 ### Lote 5 — Primeiro provider de vídeo real (ex.: Veo/Runway/Kling)
 - [ ] `VideoProvider` real + preço oficial; vídeo real substitui o placeholder no nível do asset
@@ -112,7 +126,15 @@ Conclusão: o prompt `campaign-plan@1.0.0` funciona estruturalmente (schema, lim
 - Fallbacks server-side da Anthropic não habilitados (decisão de custo); recusa vira erro tipado.
 - Re-estimativa após falha recalcula o criativo inteiro; mocks retornam URIs `mock://`; cotação estática.
 - Prompt `campaign-plan@1.0.0` validado só com 1 criativo no preset economy; high/premium e vários criativos ainda não foram testados com o modelo real.
-- Prompt ainda sem as regras de conteúdo da D42 (pendente para `1.0.1`, antes de mídia real).
+- `campaign-plan@1.0.1` ainda não validado com o Claude real (só testes do texto do prompt).
+- ElevenLabs validada só com transporte falso; voz/sotaque e headers reais pendentes de UMA validação (`tts:real -- --confirm`).
+- Vozes são premade multilíngues (sotaque pode não ser brasileiro nativo); trocar por vozes pt-BR da Voice Library.
+- Timeout de TTS: a chamada pode ter sido cobrada sem registro (não sabemos o `usage`); a mensagem avisa e nada é re-tentado.
+- Preço de API (USD) ≠ consumo de créditos de assinatura; o ledger usa o preço de API.
+- Regenerar narração refaz o criativo inteiro (narração contínua, D55); não há regeneração parcial por cena.
+- Normalização pt-BR cobre dinheiro, números, unidades comuns e %; datas, horas "10:30", siglas e números ordinais seguem como escritos.
+- Legendas são cortadas quando o CTA entra (mesma faixa da tela), mesmo com a fala continuando.
+- Narração não é refeita quando o plano muda depois da geração (exige nova estimativa/aprovação, como antes).
 - AUTO envia todos os formatos ao prompt sem instrução extra de "escolha os melhores" (pode entrar junto com a `1.0.1`).
 - Uploads órfãos (imagens enviadas sem campanha planejada) não são limpos automaticamente.
 - Sem testes de componentes React (só lógica em `application/`); o fluxo visual foi verificado manualmente.

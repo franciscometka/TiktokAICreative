@@ -1,4 +1,4 @@
-import { AbsoluteFill, Sequence } from "remotion";
+import { AbsoluteFill, Audio, Sequence } from "remotion";
 import { CallToAction } from "../components/CallToAction";
 import { Captions } from "../components/Caption";
 import { Headline } from "../components/Headline";
@@ -13,10 +13,10 @@ loadFonts();
 
 /**
  * Anúncio vertical 1080x1920. Toda a linha do tempo vem pronta nas props (frames).
- * Camadas: cenas → texto da cena → hook → legendas → CTA → barra de progresso.
+ * Camadas: cenas → texto da cena → hook → legendas → CTA → barra de progresso; narração (quando real).
  */
 export function TikTokCreative(props: CreativeProps) {
-  const { scenes, captions, hook, cta, product, durationInFrames } = props;
+  const { scenes, captions, hook, cta, product, durationInFrames, audio } = props;
 
   return (
     <AbsoluteFill style={{ backgroundColor: COLORS.ink, fontFamily: FONT.family }}>
@@ -64,6 +64,12 @@ export function TikTokCreative(props: CreativeProps) {
       </Sequence>
 
       <ProgressBar />
+
+      {audio.map((track, i) => (
+        <Sequence key={`audio-${i}`} from={track.startFrame} name={`Narração ${i + 1}`} layout="none">
+          <Audio src={track.src} />
+        </Sequence>
+      ))}
     </AbsoluteFill>
   );
 }

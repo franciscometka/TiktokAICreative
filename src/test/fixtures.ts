@@ -1,3 +1,5 @@
+import type { AudioProvider } from "@/providers/audio/audio-provider";
+import { InMemoryAudioAssetStore, type AudioAssetStore } from "@/storage/audio-asset-store";
 import { MockCreativePlanner } from "@/ai/mock-planner";
 import { PRICING_TABLE } from "@/config/pricing";
 import { QUALITY_PRESETS } from "@/config/quality-presets";
@@ -130,6 +132,9 @@ export interface HarnessOptions {
   ids?: IdGenerator;
   /** Renderer controlável (testes de render em andamento/falha). Padrão: MockRenderer. */
   renderer?: Renderer;
+  /** Provider de áudio próprio (ex.: ElevenLabs com transporte falso). Padrão: MockAudioProvider. */
+  audioProvider?: (pricing: ProviderPricing) => AudioProvider;
+  audioAssets?: AudioAssetStore;
 }
 
 /** Pipeline completo com mocks compartilhados para inspeção nos testes. */
@@ -139,6 +144,7 @@ export function createHarness(options: HarnessOptions = {}) {
   const video = new MockVideoProvider({ pricing: catalog.requireOne(settings.video), ...options.video });
   const audio = new MockAudioProvider({ pricing: catalog.requireOne(settings.audio), ...options.audio });
   const renderer = options.renderer ?? new MockRenderer();
+  const audioAssets = options.audioAssets ?? new InMemoryAudioAssetStore();
   const { store, ledger, llmCallLog } = options.storage ?? {
     store: new InMemoryPipelineStore(),
     ledger: new InMemoryCostLedger(),
@@ -148,7 +154,8 @@ export function createHarness(options: HarnessOptions = {}) {
     planner: options.planner ? options.planner(ids) : new MockCreativePlanner(ids),
     llmCallLog,
     videoProviderFactory: () => video,
-    audioProviderFactory: () => audio,
+    audioProviderFactory: options.audioProvider ?? (() => audio),
+    audioAssets,
     renderer,
     store,
     ledger,
@@ -160,5 +167,5 @@ export function createHarness(options: HarnessOptions = {}) {
     clock: fixedClock(),
     ids,
   });
-  return { service, video, audio, renderer, store, ledger, llmCallLog, settings, ids };
+  return { service, video, audio, renderer, store, ledger, llmCallLog, settings, ids, audioAssets };
 }

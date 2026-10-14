@@ -40,6 +40,10 @@ export const ManifestAudioSchema = z.object({
   uri: nonEmpty,
   startSeconds: seconds,
   durationSeconds: seconds,
+  /** true = áudio simulado (mock://): o renderer não inclui trilha. Ausente em manifests antigos. */
+  isMock: z.boolean().optional(),
+  /** Fim da última palavra (s), quando há timing real. */
+  speechEndSeconds: seconds.optional(),
 });
 export type ManifestAudio = z.infer<typeof ManifestAudioSchema>;
 
@@ -56,6 +60,10 @@ export const RENDER_WARNING_CODES = [
   "asset_not_provided",
   "asset_file_missing",
   "audio_unavailable",
+  /** Narração real sem timing confiável: legendas estimadas (fallback do Lote 3). */
+  "captions_estimated",
+  /** Fala real mais longa que o plano: o fim do vídeo foi estendido (sem cortar fala). */
+  "timeline_extended",
 ] as const;
 export const RenderWarningCodeSchema = z.enum(RENDER_WARNING_CODES);
 export type RenderWarningCode = z.infer<typeof RenderWarningCodeSchema>;
@@ -75,6 +83,10 @@ export const RenderManifestSchema = z.object({
   assets: z.array(ManifestAssetSchema).min(1),
   audio: z.array(ManifestAudioSchema),
   captions: z.array(ManifestCaptionSchema),
+  /** "alignment" = legendas com o tempo REAL da fala; "estimated" = distribuídas pela cena (Lote 3). */
+  captionSource: z.enum(["alignment", "estimated"]).default("estimated"),
+  /** Segundos acrescentados ao fim para a narração caber inteira (0 = duração do plano). */
+  extendedSeconds: seconds.default(0),
   overlays: z.object({
     productName: nonEmpty,
     priceBrl: z.number().positive().optional(),

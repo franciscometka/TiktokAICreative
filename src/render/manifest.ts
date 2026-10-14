@@ -7,6 +7,8 @@ import {
   type RenderManifest,
   type RenderWarning,
 } from "@/domain/render";
+import type { NarrationTiming } from "@/domain/audio";
+import { captionsFromWords } from "@/speech/timed-captions";
 import { segmentNarration } from "./captions";
 import { sceneStrategy } from "./scene-strategy";
 
@@ -20,7 +22,15 @@ export interface BuildManifestInput {
   product: ProductInput;
   /** sceneId → URI do vídeo gerado ATIVO daquela cena (pode ser "mock://..."). */
   sceneVideos: ReadonlyMap<string, string>;
-  narration?: { uri: string; durationSeconds: number };
+  narration?: {
+    uri: string;
+    durationSeconds: number;
+    isMock?: boolean;
+    /** Timing real da fala (Lote 4). Ausente = legendas estimadas por cena. */
+    timing?: NarrationTiming;
+    /** Segundos a acrescentar no fim para a fala caber (AudioFit). Nunca corta fala. */
+    extendSeconds?: number;
+  };
   outputDir: string;
 }
 
@@ -67,19 +77,45 @@ export function buildRenderManifest(input: BuildManifestInput): RenderManifest {
     return { ...base, kind: "text_card", uri: null, motion: scene.motion };
   });
 
-  const captions = plan.scenes.flatMap((scene, i) => {
-    const start = assets[i]?.startSeconds ?? 0;
-    return segmentNarration(scene.narration, start, start + scene.duration);
-  });
+  // Fala real mais longa que o plano: estende a ÚLTIMA cena (o CTA) — a narração nunca é cortada.
+  const extendedSeconds = Math.max(0, Math.round((input.narration?.extendSeconds ?? 0) * 1000) / 1000);
+  const last = assets[assets.length - 1];
+  if (extendedSeconds > 0 && last) {
+    last.durationSeconds = Math.round((last.durationSeconds + extendedSeconds) * 1000) / 1000;
+    warnings.push({ sceneId: last.sceneId, code: "timeline_extended", message: `Narração real mais longa que o plano: o fim do vídeo ganhou ${extendedSeconds.toFixed(1).replace(".", ",")}s.` });
+  }
+
+  const timing = input.narration?.timing;
+  const realAudio = input.narration !== undefined && input.narration.isMock === false;
+  if (realAudio && !timing) {
+    warnings.push({ sceneId: null, code: "captions_estimated", message: "Narração real sem timing confiável: legendas estimadas por cena." });
+  }
+  const captions = timing
+    ? captionsFromWords(timing.words)
+    : plan.scenes.flatMap((scene, i) => {
+        const start = assets[i]?.startSeconds ?? 0;
+        return segmentNarration(scene.narration, start, start + scene.duration);
+      });
 
   return RenderManifestSchema.parse({
     campaignId: input.campaignId,
     creativeId: plan.id,
     assets,
     audio: input.narration
-      ? [{ kind: "narration", uri: input.narration.uri, startSeconds: 0, durationSeconds: input.narration.durationSeconds }]
+      ? [
+          {
+            kind: "narration",
+            uri: input.narration.uri,
+            startSeconds: 0,
+            durationSeconds: input.narration.durationSeconds,
+            isMock: input.narration.isMock ?? input.narration.uri.startsWith("mock://"),
+            speechEndSeconds: timing?.speechEndSeconds,
+          },
+        ]
       : [],
     captions,
+    captionSource: timing ? "alignment" : "estimated",
+    extendedSeconds,
     overlays: {
       productName: product.name,
       priceBrl: product.priceBrl,
@@ -87,7 +123,7 @@ export function buildRenderManifest(input: BuildManifestInput): RenderManifest {
       hook: plan.hook,
       benefit: product.benefits[0],
     },
-    duration: plan.duration,
+    duration: Math.round((plan.duration + extendedSeconds) * 1000) / 1000,
     generatedVideoSeconds: generatedVideoSeconds(plan),
     output: {
       ...VIDEO_FORMAT,

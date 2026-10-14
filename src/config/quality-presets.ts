@@ -1,5 +1,6 @@
 import type { GenerationQuality, QualitySettings } from "@/domain/quality";
 import { PLANNING_LLM } from "./llm-models";
+import { NARRATION_TTS } from "./tts-models";
 
 export type PresetQuality = Exclude<GenerationQuality, "custom">;
 
@@ -16,7 +17,7 @@ export const QUALITY_PRESETS: Record<PresetQuality, QualitySettings> = {
     label: "Econômico",
     description: "Para testar produtos e ideias em volume.",
     video: { provider: "unassigned-video", model: "economy-tier" },
-    audio: { provider: "unassigned-audio", model: "economy-tts" },
+    audio: NARRATION_TTS.economy,
     llm: PLANNING_LLM.economy,
     rendering: LOCAL_RENDER,
     generatedVideoSeconds: { min: 8, max: 12 },
@@ -30,7 +31,7 @@ export const QUALITY_PRESETS: Record<PresetQuality, QualitySettings> = {
     label: "Alta qualidade",
     description: "Equilíbrio entre custo e qualidade.",
     video: { provider: "unassigned-video", model: "high-tier" },
-    audio: { provider: "unassigned-audio", model: "high-tts" },
+    audio: NARRATION_TTS.high,
     llm: PLANNING_LLM.high,
     rendering: LOCAL_RENDER,
     generatedVideoSeconds: { min: 12, max: 20 },
@@ -44,7 +45,7 @@ export const QUALITY_PRESETS: Record<PresetQuality, QualitySettings> = {
     label: "Premium",
     description: "Mais vídeo gerado por IA e planejamento com o modelo mais avançado.",
     video: { provider: "unassigned-video", model: "premium-tier" },
-    audio: { provider: "unassigned-audio", model: "premium-tts" },
+    audio: NARRATION_TTS.premium,
     llm: PLANNING_LLM.premium,
     rendering: LOCAL_RENDER,
     generatedVideoSeconds: { min: 20, max: 30 },

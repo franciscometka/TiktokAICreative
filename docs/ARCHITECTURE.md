@@ -15,7 +15,10 @@ src/
                 ledger de custo real, catálogo de preços, câmbio.
   ai/           LlmClient (abstração), anthropic/ (único uso do SDK), prompts versionados,
                 saída estruturada com retry limitado, LlmCreativePlanner, MockCreativePlanner.
-  providers/    VideoProvider / AudioProvider (interfaces), mocks, factories, polling.
+  providers/    VideoProvider / AudioProvider (interfaces), mocks, factories, polling;
+                audio/elevenlabs-audio-provider.ts (único lugar que conhece a ElevenLabs), mp3.ts.
+  speech/       Narração (puro): texto falado pt-BR ligado ao escrito, alinhamento → palavras,
+                legendas com timing real, AudioFit.
   pipeline/     Máquinas de estado, guards, contexto de orçamento, PipelineService, raiz de composição.
   render/       RenderManifest (puro), timeline/captions/estratégia/props (puros), AssetResolver,
                 caminhos de saída, Renderer (interface), MockRenderer, createRenderer,
@@ -110,6 +113,25 @@ UI: AutoRefresh (polling) → getCampaignView (activity, progress real, interrup
 - `remotion/types/props.ts` é o contrato entre os dois lados (sem dependências).
 - Ver DECISIONS D43–D54.
 
+## Narração (Lote 4)
+
+```
+runGeneration (lock da campanha)
+  ├─ audioProviderFactory(preço do preset)          sem chave → job failed ANTES de qualquer chamada
+  ├─ vídeo por cena (mock) …
+  ├─ pauseIfOverBudget                               (estimativa restante × orçamento)
+  ├─ generateNarration
+  │    buildNarrationScript(cenas) → texto FALADO (pt-BR normalizado) + mapa para o escrito
+  │    provider.generateAudio(texto, voz do SpeakerProfile)     UMA chamada, sem retry
+  │    ledger ← custo real (character-cost × preço)            mesmo que salvar falhe depois
+  │    storeNarration: CharacterTiming → TimedWord[] (+ janelas por cena), AudioFit,
+  │                    AudioAssetStore.save → outputs/audio/<c>/<k>/vN/{narration.mp3,timing.json,metadata.json}
+  └─ afterNarration: fit.action = review → audio_review (espera o usuário) | senão → rendering
+renderPhase → buildRenderManifest(timing → captionsFromWords; extendSeconds no fim) → Remotion (<Audio>, AAC)
+audio_review ── acceptNarration ──▶ rendering           (sem custo; vídeo mais longo)
+completed|audio_review ── startNarrationRegeneration ──▶ generating ──▶ (nova versão vN+1)
+```
+
 ## Persistência
 
 ```
@@ -120,6 +142,8 @@ DATA_DIR/
   llm-calls.jsonl       auditoria das chamadas ao LLM
 UPLOADS_DIR/            (padrão outputs/uploads)
   <productId>/img_<uuid>.<jpg|png|webp>   imagens do produto; servidas só por GET /api/uploads/<productId>/<arquivo>
+AUDIO_DIR/              (padrão outputs/audio)
+  <campaignId>/<creativeId>/v<N>/narration.mp3 + timing.json + metadata.json   servidos só por GET /api/audio/...
 RENDERS_DIR/            (padrão outputs/renders)
   <campaignId>/<creativeId>/v<N>/final.mp4 + manifest.json   nunca sobrescritos; servidos só por GET /api/renders/...
 ```
@@ -150,8 +174,9 @@ Job (`pipeline/states.ts`):
 | planned | cost_estimated, cancelled |
 | cost_estimated | cost_estimated, awaiting_approval, cancelled |
 | awaiting_approval | generating, cost_estimated, cancelled |
-| generating | rendering, budget_exceeded, failed, cancelled, completed* |
+| generating | rendering, budget_exceeded, audio_review, failed, cancelled, completed* |
 | budget_exceeded | generating, cancelled |
+| audio_review | rendering (aceitar), generating (gerar narração de novo), cancelled |
 | rendering | completed, failed |
 | completed | generating (regeneração), rendering (renderizar de novo) |
 | failed | cost_estimated, cancelled, rendering (renderizar de novo, só com mídia completa) |

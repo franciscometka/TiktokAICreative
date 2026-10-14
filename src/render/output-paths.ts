@@ -25,16 +25,21 @@ export function renderIdFor(version: number): string {
   return `v${version}`;
 }
 
-/** Pasta de uma versão. Lança se algum ID for inválido ou o caminho escapar da raiz. */
-export function renderDir(rendersDir: string, campaignId: string, creativeId: string, renderId: string): string {
-  if (!SAFE_ENTITY_ID.test(campaignId) || !SAFE_ENTITY_ID.test(creativeId) || !RENDER_ID.test(renderId)) {
-    throw new InvalidRenderPathError("Identificador de render inválido");
+/**
+ * Pasta de uma versão: <raiz>/<campaignId>/<creativeId>/v<N>. Mesmo layout para renders (Lote 3)
+ * e narrações (Lote 4). Lança se algum ID for inválido ou o caminho escapar da raiz.
+ */
+export function versionDir(rootDir: string, campaignId: string, creativeId: string, version: string): string {
+  if (!SAFE_ENTITY_ID.test(campaignId) || !SAFE_ENTITY_ID.test(creativeId) || !RENDER_ID.test(version)) {
+    throw new InvalidRenderPathError("Identificador de versão inválido");
   }
-  const root = resolve(rendersDir);
-  const dir = resolve(root, campaignId, creativeId, renderId);
-  if (!dir.startsWith(root + sep)) throw new InvalidRenderPathError("Caminho de render fora da pasta de renders");
+  const root = resolve(rootDir);
+  const dir = resolve(root, campaignId, creativeId, version);
+  if (!dir.startsWith(root + sep)) throw new InvalidRenderPathError("Caminho fora da pasta autorizada");
   return dir;
 }
+
+export const renderDir = versionDir;
 
 /** Caminho relativo (posix) para guardar no job/manifest. */
 export function relativeRenderUri(rendersDir: string, campaignId: string, creativeId: string, renderId: string, file: string): string {
@@ -42,7 +47,7 @@ export function relativeRenderUri(rendersDir: string, campaignId: string, creati
 }
 
 /** Reserva a primeira versão livre a partir de `preferred` (criação atômica da pasta). */
-export async function allocateRenderDir(
+export async function allocateVersionDir(
   rendersDir: string,
   campaignId: string,
   creativeId: string,
@@ -63,3 +68,5 @@ export async function allocateRenderDir(
   }
   throw new InvalidRenderPathError("Sem versões de render livres");
 }
+
+export const allocateRenderDir = allocateVersionDir;

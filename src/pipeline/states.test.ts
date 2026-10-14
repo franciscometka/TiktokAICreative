@@ -21,9 +21,9 @@ describe("máquina de estados do job", () => {
     }
   });
 
-  it("NUNCA pula a aprovação: só awaiting_approval, budget_exceeded (decisão) e completed (regeneração) levam a generating", () => {
+  it("NUNCA pula a aprovação: só awaiting_approval, budget_exceeded (decisão), completed e audio_review (regeneração explícita) levam a generating", () => {
     const into = JOB_STATUSES.filter((s) => canTransitionJob(s, "generating"));
-    expect(into.sort()).toEqual(["awaiting_approval", "budget_exceeded", "completed"]);
+    expect(into.sort()).toEqual(["audio_review", "awaiting_approval", "budget_exceeded", "completed"]);
     expect(canTransitionJob("planned", "generating")).toBe(false);
     expect(canTransitionJob("cost_estimated", "generating")).toBe(false);
   });
@@ -32,6 +32,12 @@ describe("máquina de estados do job", () => {
     expect(JOB_TRANSITIONS.failed).toEqual(["cost_estimated", "cancelled", "rendering"]);
     expect(JOB_TRANSITIONS.failed).not.toContain("generating");
     expect(JOB_TRANSITIONS.completed).toEqual(["generating", "rendering"]);
+  });
+
+  it("narração em revisão: só aceitar (render), gerar de novo (explícito) ou cancelar", () => {
+    expect(JOB_TRANSITIONS.audio_review).toEqual(["rendering", "generating", "cancelled"]);
+    expect(canTransitionJob("generating", "audio_review")).toBe(true);
+    expect(canTransitionJob("audio_review", "completed")).toBe(false);
   });
 
   it("cancelled é terminal", () => {

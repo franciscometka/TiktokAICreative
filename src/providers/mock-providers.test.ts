@@ -65,18 +65,21 @@ describe("MockVideoProvider", () => {
 describe("MockAudioProvider", () => {
   it("gera URI mock e fatura por caracteres", async () => {
     const p = new MockAudioProvider({ pricing: pricing({ unit: "per_1000_characters", priceUsd: 0.1 }) });
-    const req = { trackId: "narration", text: "x".repeat(150), language: "pt-BR" as const };
+    const req = { trackId: "narration", text: "x".repeat(150), language: "pt-BR" as const, speakerProfileId: "clara" };
     expect(p.estimateCost(req).costUsd).toBeCloseTo(0.015, 10);
     const ref = await p.generateAudio(req);
     expect((await p.getStatus(ref)).state).toBe("succeeded");
     const result = await p.downloadResult(ref);
     expect(result).toMatchObject({ isMock: true, durationSeconds: 10, mimeType: "audio/mpeg" });
     expect(result.billedUsage.characters).toBe(150);
+    // Mock não gera arquivo nem timing: legendas usam o fallback estimado.
+    expect(result.data).toBeUndefined();
+    expect(result.characterTiming).toBeUndefined();
   });
 
   it("falha simulada", async () => {
     const p = new MockAudioProvider({ pricing: pricing({ unit: "per_1000_characters" }), fail: true });
-    const ref = await p.generateAudio({ trackId: "n", text: "oi", language: "pt-BR" });
+    const ref = await p.generateAudio({ trackId: "n", text: "oi", language: "pt-BR", speakerProfileId: "clara" });
     expect((await p.getStatus(ref)).state).toBe("failed");
   });
 });

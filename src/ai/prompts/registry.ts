@@ -1,4 +1,5 @@
 import { campaignPlanPromptV1 } from "./campaign-plan.v1";
+import { campaignPlanPromptV1_0_1 } from "./campaign-plan.v1_0_1";
 
 /**
  * Registro central de prompts. Todo prompt do projeto vive em ai/prompts/ e é
@@ -7,11 +8,12 @@ import { campaignPlanPromptV1 } from "./campaign-plan.v1";
  */
 export const PROMPTS = {
   campaignPlan: {
-    "1.0.0": campaignPlanPromptV1,
+    "1.0.0": { ...campaignPlanPromptV1, status: "deprecated" as const },
+    "1.0.1": campaignPlanPromptV1_0_1,
   },
 } as const;
 
 /** Versão em uso de cada prompt. Trocar versão = uma linha aqui. */
 export const ACTIVE_PROMPTS = {
-  campaignPlan: PROMPTS.campaignPlan["1.0.0"],
+  campaignPlan: PROMPTS.campaignPlan["1.0.1"],
 } as const;

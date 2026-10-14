@@ -43,6 +43,14 @@ export function remainingEstimateBrl(job: GenerationJob): number {
   return usdToBrl(usd, estimate);
 }
 
+/** Estimativa (BRL) de gerar a narração de novo (nova versão, novo custo). */
+export function narrationEstimateBrl(job: GenerationJob): number {
+  const estimate = job.estimate;
+  if (!estimate) return 0;
+  const line = estimate.breakdown.find((l) => l.category === "audio");
+  return line ? usdToBrl(line.subtotalUsd, estimate) : 0;
+}
+
 /** Estimativa (BRL) de regenerar o vídeo de uma cena. */
 export function sceneEstimateBrl(job: GenerationJob, sceneId: string): number {
   const estimate = job.estimate;

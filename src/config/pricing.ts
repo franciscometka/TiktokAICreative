@@ -1,5 +1,6 @@
 import type { ExchangeRate, ProviderPricing } from "@/domain/cost";
 import { ANTHROPIC_PROVIDER, CLAUDE_MODELS } from "./llm-models";
+import { ELEVENLABS_MODELS, ELEVENLABS_PROVIDER } from "./tts-models";
 
 const CLAUDE_PRICES_DATE = "2026-10-06";
 
@@ -30,8 +31,8 @@ function claudePricing(
  * Futuro: carregar de banco/API via outra implementação de PricingCatalog (costs/pricing-catalog.ts).
  *
  * isPlaceholder = true → valor PROVISÓRIO, escolhido para caber nas metas iniciais dos presets.
- * Nenhum provider de vídeo/áudio real foi escolhido ainda; os nomes "unassigned-*" deixam isso explícito.
- * Antes de integrar um provider real, substitua a entrada pelo preço oficial e isPlaceholder = false.
+ * Vídeo: nenhum provider real escolhido ainda ("unassigned-video" deixa isso explícito). Áudio: ElevenLabs
+ * com preço oficial (Lote 4). Antes de integrar um provider real, use o preço oficial e isPlaceholder = false.
  */
 export const PRICING_TABLE: readonly ProviderPricing[] = [
   // ---- LLM (preços oficiais Anthropic, tabela de 2026-10-06) ----
@@ -66,30 +67,26 @@ export const PRICING_TABLE: readonly ProviderPricing[] = [
     isPlaceholder: true,
   },
 
-  // ---- Áudio / TTS (PROVISÓRIO) ----
+  // ---- Áudio / TTS: ElevenLabs (preço OFICIAL da API, cobrado em USD por caractere) ----
+  // elevenlabs.io/pricing/api, verificado em 2026-10-14. Planos de assinatura usam créditos e
+  // podem sair diferentes: este é o preço de API pay-as-you-go.
   {
-    provider: "unassigned-audio",
-    model: "economy-tts",
+    provider: ELEVENLABS_PROVIDER,
+    model: ELEVENLABS_MODELS.flash,
     unit: "per_1000_characters",
-    priceUsd: 0.05,
-    updatedAt: "2026-10-13",
-    isPlaceholder: true,
+    priceUsd: 0.04,
+    updatedAt: "2026-10-14",
+    isPlaceholder: false,
+    source: "ElevenLabs API pricing — Flash/Turbo",
   },
   {
-    provider: "unassigned-audio",
-    model: "high-tts",
+    provider: ELEVENLABS_PROVIDER,
+    model: ELEVENLABS_MODELS.multilingual,
     unit: "per_1000_characters",
-    priceUsd: 0.1,
-    updatedAt: "2026-10-13",
-    isPlaceholder: true,
-  },
-  {
-    provider: "unassigned-audio",
-    model: "premium-tts",
-    unit: "per_1000_characters",
-    priceUsd: 0.2,
-    updatedAt: "2026-10-13",
-    isPlaceholder: true,
+    priceUsd: 0.08,
+    updatedAt: "2026-10-14",
+    isPlaceholder: false,
+    source: "ElevenLabs API pricing — Multilingual v2",
   },
 
   // ---- Renderização local (Remotion na máquina do usuário) ----

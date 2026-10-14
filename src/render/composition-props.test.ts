@@ -32,6 +32,7 @@ function manifest(overrides: Partial<RenderManifest> = {}): RenderManifest {
 
 const file = (uri: string, width: number, height: number): ResolvedAsset => ({
   kind: "file",
+  media: "image",
   uri,
   absolutePath: `/abs/${uri}`,
   contentType: "image/png",

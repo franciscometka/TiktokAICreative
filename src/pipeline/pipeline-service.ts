@@ -33,7 +33,9 @@ import type {
   IncurredCost,
   ProviderPricing,
 } from "@/domain/cost";
+import type { NarrationInfo, NarrationTiming } from "@/domain/audio";
 import type { CreativePlan, ScenePlan } from "@/domain/creative";
+import { getSpeakerProfile } from "@/config/voices";
 import {
   CampaignRequestSchema,
   type Campaign,
@@ -49,7 +51,7 @@ import type { IdGenerator } from "@/lib/ids";
 import { KeyedMutex } from "@/lib/keyed-mutex";
 import { roundBrl, roundUsd, toCents, usdToBrl } from "@/lib/money";
 import type { AudioProviderFactory } from "@/providers/audio";
-import type { AudioProvider } from "@/providers/audio/audio-provider";
+import type { AudioProvider, AudioResult } from "@/providers/audio/audio-provider";
 import { waitForCompletion, type PollOptions } from "@/providers/poll";
 import { ProviderError, type MediaResult, type ProviderJobRef } from "@/providers/types";
 import type { VideoProviderFactory } from "@/providers/video";
@@ -59,7 +61,11 @@ import type { RenderProgress, Renderer, RenderResult } from "@/render/renderer";
 import type { RenderManifest, RenderRecord } from "@/domain/render";
 import type { LlmCallLog } from "@/storage/llm-call-log";
 import type { PipelineStore } from "@/storage/pipeline-store";
-import { budgetSnapshot, remainingEstimateBrl, sceneEstimateBrl } from "./budget-context";
+import type { AudioAssetStore } from "@/storage/audio-asset-store";
+import { AlignmentMismatchError, narrationTiming } from "@/speech/alignment";
+import { evaluateAudioFit } from "@/speech/audio-fit";
+import { buildNarrationScript, type NarrationScript } from "@/speech/narration-script";
+import { budgetSnapshot, narrationEstimateBrl, remainingEstimateBrl, sceneEstimateBrl } from "./budget-context";
 import {
   activeAttempt,
   assertApprovalValid,
@@ -78,6 +84,8 @@ export interface PipelineDeps {
   videoProviderFactory: VideoProviderFactory;
   audioProviderFactory: AudioProviderFactory;
   renderer: Renderer;
+  /** Narrações versionadas (arquivo + timing + metadata), independentes do renderer. */
+  audioAssets: AudioAssetStore;
   store: PipelineStore;
   ledger: CostLedger;
   llmCallLog: LlmCallLog;
@@ -106,10 +114,13 @@ export type BudgetExceededOutcome = { kind: "BUDGET_EXCEEDED"; decision: BudgetE
 export type ApproveOutcome = { kind: "APPROVED"; job: GenerationJob } | BudgetExceededOutcome;
 export type GenerationOutcome =
   | { kind: "COMPLETED"; job: GenerationJob }
+  /** Narração real bem mais longa que o planejado: espera decisão explícita (nada é regerado sozinho). */
+  | { kind: "AUDIO_REVIEW"; job: GenerationJob }
   | { kind: "FAILED"; job: GenerationJob; error: string }
   | BudgetExceededOutcome;
 export type RegenerationOutcome =
   | { kind: "REGENERATED"; job: GenerationJob }
+  | { kind: "AUDIO_REVIEW"; job: GenerationJob }
   | { kind: "FAILED"; job: GenerationJob; error: string }
   | BudgetExceededOutcome;
 
@@ -561,6 +572,89 @@ export class PipelineService {
     return { job, completion: this.launchJob(jobId, run) };
   }
 
+  /**
+   * Narração em revisão (fala real bem mais longa que o planejado): o usuário ACEITA o vídeo mais
+   * longo. Nenhuma chamada paga; o fim do vídeo é estendido para a fala caber inteira.
+   */
+  async acceptNarration(jobId: string): Promise<{ job: GenerationJob; completion: Promise<GenerationOutcome> }> {
+    const job = await this.withJobLock(jobId, async () => {
+      this.assertJobIdle(jobId);
+      const ctx = await this.load(jobId);
+      assertStatus(ctx.job, "audio_review");
+      const active = activeAttempt(ctx.job.audioAttempts);
+      if (!active?.narration) throw new UnexpectedStatusError("Não há narração ativa para aceitar");
+      const acceptedAt = this.deps.clock();
+      const next: GenerationJob = {
+        ...transitionJob(ctx.job, "rendering", acceptedAt),
+        audioAttempts: ctx.job.audioAttempts.map((a) =>
+          a.id === active.id && a.narration ? { ...a, narration: { ...a.narration, reviewAcceptedAt: acceptedAt } } : a,
+        ),
+        error: undefined,
+      };
+      await this.deps.store.saveJob(next);
+      return next;
+    });
+    return { job, completion: this.launchJob(jobId, () => this.renderPhase(jobId)) };
+  }
+
+  /**
+   * Ação EXPLÍCITA: gera a narração de novo (nova versão, NOVO custo, tentativa anterior vira
+   * descartada mas continua no total). Respeita o limite de tentativas e o orçamento; com
+   * orçamento excedido devolve a decisão sem chamar nada. Se a nova chamada falhar, a narração
+   * anterior continua valendo. Roda em background.
+   */
+  async startNarrationRegeneration(
+    jobId: string,
+    options: { authorizeOverBudget?: boolean } = {},
+  ): Promise<{ kind: "started"; job: GenerationJob; completion: Promise<GenerationOutcome> } | BudgetExceededOutcome> {
+    const prepared = await this.withJobLock(jobId, async () => {
+      this.assertJobIdle(jobId);
+      const ctx = await this.load(jobId);
+      let job = ctx.job;
+      assertStatus(job, "completed", "audio_review");
+      assertApprovalValid(job);
+      assertAttemptsAvailable(job.audioAttempts, this.deps.maxAttemptsPerScene);
+      const previousStatus = job.status as "completed" | "audio_review";
+
+      const additional = narrationEstimateBrl(job);
+      let check = await this.checkJobBudget({ ...ctx, job }, additional);
+      if (check.kind === "BUDGET_EXCEEDED") {
+        if (!options.authorizeOverBudget) return { kind: "BUDGET_EXCEEDED" as const, decision: check, job };
+        job = {
+          ...job,
+          overBudgetAuthorization: authorizeOverBudget(check, ctx.campaign.request.budget, this.deps.clock(), job.overBudgetAuthorization),
+        };
+        check = await this.checkJobBudget({ ...ctx, job }, additional);
+        if (check.kind === "BUDGET_EXCEEDED") return this.returnDecisionWithoutStateChange(job, check);
+      }
+      job = { ...transitionJob(job, "generating", this.deps.clock()), error: undefined };
+      await this.deps.store.saveJob(job);
+      return { kind: "started" as const, job, previousStatus };
+    });
+    if (prepared.kind === "BUDGET_EXCEEDED") return prepared;
+    const completion = this.launchJob(jobId, () => this.regenerateNarrationNow(jobId, prepared.previousStatus));
+    return { kind: "started", job: prepared.job, completion };
+  }
+
+  private async regenerateNarrationNow(jobId: string, previousStatus: "completed" | "audio_review"): Promise<GenerationOutcome> {
+    const outcome = await this.withJobLock(jobId, async (): Promise<GenerationOutcome | { kind: "READY_TO_RENDER" }> => {
+      const ctx = await this.load(jobId);
+      const restore = async (job: GenerationJob, error: string): Promise<GenerationOutcome> => {
+        // A narração anterior continua ativa; o criativo volta para onde estava.
+        const next = { ...transitionJob(job, previousStatus, this.deps.clock()), error };
+        await this.deps.store.saveJob(next);
+        return { kind: "FAILED", job: next, error };
+      };
+      const audio = this.createAudioProvider(ctx);
+      if (!audio.ok) return restore(ctx.job, audio.error);
+      const result = await this.generateNarration(ctx, audio.provider);
+      if (result.attempt.status === "failed") return restore(result.job, result.attempt.error ?? "Falha ao gerar a narração");
+      return this.afterNarration(result.job);
+    });
+    if (outcome.kind !== "READY_TO_RENDER") return outcome;
+    return this.renderPhase(jobId);
+  }
+
   /** true se ESTE processo está gerando/renderizando o job. */
   isJobActive(jobId: string): boolean {
     return this.activeJobs.has(jobId);
@@ -670,7 +764,9 @@ export class PipelineService {
   private async runGeneration(ctx: JobContext): Promise<GenerationOutcome | { kind: "READY_TO_RENDER" }> {
     let job = ctx.job;
     const video = this.deps.videoProviderFactory(ctx.pricing.video);
-    const audio = this.deps.audioProviderFactory(ctx.pricing.audio);
+    // Provider de áudio indisponível (ex.: sem chave) falha ANTES de qualquer chamada paga.
+    const audio = this.createAudioProvider(ctx);
+    if (!audio.ok) return this.fail(job, audio.error);
 
     for (const scene of ctx.creative.scenes) {
       if (!scene.requiresGeneratedVideo) continue;
@@ -691,14 +787,34 @@ export class PipelineService {
       if (paused) return paused;
       assertAttemptsAvailable(job.audioAttempts, this.deps.maxAttemptsPerScene);
 
-      const result = await this.generateNarration({ ...ctx, job }, audio);
+      const result = await this.generateNarration({ ...ctx, job }, audio.provider);
       job = result.job;
       if (result.attempt.status === "failed") return this.fail(job, result.attempt.error);
     }
 
-    job = transitionJob(job, "rendering", this.deps.clock());
-    await this.deps.store.saveJob(job);
+    return this.afterNarration(job);
+  }
+
+  /** Narração pronta: se a fala real passou MUITO do planejado, pede revisão; senão segue para o render. */
+  private async afterNarration(job: GenerationJob): Promise<GenerationOutcome | { kind: "READY_TO_RENDER" }> {
+    const info = activeAttempt(job.audioAttempts)?.narration;
+    if (info?.fit?.action === "review" && !info.reviewAcceptedAt) {
+      const next = transitionJob(job, "audio_review", this.deps.clock());
+      await this.deps.store.saveJob(next);
+      return { kind: "AUDIO_REVIEW", job: next };
+    }
+    const next = transitionJob(job, "rendering", this.deps.clock());
+    await this.deps.store.saveJob(next);
     return { kind: "READY_TO_RENDER" };
+  }
+
+  private createAudioProvider(ctx: JobContext): { ok: true; provider: AudioProvider } | { ok: false; error: string } {
+    try {
+      return { ok: true, provider: this.deps.audioProviderFactory(ctx.pricing.audio) };
+    } catch (error) {
+      if (error instanceof ProviderError) return { ok: false, error: error.message };
+      throw error;
+    }
   }
 
   /** Checagem de orçamento antes de CADA chamada paga, com base no gasto real até aqui. */
@@ -745,22 +861,104 @@ export class PipelineService {
     provider: AudioProvider,
   ): Promise<{ job: GenerationJob; attempt: MediaAttempt }> {
     assertCanStartPaidCall(ctx.job);
-    const text = ctx.creative.scenes
-      .map((s) => s.narration.trim())
-      .filter((t) => t.length > 0)
-      .join(" ");
+    // Narração CONTÍNUA por criativo (D55): um texto falado, uma chamada, um timing.
+    const speaker = getSpeakerProfile(ctx.campaign.request.speakerProfileId);
+    const script = buildNarrationScript(ctx.creative);
     return this.executeAttempt(ctx, {
       kind: "audio",
       sceneId: null,
       provider: provider.descriptor,
       category: "audio",
       operation: "audio_generation",
-      description: "Narração (TTS)",
+      description: `Narração (TTS · ${speaker.name})`,
       run: async () => {
-        const ref = await provider.generateAudio({ trackId: "narration", text, language: "pt-BR" });
+        const ref = await provider.generateAudio({
+          trackId: "narration",
+          text: script.spoken,
+          language: speaker.language,
+          speakerProfileId: speaker.id,
+        });
         return this.awaitResult(ref, provider);
       },
+      finalize: (result, attemptId) =>
+        this.storeNarration(ctx, { script, speakerProfileId: speaker.id, language: speaker.language }, result as AudioResult, attemptId, provider),
     });
+  }
+
+  /**
+   * Depois da chamada (já registrada no ledger): converte o timing para palavras escritas,
+   * mede o encaixe (AudioFit) e salva arquivo + timing + metadata numa versão NOVA.
+   */
+  private async storeNarration(
+    ctx: JobContext,
+    voice: { script: NarrationScript; speakerProfileId: string; language: NarrationInfo["language"] },
+    result: AudioResult,
+    attemptId: string,
+    provider: AudioProvider,
+  ): Promise<{ uri: string; durationSeconds: number; narration: NarrationInfo }> {
+    let timing: NarrationTiming | undefined;
+    let note: string | undefined;
+    if (result.characterTiming) {
+      try {
+        timing = narrationTiming(voice.script, result.characterTiming);
+      } catch (error) {
+        if (!(error instanceof AlignmentMismatchError)) throw error;
+        note = `${error.message}; legendas estimadas.`;
+      }
+    } else if (!result.isMock) {
+      note = "Provider não informou timing; legendas estimadas.";
+    }
+    const speechSeconds = timing?.speechEndSeconds ?? result.durationSeconds;
+    const fit = evaluateAudioFit({
+      targetSeconds: ctx.creative.duration,
+      speechSeconds,
+      measured: !result.isMock && result.data !== undefined,
+    });
+
+    const narration: NarrationInfo = {
+      speakerProfileId: voice.speakerProfileId,
+      voiceId: result.voiceId,
+      language: voice.language,
+      requestId: result.requestId,
+      characters: voice.script.spoken.length,
+      billedCharacters: result.billedCharacters,
+      captionTiming: timing ? "alignment" : "estimated",
+      speechEndSeconds: timing?.speechEndSeconds,
+      fit,
+      note,
+    };
+    if (!result.data) return { uri: result.uri, durationSeconds: result.durationSeconds, narration };
+
+    const stored = await this.deps.audioAssets.save({
+      campaignId: ctx.campaign.id,
+      creativeId: ctx.creative.id,
+      data: result.data,
+      timing,
+      metadata: {
+        attemptId,
+        jobId: ctx.job.id,
+        provider: provider.descriptor.id,
+        model: provider.descriptor.model,
+        speakerProfileId: voice.speakerProfileId,
+        voiceId: result.voiceId,
+        language: voice.language,
+        requestId: result.requestId,
+        characters: voice.script.spoken.length,
+        billedCharacters: result.billedCharacters,
+        durationSeconds: result.durationSeconds,
+        speechEndSeconds: timing?.speechEndSeconds,
+        captionTiming: narration.captionTiming,
+        fit,
+        writtenText: voice.script.written,
+        spokenText: voice.script.spoken,
+        createdAt: this.deps.clock(),
+      },
+    });
+    return {
+      uri: stored.uri,
+      durationSeconds: result.durationSeconds,
+      narration: { ...narration, version: stored.version, timingUri: stored.timingUri },
+    };
   }
 
   private async awaitResult(
@@ -786,6 +984,8 @@ export class PipelineService {
       operation: CostOperation;
       description: string;
       run: () => Promise<{ ref: ProviderJobRef; result: MediaResult }>;
+      /** Pós-processamento DEPOIS do custo registrado (ex.: salvar a narração). Falha = tentativa falha (custo mantido). */
+      finalize?: (result: MediaResult, attemptId: string) => Promise<{ uri: string; durationSeconds: number; narration?: NarrationInfo }>;
     },
   ): Promise<{ job: GenerationJob; attempt: MediaAttempt }> {
     const { clock, ids } = this.deps;
@@ -828,13 +1028,26 @@ export class PipelineService {
     try {
       const { ref, result } = await spec.run();
       await recordCost(result.billedUsage);
+      let output: { uri: string; durationSeconds: number; narration?: NarrationInfo } = {
+        uri: result.uri,
+        durationSeconds: result.durationSeconds,
+      };
+      if (spec.finalize) {
+        try {
+          output = await spec.finalize(result, attemptId);
+        } catch (error) {
+          // Custo já registrado acima; não registra de novo nem re-tenta.
+          throw new ProviderError(`Mídia gerada (e cobrada), mas não foi possível salvar: ${messageOf(error)}`, ref.providerJobId);
+        }
+      }
       attempt = {
         ...base,
         providerJobId: ref.providerJobId,
         status: "succeeded",
         active: true,
-        assetUri: result.uri,
-        durationSeconds: result.durationSeconds,
+        assetUri: output.uri,
+        durationSeconds: output.durationSeconds,
+        ...(output.narration ? { narration: output.narration } : {}),
       };
     } catch (error) {
       if (!(error instanceof ProviderError)) throw error;
@@ -884,15 +1097,23 @@ export class PipelineService {
         if (active?.assetUri) sceneVideos.set(s.sceneId, active.assetUri);
       }
       const narration = activeAttempt(job.audioAttempts);
+      const timingUri = narration?.narration?.timingUri;
       let manifest: RenderManifest;
       try {
+        const timing = timingUri ? await this.deps.audioAssets.readTiming(timingUri) : undefined;
         manifest = buildRenderManifest({
           campaignId: ctx.campaign.id,
           plan: ctx.creative,
           product: ctx.campaign.request.product,
           sceneVideos,
           narration: narration?.assetUri
-            ? { uri: narration.assetUri, durationSeconds: narration.durationSeconds ?? 0 }
+            ? {
+                uri: narration.assetUri,
+                durationSeconds: narration.durationSeconds ?? 0,
+                isMock: narration.isMock,
+                timing,
+                extendSeconds: narration.narration?.fit?.extendSeconds ?? 0,
+              }
             : undefined,
           outputDir: this.deps.outputDir,
         });

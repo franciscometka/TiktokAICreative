@@ -3,6 +3,7 @@ import { newProductId } from "@/application/campaign-actions";
 import { formInputFromRequest, type CampaignFormInput } from "@/application/campaign-form";
 import { imagePreviewUrl, type ImageView } from "@/application/campaign-view";
 import { CampaignWizard } from "@/components/create/campaign-wizard";
+import { DEFAULT_SPEAKER_PROFILE_ID, SPEAKER_PROFILES } from "@/config/voices";
 import { getPresetSummaries, getPublicConfig, getRuntime } from "@/server/runtime";
 
 export const dynamic = "force-dynamic";
@@ -32,6 +33,7 @@ export default async function CreatePage({ searchParams }: { searchParams: Promi
     styleMode: "auto",
     styles: [],
     quality: "economy",
+    speakerProfileId: DEFAULT_SPEAKER_PROFILE_ID,
     budget: {
       maxCostPerCreativeBrl: toInput(publicConfig.defaultBudget.maxCostPerCreativeBrl),
       maxCostPerCampaignBrl: toInput(publicConfig.defaultBudget.maxCostPerCampaignBrl),
@@ -75,6 +77,8 @@ export default async function CreatePage({ searchParams }: { searchParams: Promi
         fromCampaign={fromName !== undefined}
         planner={publicConfig.planner}
         planningAvailable={publicConfig.planningAvailable}
+        voices={SPEAKER_PROFILES.map((v) => ({ id: v.id, name: v.name, description: v.description }))}
+        audioProvider={publicConfig.audioProvider}
       />
     </main>
   );
