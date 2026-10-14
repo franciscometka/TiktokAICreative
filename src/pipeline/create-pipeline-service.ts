@@ -1,0 +1,70 @@
+import { createAnthropicLlmClient } from "@/ai/create-llm-client";
+import { LlmCreativePlanner } from "@/ai/llm-planner";
+import { MockCreativePlanner } from "@/ai/mock-planner";
+import type { CreativePlanner } from "@/ai/planner";
+import type { AppConfig } from "@/config/env";
+import { PRICING_TABLE } from "@/config/pricing";
+import { StaticExchangeRateProvider } from "@/costs/exchange-rate";
+import { InMemoryCostLedger } from "@/costs/ledger";
+import { StaticPricingCatalog } from "@/costs/pricing-catalog";
+import { systemClock } from "@/lib/clock";
+import { randomId, type IdGenerator } from "@/lib/ids";
+import { createAudioProviderFactory } from "@/providers/audio";
+import { DEFAULT_POLL_OPTIONS } from "@/providers/poll";
+import { createVideoProviderFactory } from "@/providers/video";
+import { MockRenderer } from "@/render/renderer";
+import { FileCostLedger } from "@/storage/file-cost-ledger";
+import { FilePipelineStore } from "@/storage/file-pipeline-store";
+import { FileLlmCallLog, InMemoryLlmCallLog } from "@/storage/llm-call-log";
+import { InMemoryPipelineStore } from "@/storage/pipeline-store";
+import { PipelineService, type PipelineDeps } from "./pipeline-service";
+
+function createPlanner(config: AppConfig, ids: IdGenerator, env: Record<string, string | undefined>): CreativePlanner {
+  switch (config.llmProvider) {
+    case "mock":
+      return new MockCreativePlanner(ids);
+    case "anthropic":
+      return new LlmCreativePlanner(createAnthropicLlmClient(config, env), ids, {
+        maxValidationAttempts: config.llmPolicy.maxValidationAttempts,
+      });
+  }
+}
+
+function createStorage(config: AppConfig): Pick<PipelineDeps, "store" | "ledger" | "llmCallLog"> {
+  if (config.storage === "memory") {
+    return { store: new InMemoryPipelineStore(), ledger: new InMemoryCostLedger(), llmCallLog: new InMemoryLlmCallLog() };
+  }
+  return {
+    store: new FilePipelineStore(config.dataDir),
+    ledger: new FileCostLedger(config.dataDir),
+    llmCallLog: new FileLlmCallLog(config.dataDir),
+  };
+}
+
+/**
+ * Raiz de composição: o ÚNICO lugar que escolhe implementações concretas.
+ * Lote 1: planner mock ou Claude (LLM_PROVIDER); mídia e renderer continuam mock;
+ * persistência local em arquivos (STORAGE=file, padrão) ou memória.
+ */
+export function createPipelineService(
+  config: AppConfig,
+  overrides: Partial<PipelineDeps> = {},
+  env: Record<string, string | undefined> = process.env,
+): PipelineService {
+  const ids = overrides.ids ?? randomId;
+  return new PipelineService({
+    planner: overrides.planner ?? createPlanner(config, ids, env),
+    videoProviderFactory: createVideoProviderFactory(config.videoProvider),
+    audioProviderFactory: createAudioProviderFactory(config.audioProvider),
+    renderer: new MockRenderer(),
+    ...createStorage(config),
+    pricing: new StaticPricingCatalog(PRICING_TABLE),
+    exchangeRates: new StaticExchangeRateProvider(config.exchangeRate),
+    maxAttemptsPerScene: config.maxAttemptsPerScene,
+    pollOptions: DEFAULT_POLL_OPTIONS,
+    outputDir: "outputs",
+    clock: systemClock,
+    ids,
+    ...overrides,
+  });
+}
