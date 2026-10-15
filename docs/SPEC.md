@@ -97,3 +97,7 @@ Vídeo/áudio reais (ElevenLabs, Veo, Runway, Kling), TTS, publicação/TikTok A
 
 ## Lote 5 — Vídeo real Runway
 Integração modular opt-in com Gen-4 Turbo, estimativa oficial da duração comprada antes da aprovação, task id persistido, ledger real inclusive falhas cobradas, download e assets locais versionados, clipe real na composição Remotion. Nenhuma repetição paga automática. Validação manual sem custo por padrão; `--confirm` autoriza uma cena de 5s (não 2s), com planejamento/áudio/render mock. Testes normais usam transporte falso e rede bloqueada. Upload dedicado de screenshots/assets existentes continua separado desta integração; o fallback explícito existente é preservado.
+
+## Execução híbrida por etapa
+
+A interface oferece MOCK/REAL por planejamento, narração, cenas, presenter e render; MOCK é o default. REAL só disponível com provider configurado e requer cotação + confirmação da etapa. Planejamento REAL aguarda em draft; mídia REAL executa uma unidade por clique. Render REAL é local e não pode chamar outros providers. Novas versões e excedentes têm aprovação própria. Dados antigos permanecem consultáveis; troca de modo preserva arquivos e ledger. Ver [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md) e D76.

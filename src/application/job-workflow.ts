@@ -4,7 +4,7 @@ import { activeAttempt } from "@/pipeline/guards";
 export type WorkflowState = "ready" | "running" | "waiting" | "paused" | "failed" | "skipped";
 export interface WorkflowStep { id: string; label: string; state: WorkflowState; detail: string; simulated: boolean }
 export function jobWorkflow(campaign: Campaign, creative: CreativePlan, job: GenerationJob | undefined, active: boolean): WorkflowStep[] {
-  const offline = campaign.executionMode === "offline";
+  const offline = campaign.executionMode === "offline" || campaign.executionMode === "hybrid";
   const narration = job ? activeAttempt(job.audioAttempts) : undefined;
   const generic = creative.scenes.filter(s => s.requiresGeneratedVideo && s.visualSource !== "presenter");
   const avatars = creative.scenes.filter(s => s.visualSource === "presenter");
@@ -25,8 +25,8 @@ export function jobWorkflow(campaign: Campaign, creative: CreativePlan, job: Gen
     { id: "script", label: "Roteiro", state: "ready", detail: campaign.request.scriptMode === "manual" ? "Texto definido por você" : offline ? "Sugestão local, sem IA externa" : "Roteiro planejado", simulated: offline && campaign.request.scriptMode !== "manual" },
     { id: "plan", label: "Planejamento", state: "ready", detail: `${creative.scenes.length} cenas · ${avatars.length} com avatar`, simulated: campaign.plannerId === "mock" },
     { id: "narration", label: "Narração", state: state("narration", !!narration), detail: narration ? `${narration.narration?.version ?? `tentativa ${narration.attemptNumber}`} · ${narration.durationSeconds?.toFixed(1) ?? "?"}s${narration.isMock ? " estimados; sem arquivo de voz" : " de áudio"}` : "Aguardando aprovação", simulated: narration?.isMock ?? offline },
-    { id: "scenes", label: "Cenas", state: state("scenes", genericDone === generic.length), detail: `${genericDone}/${generic.length} vídeos de produto · imagens e textos prontos para composição`, simulated: offline },
-    { id: "avatar", label: "Avatar", state: state("avatar", avatarDone === avatars.length, !avatars.length), detail: avatars.length ? `${avatarDone}/${avatars.length} · ${campaign.request.presenterPresetId ?? "sem avatar selecionado"}` : "Este job não usa apresentador", simulated: offline },
-    { id: "render", label: "Render final", state: state("render", job?.status === "completed" && !!job.outputUri), detail: job?.status === "completed" ? offline ? `Simulação concluída · ${job.renders.length} versão(ões); sem MP4` : "Render concluído" : "Aguardando cenas e narração", simulated: offline },
+    { id: "scenes", label: "Cenas", state: state("scenes", genericDone === generic.length), detail: `${genericDone}/${generic.length} vídeos de produto · imagens e textos prontos para composição`, simulated: offline && job?.stageModes?.scenes !== "real" },
+    { id: "avatar", label: "Avatar", state: state("avatar", avatarDone === avatars.length, !avatars.length), detail: avatars.length ? `${avatarDone}/${avatars.length} · ${campaign.request.presenterPresetId ?? "sem avatar selecionado"}` : "Este job não usa apresentador", simulated: offline && job?.stageModes?.avatar !== "real" },
+    { id: "render", label: "Render final", state: state("render", job?.status === "completed" && !!job.outputUri), detail: job?.status === "completed" ? (offline && job?.stageModes?.render !== "real") ? `Simulação concluída · ${job.renders.length} versão(ões); sem MP4` : "Render concluído" : "Aguardando cenas e narração", simulated: offline && job?.stageModes?.render !== "real" },
   ];
 }

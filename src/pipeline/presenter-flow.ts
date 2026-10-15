@@ -21,7 +21,7 @@ export interface PresenterFlowDeps {
 }
 export async function presenterPreview(deps: Pick<PresenterFlowDeps, "audioAssets">, campaign: Campaign, plan: CreativePlan, job: GenerationJob, scene: ScenePlan, simulated = false) {
   const narration = activeAttempt(job.audioAttempts);
-  if (simulated) {
+  if (simulated && narration?.isMock) {
     if (!narration?.isMock) throw new Error("Simulação exige narração mock; áudio real não é convertido em simulação.");
     const startSeconds = plan.scenes.slice(0, scene.order).reduce((sum, s) => sum + s.duration, 0);
     const window = { startSeconds, endSeconds: startSeconds + scene.duration };

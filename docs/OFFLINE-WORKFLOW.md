@@ -1,3 +1,5 @@
+> **Atualização:** a interface agora oferece modos por etapa. O bloqueio absoluto abaixo descreve ff176bb; veja [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md) para o comportamento atual. `*:real --confirm` isolado continua bloqueado.
+
 # Fluxo offline de projetos e jobs
 
 Esta versão está travada em modo offline. Nenhuma variável de ambiente, aprovação de orçamento ou `--confirm` libera chamadas reais. O bloqueio fica no servidor, nos transportes de produção e nos comandos `*:real`; os transportes falsos dos testes continuam disponíveis.

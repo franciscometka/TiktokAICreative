@@ -169,3 +169,18 @@ Validação offline do Lote 5 (2026-10-14): `npm run check` aprovado (451 testes
 - [x] Product UGC: contrato local com consentimento, imagens, informações/script e audio=false; geração desabilitada
 - [ ] Primeira validação paga de presenter autorizada (nenhuma feita na implementação)
 - [ ] Product UGC real e estratégia de fala sincronizada: verificar rota compatível antes de habilitar
+
+## Modo híbrido por etapa (2026-10-15)
+
+- [x] Seletores MOCK/REAL independentes para planejamento, narração, vídeo, avatar e render; REAL só com provider configurado.
+- [x] Planejamento real em draft, cotação de pior caso e aprovação explícita; sem retry pago automático.
+- [x] Painel de provider/modelo/estado/custo real e simulado/bloqueio/execução por etapa.
+- [x] Uma unidade paga por clique; nenhuma cascata paga; escopo de transporte limitado.
+- [x] Aprovação por cotação, orçamento sob lock, autorização de excedentes por escopo, histórico de aprovação.
+- [x] Troca de modo sem apagar assets; nova versão explícita; limite de tentativas mantido.
+- [x] Retomada de vídeo/avatar pelo ID, sem novo POST; intenção sem ID bloqueia reenvio.
+- [x] Preservados ledger, diagnóstico HTTP, duração medida e integridade dos clipes reais.
+- [x] Jobs offline de ff176bb adotam modos no próprio job sem apagar histórico; projetos reais antigos ficam consultáveis e podem ser copiados.
+- [ ] Validação REAL paga integrada, incluindo primeira validação do presenter (não autorizada nesta implementação).
+
+Guia: [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md).

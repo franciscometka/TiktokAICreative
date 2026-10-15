@@ -1,3 +1,4 @@
+import { StageModesSchema, ExecutionStageSchema } from "./execution";
 import { ProviderDiagnosticSchema } from "./provider-diagnostic";
 import { ClipDurationCheckSchema } from "./media-integrity";
 import { z } from "zod";
@@ -53,6 +54,7 @@ export const StyleSelectionSchema = z.enum(["auto", "manual"]);
 export type StyleSelection = z.infer<typeof StyleSelectionSchema>;
 
 export const CampaignRequestSchema = z.object({
+  stageModes: StageModesSchema.optional(),
   projectName: z.string().trim().max(120).optional(),
   videoConcept: z.string().trim().max(2000).optional(),
   scriptMode: z.enum(["manual", "generate"]).optional(),
@@ -91,7 +93,8 @@ export const CampaignErrorCodeSchema = z.enum(CAMPAIGN_ERROR_CODES);
 export type CampaignErrorCode = z.infer<typeof CampaignErrorCodeSchema>;
 
 export const CampaignSchema = z.object({
-  executionMode: z.enum(["offline", "real"]).optional(),
+  planningApproval: z.object({ quoteToken: z.string(), estimatedBrl: z.number().nonnegative(), approvedAt: z.string() }).optional(),
+  executionMode: z.enum(["offline", "real", "hybrid"]).optional(),
   id: nonEmpty,
   status: CampaignStatusSchema,
   request: CampaignRequestSchema,
@@ -170,9 +173,15 @@ export const ApprovalSchema = z.object({
 export type Approval = z.infer<typeof ApprovalSchema>;
 
 export const GenerationJobSchema = z.object({
+  stageIntents: z.array(z.object({ stage: ExecutionStageSchema, unit: z.string(), state: z.enum(["running", "settled"]), createdAt: z.string() })).optional(),
+  renderStale: z.boolean().optional(),
+  stageModes: StageModesSchema.optional(),
+  stageRevision: z.number().int().nonnegative().optional(),
+  waitingForStage: ExecutionStageSchema.optional(),
+  stageApprovals: z.array(z.object({ mode: z.enum(["mock", "real"]).optional(), provider: z.string().optional(), model: z.string().optional(), stage: ExecutionStageSchema, unit: z.string(), quoteToken: z.string(), estimatedBrl: z.number().nonnegative(), approvedAt: z.string() })).optional(),
   currentStage: z.enum(["narration", "scenes", "avatar", "render"]).optional(),
   presenterTasks: z.array(PresenterTaskSchema).optional(),
-  videoTasks: z.array(z.object({ sceneId: z.string(), providerJobId: z.string(), provider: z.string(), model: z.string(), createdAt: z.string() })).optional(),
+  videoTasks: z.array(z.object({ attemptId: z.string().optional(), state: z.enum(["submitting", "pending", "settled"]).optional(), sceneId: z.string(), providerJobId: z.string(), provider: z.string(), model: z.string(), createdAt: z.string() })).optional(),
   id: nonEmpty,
   campaignId: nonEmpty,
   creativeId: nonEmpty,

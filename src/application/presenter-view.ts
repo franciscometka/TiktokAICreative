@@ -15,7 +15,7 @@ export function presenterSceneViews(campaign: Campaign, plan: CreativePlan, job:
     return { sceneId: s.id, label: `Cena ${s.order + 1}`, avatar: task?.avatarPresetId ?? campaign.request.presenterPresetId ?? "não selecionado",
       status: task?.state === "pending" ? "Aguardando Runway" : task?.state === "submitting" ? "Envio iniciado — não repetir" : task?.state === "succeeded" ? "Pronto" : task?.state === "failed" ? "Falhou" : "Aguardando aprovação/narração",
       estimateUsd: task?.estimatedCostUsd ?? presenterBilledSeconds(s.duration) * PRICING_TABLE.find(p => p.model === RUNWAY_PRESENTER.model)!.priceUsd,
-      simulated: task?.isMock ?? campaign.executionMode === "offline",
+      simulated: task?.isMock ?? (campaign.executionMode === "offline" || campaign.executionMode === "hybrid" && job?.stageModes?.avatar !== "real"),
       actualUsd: task?.actualCostUsd ?? null, duration: attempt?.isMock ? attempt.durationSeconds ?? null : attempt?.media?.actualMediaDurationSeconds ?? null,
       videoUrl: version ? `/api/video/${campaign.id}/${plan.id}/${s.id}/${version}` : null,
       canRegenerate: job?.status === "completed" && task?.state !== "pending" && task?.state !== "submitting", error: task?.error ?? attempt?.error ?? null };

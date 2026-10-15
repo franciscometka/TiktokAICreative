@@ -1,5 +1,6 @@
 "use client";
 
+import { MOCK_STAGE_MODES, EXECUTION_STAGES, type StageCapabilities } from "@/domain/execution";
 import { RUNWAY_AVATAR_PRESETS } from "@/domain/presenter";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore, useTransition } from "react";
@@ -61,6 +62,7 @@ function writeDraft(draft: Draft | undefined): void {
 }
 
 export interface WizardProps {
+  stageCapabilities: StageCapabilities;
   presets: PresetSummary[];
   initial: CampaignFormInput;
   initialImages: ImageView[];
@@ -82,6 +84,7 @@ export function CampaignWizard({
   planningAvailable,
   voices,
   audioProvider,
+  stageCapabilities,
 }: WizardProps) {
   const router = useRouter();
   const [form, setForm] = useState<CampaignFormInput>(initial);
@@ -327,6 +330,9 @@ export function CampaignWizard({
       ) : (
         <div className="space-y-6">
           <Panel className="space-y-4 p-5 sm:p-6">
+            <h2 className="text-lg font-semibold tracking-tight">Modo por etapa</h2>
+            <p className="mt-2 text-sm text-zinc-600">Tudo começa em MOCK. REAL só pode ser executado após revisar o custo e confirmar a etapa no projeto.</p>
+            <div className="my-4 grid gap-3 sm:grid-cols-2">{EXECUTION_STAGES.map(stage => <label className="text-sm" key={stage}>{({planning: "Roteiro / planejamento", narration: "Narração", scenes: "Cenas de vídeo", avatar: "Presenter / avatar", render: "Render final"})[stage]}<select className={inputClasses()} aria-label={`Modo ${stage}`} value={form.stageModes?.[stage] ?? "mock"} onChange={e => update("stageModes", { ...MOCK_STAGE_MODES, ...form.stageModes, [stage]: e.target.value as "mock" | "real" })}><option value="mock">MOCK</option><option value="real" disabled={!stageCapabilities[stage].available}>REAL · {stageCapabilities[stage].provider}</option></select>{!stageCapabilities[stage].available ? <span className="mt-1 block text-xs text-zinc-500">{stageCapabilities[stage].reason}</span> : null}</label>)}</div>
             <h2 className="text-lg font-semibold tracking-tight">Conceito e roteiro</h2>
             <Field id="videoConcept" label="Conceito do vídeo" error={errors.videoConcept} hint="Como apresentar o produto, para quem e qual mensagem destacar.">
               <textarea id="videoConcept" rows={3} maxLength={2000} className={inputClasses(!!errors.videoConcept)} value={form.videoConcept ?? ""} onChange={e => update("videoConcept", e.target.value)} placeholder="Ex.: Apresentador explica os detalhes e intercala fotos do produto." />
@@ -413,16 +419,16 @@ export function CampaignWizard({
               <h2 className="text-lg font-semibold tracking-tight">Voz da narração</h2>
               <span
                 className={
-                  audioProvider === "elevenlabs"
+                  (form.stageModes?.narration === "real" || audioProvider === "elevenlabs")
                     ? "rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700"
                     : "rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800"
                 }
               >
-                {audioProvider === "elevenlabs" ? "Narração real · ElevenLabs" : "MODO DE TESTE"}
+                {(form.stageModes?.narration === "real" || audioProvider === "elevenlabs") ? "Narração real · ElevenLabs" : "MODO DE TESTE"}
               </span>
             </div>
             <p className="mt-1 text-sm text-zinc-600">
-              {audioProvider === "elevenlabs"
+              {(form.stageModes?.narration === "real" || audioProvider === "elevenlabs")
                 ? "A narração é gerada em português do Brasil depois da sua aprovação e entra no custo estimado."
                 : "Narração simulada (AUDIO_PROVIDER=mock): nenhuma voz é gerada e nada é cobrado."}
             </p>
@@ -451,7 +457,7 @@ export function CampaignWizard({
                 <option value="">Sem apresentador</option>
                 {RUNWAY_AVATAR_PRESETS.map(id => <option key={id} value={id}>{id}</option>)}
               </select>
-              <p className="mt-2 text-xs text-zinc-500">O avatar e a voz escolhidos serão simulados neste job, sem chamada à Runway ou ElevenLabs. Você poderá acompanhar cada etapa e seu custo de referência.</p>
+              <p className="mt-2 text-xs text-zinc-500">Avatar e voz seguem os modos selecionados. Avatar REAL exige áudio real com alignment; nada pago começa ao criar o projeto.</p>
             </Field>
             {errors.presenterPresetId && <p role="alert">{errors.presenterPresetId}</p>}
             {errors.speakerProfileId && <p className="mt-1.5 text-xs font-medium text-red-600">{errors.speakerProfileId}</p>}
@@ -502,9 +508,9 @@ export function CampaignWizard({
                   {form.styleMode === "auto" ? "Formatos AUTO" : `${form.styles.length} formato(s)`}
                 </p>
                 <p className="mt-1">
-                  {planner === "mock"
+                  {form.stageModes?.planning !== "real" && planner === "mock"
                     ? "Planejamento simulado (LLM_PROVIDER=mock): nenhuma chamada ao Claude e nenhum custo real."
-                    : "O planejamento com Claude possui um pequeno custo e já é contabilizado separadamente."}{" "}
+                    : "O planejamento REAL aguarda estimativa e aprovação explícita na próxima tela. Nenhuma chamada paga começa ao criar o projeto."}{" "}
                   Nenhum vídeo é gerado antes da sua aprovação.
                 </p>
               </div>
@@ -519,7 +525,7 @@ export function CampaignWizard({
                   disabled={pending || !planningAvailable}
                 >
                   {pending && <Spinner />}
-                  {pending ? "Iniciando…" : "Planejar campanha"}
+                  {pending ? "Iniciando…" : form.stageModes?.planning === "real" ? "Criar projeto e revisar custo" : "Planejar campanha"}
                 </button>
               </div>
             </div>

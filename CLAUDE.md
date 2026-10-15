@@ -8,6 +8,8 @@ produto → análise/hooks/conceitos/roteiro/cenas (Claude) → validação + aj
 Custo é preocupação central; nada pago de mídia acontece sem aprovação explícita.
 
 ## Estado atual
+- Prompt ativo: `campaign-plan@1.4.0` (inclui brief e valida preservação do roteiro manual; ainda sem validação paga).
+- Interface híbrida por etapa (D76): MOCK default; REAL apenas com provider configurado, cotação e confirmação por unidade. Nenhuma cascata paga. Planejamento real aguarda draft/aprovação. Guia: `docs/HYBRID-WORKFLOW.md`. CLI `--confirm` isolado continua bloqueada.
 - Lotes 0 a 5 implementados (Runway ainda sem validação paga). Lote 4 = narração real pt-BR com ElevenLabs (opcional), legendas com timing real, AudioFit/revisão, áudio versionado e MP4 com AAC. Lote 2 = experiência `/create` → `/campaigns/[id]` (planejar, revisar, custo, aprovar). Lote 3 = render real do MP4 com Remotion (local, R$0).
 - Planejamento: `LLM_PROVIDER=mock` (padrão, sem custo) ou `anthropic` (Claude real, pago).
 - Renderer: `RENDERER=mock` (padrão, sem arquivo) ou `remotion` (MP4 real). Narração: `AUDIO_PROVIDER=mock` (padrão, "MODO DE TESTE", sem som) ou `elevenlabs` (real, paga). Vídeo IA: `VIDEO_PROVIDER=mock|runway` (default mock); Runway Gen-4 Turbo real, ver `docs/RUNWAY.md`.

@@ -69,7 +69,7 @@ export function RenderPanel({ creative, rendererIsReal }: { creative: CreativeVi
               tone="amber"
               title={creative.jobStatus === "generating" ? "Geração interrompida" : "Render interrompido"}
               action={
-                <button type="button" className={buttonClasses("secondary", "sm")} onClick={() => setConfirming(true)} disabled={!creative.canRerender}>
+                <button type="button" className={buttonClasses("secondary", "sm")} onClick={() => setConfirming(true)} disabled={!creative.canRerender && !creative.hybrid}>
                   {creative.jobStatus === "generating" ? "Retomar geração" : "Renderizar novamente"}
                 </button>
               }
@@ -98,8 +98,7 @@ export function RenderPanel({ creative, rendererIsReal }: { creative: CreativeVi
               <div>
                 <p className="text-xs font-semibold tracking-wider text-zinc-500 uppercase">Vídeo renderizado · {video.renderId}</p>
                 <p className="mt-1 text-sm text-zinc-700">
-                  MP4 real 1080×1920. Vídeo IA e narração ainda são simulados: cenas de IA aparecem marcadas como
-                  <span className="font-medium"> MOCK · VÍDEO IA</span> e o vídeo não tem som.
+                  MP4 local 1080×1920. O áudio e as cenas seguem os assets registrados no job; os trechos simulados continuam identificados no vídeo.
                 </p>
               </div>
               <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
@@ -115,7 +114,7 @@ export function RenderPanel({ creative, rendererIsReal }: { creative: CreativeVi
                 <a href={video.downloadUrl} className={buttonClasses("primary", "sm")}>
                   Baixar MP4
                 </a>
-                {creative.canRerender && !confirming && (
+                {creative.canRerender && !creative.hybrid && !confirming && (
                   <button type="button" className={buttonClasses("ghost", "sm")} onClick={() => setConfirming(true)}>
                     Renderizar novamente
                   </button>
@@ -151,7 +150,7 @@ export function RenderPanel({ creative, rendererIsReal }: { creative: CreativeVi
         </div>
       )}
 
-      {!video && !activity && !interrupted && creative.jobStatus === "failed" && creative.canRerender && (
+      {!video && !activity && !interrupted && creative.jobStatus === "failed" && creative.canRerender && !creative.hybrid && (
         <div className="flex justify-end">
           {confirming ? (
             confirmBox("Renderizar novamente?", "A mídia já está pronta; só o render é refeito (local, sem custo de API).", "Renderizar")
@@ -163,13 +162,13 @@ export function RenderPanel({ creative, rendererIsReal }: { creative: CreativeVi
         </div>
       )}
 
-      {!rendererIsReal && creative.result && (
+      {!rendererIsReal && !video && creative.result && (
         <Notice tone="green" title="Concluído em modo de teste">
-          Simulação concluída; nenhum MP4 foi gerado. As gerações reais continuam bloqueadas.
+          Simulação concluída; nenhum MP4 foi gerado. Para gerar um arquivo, escolha REAL no painel de render e aprove a execução.
         </Notice>
       )}
 
-      {creative.offline && creative.jobStatus === "completed" && creative.canRerender && (
+      {creative.offline && creative.jobStatus === "completed" && creative.canRerender && !creative.hybrid && (
         <div className="space-y-2">
           <p className="text-xs text-zinc-500">{creative.workflow?.find(s => s.id === "render")?.detail}</p>
           {confirming ? confirmBox("Simular nova versão do render?", "Reutiliza a narração e as cenas salvas, preservando o histórico. Sem geração real ou cobrança.", "Confirmar nova versão simulada") : <button type="button" className={buttonClasses("secondary", "sm")} onClick={() => setConfirming(true)}>Simular nova versão do render</button>}

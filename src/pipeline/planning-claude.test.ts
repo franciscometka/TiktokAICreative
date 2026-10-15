@@ -65,7 +65,7 @@ describe("planejamento com Claude (API isolada por mock)", () => {
       outcome: "valid",
       usage: USAGE,
       promptId: "campaign-plan",
-      promptVersion: "1.3.0",
+      promptVersion: "1.4.0",
     });
     expect(call?.costUsd).toBeCloseTo(0.2102, 6);
     expect(entries.every((e) => e.llmCallId === call?.id)).toBe(true);

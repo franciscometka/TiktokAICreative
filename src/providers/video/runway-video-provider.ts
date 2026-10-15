@@ -124,6 +124,9 @@ export class RunwayVideoProvider implements VideoProvider {
       throw new ProviderError("Runway gerou o clipe, mas o download falhou. Custo preservado; não houve nova geração.", ref.providerJobId, job.usage);
     }
   }
+  resumeTask(ref: ProviderJobRef, request: VideoGenerationRequest): void {
+    this.jobs.set(ref.providerJobId, { seconds: runwayDuration(request.durationSeconds) });
+  }
   private job(ref: ProviderJobRef) {
     const job = this.jobs.get(ref.providerJobId);
     if (!job) throw new ProviderError("Runway: tarefa desconhecida", ref.providerJobId);

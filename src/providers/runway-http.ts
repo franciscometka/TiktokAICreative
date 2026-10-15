@@ -49,7 +49,7 @@ export class RunwayHttpClient {
     return new ProviderError(`Runway: ${labels[diagnostic.kind]}${details ? ` (${details})` : ""}. ${diagnostic.billing === "rejected" ? "Criação rejeitada pelo HTTP; sem tarefa confirmada." : diagnostic.billing === "confirmed" ? "Consumo informado pelo provider." : "Possível cobrança não confirmada."} Sem retry automático.`, id, undefined, diagnostic);
   }
   async api(path: string, init: RequestInit = {}, id?: string): Promise<unknown> {
-    if (!this.injectedTransport) assertRealCallsEnabled();
+    if (!this.injectedTransport) assertRealCallsEnabled(init.method === "POST");
     const creating = init.method === "POST";
     const sensitive: string[] = [];
     if (typeof init.body === "string") {

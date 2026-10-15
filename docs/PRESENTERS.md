@@ -1,3 +1,5 @@
+> **Atualização:** a interface agora oferece modos por etapa. O bloqueio absoluto abaixo descreve ff176bb; veja [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md) para o comportamento atual. `*:real --confirm` isolado continua bloqueado.
+
 > **Estado atual:** chamadas reais/pagas temporariamente bloqueadas, inclusive com `--confirm`. A interface executa somente mocks. Consulte [fluxo offline](OFFLINE-WORKFLOW.md). As instruções reais abaixo documentam a integração preservada para futura liberação.
 
 # Presenter real — Lote 5

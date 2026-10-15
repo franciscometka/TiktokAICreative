@@ -9,7 +9,7 @@ export function WorkflowPanel({ creative }: { creative: CreativeView }) {
       <div><p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Job {String(creative.number).padStart(2, "0")}</p>
         <h2 className="mt-1 text-lg font-semibold">{creative.concept.title.replace(/^\[MOCK\] /, "")}</h2>
         <p className="mt-1 break-all text-xs text-zinc-500">{creative.jobId} · {creative.jobStatusLabel}</p></div>
-      <Badge tone={creative.offline ? "blue" : "neutral"}>{creative.offline ? "Offline · gasto real R$ 0,00" : "Histórico"}</Badge>
+      <Badge tone={creative.offline ? "blue" : "neutral"}>{creative.hybrid ? "Modos por etapa" : creative.offline ? "Offline · gasto real R$ 0,00" : "Histórico"}</Badge>
     </div>
     <dl className="mt-4 flex flex-wrap gap-x-8 gap-y-2 text-sm"><div><dt className="text-zinc-500">Duração planejada</dt><dd className="font-medium">≈ {creative.durationSeconds.toFixed(1)}s</dd></div>
       <div><dt className="text-zinc-500">Custo de referência antes de simular</dt><dd className="font-medium">{creative.estimate ? formatBrl(creative.estimate.futureTotalBrl) : "Calculando"}</dd></div></dl>

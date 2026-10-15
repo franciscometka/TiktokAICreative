@@ -1,3 +1,7 @@
+import { createHash } from "node:crypto";
+import { MOCK_STAGE_MODES, type ExecutionStage, type ExecutionMode, type StageCapabilities, type StageQuote } from "@/domain/execution";
+import { withRealStageAuthorization } from "@/config/execution-policy";
+import { RUNWAY_VIDEO } from "@/config/video-models";
 import { generatePresenter, presenterPreview, PresenterPendingError, type PresenterFlowDeps } from "./presenter-flow";
 import type { PresenterProvider } from "@/providers/presenter/presenter-provider";
 import { readFile } from "node:fs/promises";
@@ -94,6 +98,14 @@ import { transitionCampaign, transitionJob } from "./states";
 
 export interface PipelineDeps {
   planner: CreativePlanner;
+  hybrid?: {
+    capabilities: StageCapabilities;
+    planner: (mode: ExecutionMode) => CreativePlanner;
+    audio: (pricing: ProviderPricing, mode: ExecutionMode) => AudioProvider;
+    video: (pricing: ProviderPricing, mode: ExecutionMode) => VideoProvider;
+    presenter: (pricing: ProviderPricing, mode: ExecutionMode) => PresenterProvider;
+    renderer: (mode: ExecutionMode) => Renderer;
+  };
   offlineOnly?: boolean;
   stageDelayMs?: number;
   presenterProviderFactory?: (pricing: ProviderPricing) => PresenterProvider;
@@ -132,12 +144,14 @@ export class JobInProgressError extends Error {
 export type BudgetExceededOutcome = { kind: "BUDGET_EXCEEDED"; decision: BudgetExceededDecision; job: GenerationJob };
 export type ApproveOutcome = { kind: "APPROVED"; job: GenerationJob } | BudgetExceededOutcome;
 export type GenerationOutcome =
+  | { kind: "WAITING_STAGE"; job: GenerationJob }
   | { kind: "COMPLETED"; job: GenerationJob }
   /** Narração real bem mais longa que o planejado: espera decisão explícita (nada é regerado sozinho). */
   | { kind: "AUDIO_REVIEW"; job: GenerationJob }
   | { kind: "FAILED"; job: GenerationJob; error: string }
   | BudgetExceededOutcome;
 export type RegenerationOutcome =
+  | { kind: "WAITING_STAGE"; job: GenerationJob }
   | { kind: "REGENERATED"; job: GenerationJob }
   | { kind: "AUDIO_REVIEW"; job: GenerationJob }
   | { kind: "FAILED"; job: GenerationJob; error: string }
@@ -171,6 +185,7 @@ interface JobContext {
  *        → regenerateScene (opcional, com checagem de orçamento)
  */
 export class PipelineService {
+  private readonly hybridInvocations = new Set<string>();
   private readonly campaignLocks = new KeyedMutex();
   /**
    * Planejamentos em execução NESTE processo. Não é fila durável: se o processo cair, a campanha
@@ -182,6 +197,217 @@ export class PipelineService {
   private readonly renderProgress = new Map<string, RenderProgress>();
 
   constructor(private readonly deps: PipelineDeps) {}
+
+  // Execução híbrida: uma ação autoriza somente uma unidade da etapa escolhida.
+  private fingerprint(value: unknown): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
+  getStageCapabilities(): StageCapabilities | undefined { return this.deps.hybrid?.capabilities; }
+  private assertHybridInvocation(job: GenerationJob, stage: ExecutionStage): void {
+    if (job.stageModes?.[stage] === "real" && !this.hybridInvocations.has(job.id)) throw new Error("A etapa REAL exige estimativa e aprovação explícita no painel de etapas.");
+  }
+  private videoProvider(ctx: JobContext): VideoProvider {
+    return this.deps.hybrid ? this.deps.hybrid.video(ctx.pricing.video, ctx.job.stageModes?.scenes ?? "mock") : this.deps.videoProviderFactory(ctx.pricing.video);
+  }
+  private matchesMode(attempt: MediaAttempt | undefined, mode: ExecutionMode): boolean { return !!attempt && (mode === "mock" || !attempt.isMock); }
+  /** Adoção local explícita dos jobs MOCK de ff176bb, sem recalcular plano/apagar assets. */
+  private async adoptOfflineCampaign(campaign: Campaign): Promise<void> {
+    if (campaign.executionMode !== "offline") return;
+    for (const job of await this.deps.store.listJobs(campaign.id)) {
+      if (!job.stageModes) await this.deps.store.saveJob({ ...job, stageModes: { ...MOCK_STAGE_MODES } });
+    }
+    await this.deps.store.saveCampaign({ ...campaign, executionMode: "hybrid", request: { ...campaign.request, stageModes: campaign.request.stageModes ?? { ...MOCK_STAGE_MODES } } });
+  }
+  async configureStage(jobId: string, stage: ExecutionStage, mode: ExecutionMode): Promise<void> {
+    if (stage === "planning") throw new Error("O planejamento já produziu este job. Crie uma cópia com ajustes para mudar o roteiro sem invalidar as mídias existentes.");
+    await this.withJobLock(jobId, async () => {
+      this.assertJobIdle(jobId);
+      const ctx = await this.load(jobId);
+      if (!this.deps.hybrid || !["hybrid", "offline"].includes(ctx.campaign.executionMode ?? "")) throw new Error("Crie uma cópia híbrida deste projeto.");
+      if (mode === "real" && !this.deps.hybrid.capabilities[stage].available) throw new Error(this.deps.hybrid.capabilities[stage].reason);
+      if (ctx.job.stageIntents?.some(i => i.state === "running")) throw new Error("Há uma execução pendente/incerta; preserve o modo até reconciliar o provider.");
+      const uncertain = ctx.job.presenterTasks?.some(t => t.state === "pending" || t.state === "submitting");
+      if (uncertain) throw new Error("Há uma tarefa de avatar pendente; retome a tarefa antes de alterar modos.");
+      await this.adoptOfflineCampaign(ctx.campaign);
+      const job = { ...ctx.job, stageModes: { ...MOCK_STAGE_MODES, ...ctx.job.stageModes, [stage]: mode }, stageRevision: (ctx.job.stageRevision ?? 0) + 1, updatedAt: this.deps.clock() };
+      // Preferência não apaga assets, renders, aprovação anterior ou histórico. Cada nova ação recebe outra cotação.
+      await this.deps.store.saveJob(job);
+    });
+  }
+  async quotePlanning(campaignId: string): Promise<StageQuote> {
+    const campaign = await this.deps.store.getCampaign(campaignId);
+    const mode = campaign.request.stageModes?.planning ?? "mock";
+    const pricing = resolvePricing(campaign.settings, this.deps.pricing);
+    const estimatedBrl = mode === "real" ? usdToBrl(worstCaseLlmCostUsd(pricing.llm, this.toWorstCaseParams(this.toPlanningRequest(campaign.request, campaign.settings))), (await this.deps.exchangeRates.getUsdBrl()).rate) : 0;
+    const entries = await this.planningEntries(campaignId);
+    const blocked = mode === "real" && !this.deps.hybrid?.capabilities.planning.available ? this.deps.hybrid?.capabilities.planning.reason ?? "Claude não configurado" : campaign.status === "planned" ? "O plano já existe; crie uma cópia para replanejar." : this.isPlanningActive(campaignId) ? "Planejamento em andamento" : (campaign.planningRuns ?? 0) >= this.deps.maxAttemptsPerScene ? "Limite de tentativas de planejamento atingido" : undefined;
+    return { stage: "planning", mode, unit: campaignId, token: this.fingerprint({ campaign, estimatedBrl }), provider: mode === "real" ? campaign.settings.llm.provider : "mock", model: campaign.settings.llm.model, estimatedBrl, actualBrl: entries.filter(e => !e.simulated).reduce((a,e) => a+e.costBrl,0), simulatedBrl: entries.filter(e => e.simulated).reduce((a,e) => a+e.costBrl,0), ready: !blocked, blocked, done: campaign.status === "planned", state: campaign.status === "planned" ? "Concluído" : campaign.status === "draft" ? "Aguardando aprovação" : campaign.status === "planning" ? "Em andamento ou interrompido" : "Falhou" };
+  }
+  async executePlanning(campaignId: string, token: string) {
+    if (!this.deps.hybrid) throw new Error("Fluxo híbrido indisponível");
+    const campaign = await this.campaignLocks.run(campaignId, async () => {
+      const quote = await this.quotePlanning(campaignId);
+      if (quote.token !== token || !quote.ready) throw new Error(quote.blocked ?? "Estimativa alterada; revise e aprove novamente.");
+      let campaign = await this.deps.store.getCampaign(campaignId);
+      if (campaign.executionMode !== "hybrid" || campaign.status === "planned") throw new Error("Crie uma cópia híbrida para replanejar.");
+      const spent = (await this.deps.ledger.list({ campaignId })).filter(e => !e.simulated).reduce((a,e) => a+e.costBrl,0);
+      await this.assertPlanningFitsBudget(campaign.request, campaign.settings, spent);
+      if (campaign.status === "planning") campaign = this.markInterrupted(campaign);
+      campaign = this.beginPlanningRun({ ...campaign, planningApproval: { quoteToken: token, estimatedBrl: quote.estimatedBrl, approvedAt: this.deps.clock() } });
+      await this.deps.store.saveCampaign(campaign);
+      return campaign;
+    });
+    return { campaign, completion: withRealStageAuthorization("planning", () => this.launchPlanning(campaign)) };
+  }
+  async quoteStage(jobId: string, stage: ExecutionStage, internal = false, regenerate = false): Promise<StageQuote> {
+    if (stage === "planning") return this.quotePlanning((await this.getJob(jobId)).campaignId);
+    const ctx = await this.load(jobId); const { job, creative, campaign } = ctx;
+    const mode = job.stageModes?.[stage] ?? "mock";
+    const narration = activeAttempt(job.audioAttempts);
+    const scenes = creative.scenes.filter(s => (stage === "avatar" || stage === "scenes") && s.requiresGeneratedVideo && (stage === "avatar" ? s.visualSource === "presenter" : s.visualSource !== "presenter"));
+    const scene = regenerate ? scenes[0] : scenes.find(s => !this.matchesMode(activeAttempt(job.scenes.find(g => g.sceneId === s.id)?.attempts ?? []), mode));
+    let unit = stage === "narration" ? "narration" : stage === "render" ? "render" : scene?.id ?? "done";
+    const done = !regenerate && (stage === "narration" ? this.matchesMode(narration, mode) : stage === "render" ? job.status === "completed" && !job.renderStale && job.renders.some(r => r.status === "completed" && (mode === "mock" || !r.isMock)) : !scene);
+    let model = stage === "narration" ? ctx.pricing.audio.model : stage === "render" ? ctx.pricing.rendering.model : stage === "avatar" ? RUNWAY_PRESENTER.model : ctx.pricing.video.model;
+    let provider = mode === "mock" ? "mock" : stage === "narration" ? ctx.pricing.audio.provider : stage === "render" ? "remotion" : "runway";
+    let budgetDecision: BudgetExceededDecision | undefined;
+    let estimatedBrl = 0; let blocked: string | undefined;
+    if (!this.deps.hybrid || !["hybrid", "offline"].includes(campaign.executionMode ?? "")) blocked = "Projeto anterior: crie uma cópia híbrida para continuar.";
+    else if (mode === "real" && !this.deps.hybrid.capabilities[stage].available) blocked = this.deps.hybrid.capabilities[stage].reason;
+    else if (!internal && this.isJobActive(jobId)) blocked = "Etapa em andamento";
+    else if (job.status === "cancelled") blocked = "Job cancelado";
+    try {
+      if (stage === "narration") {
+        const attempts = job.audioAttempts;
+        if (!done && attempts.length >= this.deps.maxAttemptsPerScene) blocked ??= "Limite de tentativas da narração atingido";
+        if (!done && job.presenterTasks?.some(t => !t.isMock && (t.state === "succeeded" || t.state === "pending" || t.state === "submitting"))) blocked ??= "A narração está vinculada ao avatar. Crie uma cópia para mudar a fala preservando a sincronização.";
+        const audio = this.createAudioProvider(ctx); if (!audio.ok) throw new Error(audio.error);
+        const script = buildNarrationScript(creative);
+        const quote = audio.provider.estimateCost({ trackId: "narration", text: script.spoken, language: "pt-BR", speakerProfileId: getSpeakerProfile(campaign.request.speakerProfileId).id });
+        estimatedBrl = quote.costUsd * (await this.deps.exchangeRates.getUsdBrl()).rate;
+      } else if (scene) {
+        const attempts = job.scenes.find(s => s.sceneId === scene.id)!.attempts;
+        const pending = job.presenterTasks?.find(t => t.sceneId === scene.id && (t.state === "pending" || t.state === "submitting"));
+        if (!pending && !job.videoTasks?.some(t => t.sceneId === scene.id && t.state === "pending") && attempts.length >= this.deps.maxAttemptsPerScene) blocked ??= "Limite de tentativas da cena atingido";
+        if (stage === "avatar") {
+          if (!campaign.request.presenterPresetId) blocked ??= "Selecione um avatar ao criar o projeto.";
+          if (!narration) blocked ??= "Execute a narração primeiro.";
+          else {
+            const preview = await presenterPreview(this.deps, campaign, creative, job, scene, mode === "mock");
+            estimatedBrl = this.presenterProvider(ctx).estimateCost(preview.durationSeconds).costUsd * (await this.deps.exchangeRates.getUsdBrl()).rate;
+          }
+          if (pending?.state === "submitting" && !pending.providerJobId) blocked ??= "Envio anterior incerto: sem reenvio automático; confira a tarefa no provider.";
+          if (pending?.providerJobId) unit = `${scene.id}:resume:${pending.providerJobId}`;
+        } else {
+          const video = this.videoProvider(ctx); model = video.descriptor.model; provider = video.descriptor.id;
+          estimatedBrl = video.estimateCost(this.videoRequest(ctx, scene)).costUsd * (await this.deps.exchangeRates.getUsdBrl()).rate;
+          if (mode === "real") await video.validateRequest?.(this.videoRequest(ctx, scene));
+          const uncertain = job.videoTasks?.findLast(t => t.sceneId === scene.id && (t.state === "pending" || t.state === "submitting" || !t.state && !attempts.some(a => a.providerJobId === t.providerJobId)));
+          if (uncertain && uncertain.state !== "pending") blocked ??= "Geração anterior de vídeo incerta. Não será reenviada; confira a tarefa no provider antes de continuar.";
+          if (uncertain?.state === "pending") unit = `${scene.id}:resume:${uncertain.providerJobId}`;
+        }
+      } else if (stage === "render") {
+        if (!mediaComplete(job)) blocked ??= "Conclua narração e cenas primeiro.";
+        if (creative.scenes.some(s => s.requiresGeneratedVideo && !this.matchesMode(activeAttempt(job.scenes.find(g => g.sceneId === s.id)?.attempts ?? []), job.stageModes?.[s.visualSource === "presenter" ? "avatar" : "scenes"] ?? "mock")) || !this.matchesMode(narration, job.stageModes?.narration ?? "mock")) blocked ??= "Há etapas selecionadas em REAL ainda não executadas.";
+        if (narration?.narration?.fit?.action === "review" && !narration.narration.reviewAcceptedAt) blocked ??= "Revise e aceite a duração da narração antes do render.";
+      }
+    } catch (error) { blocked ??= messageOf(error); }
+    if (job.stageIntents?.some(i => i.stage === stage && i.state === "running") && !(stage === "avatar" && job.presenterTasks?.some(t => t.state === "pending" && t.providerJobId)) && !(stage === "scenes" && job.videoTasks?.some(t => t.state === "pending" && t.providerJobId))) blocked ??= "Etapa anterior interrompida com possível cobrança. Sem reenvio: confira o provider e preserve o ledger antes de uma nova execução.";
+    if (regenerate && (stage === "scenes" || stage === "avatar") && !scene) blocked ??= "Não há cenas desta etapa neste job.";
+    if (done) estimatedBrl = 0;
+    if (mode === "mock") estimatedBrl = 0;
+    if (!done && !blocked) { const budget = await this.checkJobBudget(ctx, estimatedBrl); if (budget.kind === "BUDGET_EXCEEDED") { budgetDecision = budget; blocked = `Orçamento insuficiente: total R$${budget.newEstimatedTotalBrl.toFixed(2)}; ajuste o orçamento em uma cópia ou use a decisão de orçamento existente.`; } }
+    const category = stage === "narration" ? "audio" : stage === "render" ? "rendering" : "video";
+    const sceneIds = new Set(scenes.map(s => s.id));
+    const entries = (await this.deps.ledger.list({ jobId })).filter(e => e.category === category && (category !== "video" || !!e.sceneId && sceneIds.has(e.sceneId)));
+    return { regenerate, budgetDecision, stage, mode, unit, token: this.fingerprint({ job, stage, mode, unit, estimatedBrl, model, provider, budgetDecision, regenerate }), provider, model, estimatedBrl, actualBrl: entries.filter(e => !e.simulated).reduce((a,e) => a+e.costBrl,0), simulatedBrl: entries.filter(e => e.simulated).reduce((a,e) => a+e.costBrl,0), ready: !blocked && !done, blocked, done, state: this.isJobActive(jobId) && job.currentStage === stage ? "Em andamento" : done ? "Concluído" : blocked ? "Bloqueado" : "Aguardando ação explícita" };
+  }
+  async executeStage(jobId: string, stage: ExecutionStage, token: string, options: { regenerate?: boolean; authorizeOverBudget?: boolean } = {}) {
+    if (stage === "planning") throw new Error("Use a ação de planejamento do projeto.");
+    let budgetStillBlocked = false;
+    const job = await this.withJobLock(jobId, async () => {
+      this.assertJobIdle(jobId);
+      const quote = await this.quoteStage(jobId, stage, false, options.regenerate);
+      if (token !== quote.token || (!quote.ready && !(options.authorizeOverBudget && quote.budgetDecision?.canAuthorizeOverBudget))) throw new Error(quote.blocked ?? "Estimativa alterada ou etapa concluída; revise novamente.");
+      await this.adoptOfflineCampaign(await this.getCampaign((await this.getJob(jobId)).campaignId));
+      let job = await this.getJob(jobId);
+      if (!job.estimate) throw new Error("Job sem estimativa");
+      if (quote.budgetDecision && options.authorizeOverBudget) job = { ...job, overBudgetAuthorization: authorizeOverBudget(quote.budgetDecision, (await this.getCampaign(job.campaignId)).request.budget, this.deps.clock(), job.overBudgetAuthorization) };
+      const recheck = await this.checkJobBudget({ ...(await this.load(jobId)), job }, quote.estimatedBrl);
+      if (recheck.kind === "BUDGET_EXCEEDED") { budgetStillBlocked = true; await this.deps.store.saveJob(job); return job; }
+      if (job.status === "cost_estimated") job = transitionJob(job, "awaiting_approval", this.deps.clock());
+      if (job.status === "failed") { job = transitionJob(job, "cost_estimated", this.deps.clock()); job = transitionJob(job, "awaiting_approval", this.deps.clock()); }
+      job = { ...job, approval: { estimateId: job.estimate!.id, approvedTotalBrl: quote.estimatedBrl, overBudget: false, approvedAt: this.deps.clock() },
+        stageApprovals: [...(job.stageApprovals ?? []), { stage, mode: quote.mode, provider: quote.provider, model: quote.model, unit: quote.unit, quoteToken: token, estimatedBrl: quote.estimatedBrl, approvedAt: this.deps.clock() }], waitingForStage: undefined, error: undefined };
+      if (job.status === "awaiting_approval" || job.status === "completed" || job.status === "budget_exceeded") job = transitionJob(job, "generating", this.deps.clock());
+      if (job.status !== "generating") throw new Error("Resolva a revisão/orçamento antes de executar outra etapa.");
+      await this.deps.store.saveJob(job); return job;
+    });
+    if (budgetStillBlocked) return { job, completion: Promise.resolve({ kind: "WAITING_STAGE" as const, job }) };
+    return { job, completion: this.launchJob(jobId, () => this.performHybridStage(jobId, stage, options.regenerate)) };
+  }
+  private async performHybridStage(jobId: string, stage: ExecutionStage, regenerate = false): Promise<GenerationOutcome> {
+    this.hybridInvocations.add(jobId);
+    try {
+      return await withRealStageAuthorization(stage, async () => {
+        if (stage === "render") {
+          await this.withJobLock(jobId, async () => { const job = await this.getJob(jobId); await this.deps.store.saveJob(transitionJob(job, "rendering", this.deps.clock())); });
+          return this.renderPhase(jobId);
+        }
+        return this.withJobLock(jobId, async () => {
+          let ctx = await this.load(jobId); let job = ctx.job;
+          assertCanStartPaidCall(job);
+          const quote = await this.quoteStage(jobId, stage, true, regenerate);
+          if (quote.blocked || quote.done) throw new Error(quote.blocked ?? "Etapa já concluída");
+          const paused = await this.pauseIfOverBudget(ctx, quote.estimatedBrl);
+          if (paused) return paused;
+          const mode = job.stageModes?.[stage] ?? "mock";
+          if (mode === "real") {
+            job = { ...job, stageIntents: [...(job.stageIntents ?? []).filter(i => i.stage !== stage || i.state !== "running"), { stage, unit: quote.unit, state: "running", createdAt: this.deps.clock() }] };
+            await this.deps.store.saveJob(job); ctx = { ...ctx, job };
+          }
+          if (stage === "narration") {
+            assertAttemptsAvailable(job.audioAttempts, this.deps.maxAttemptsPerScene);
+            const provider = this.createAudioProvider(ctx); if (!provider.ok) return this.fail(job, provider.error);
+            job = await this.stage(job, "narration");
+            const result = await this.generateNarration({ ...ctx, job }, provider.provider); job = result.job;
+            if (result.attempt.status === "failed") { job = { ...job, stageIntents: job.stageIntents?.map(i => i.stage === stage ? { ...i, state: "settled" as const } : i) }; return this.fail(job, result.attempt.error); }
+          } else {
+            for (const scene of ctx.creative.scenes.filter(s => s.requiresGeneratedVideo && (stage === "avatar" ? s.visualSource === "presenter" : s.visualSource !== "presenter"))) {
+              const state = job.scenes.find(s => s.sceneId === scene.id)!;
+              if (!regenerate && this.matchesMode(activeAttempt(state.attempts), mode)) continue;
+              const pending = job.presenterTasks?.some(t => t.sceneId === scene.id && (t.state === "pending" || t.state === "submitting")) || job.videoTasks?.some(t => t.sceneId === scene.id && t.state === "pending");
+              if (!pending) assertAttemptsAvailable(state.attempts, this.deps.maxAttemptsPerScene);
+              job = await this.stage(job, stage === "avatar" ? "avatar" : "scenes"); ctx = { ...ctx, job };
+              const result = stage === "avatar" ? await this.generatePresenterScene(ctx, scene, !pending && state.attempts.length > 0) : await this.generateSceneVideo(ctx, scene, this.videoProvider(ctx));
+              job = result.job; if (result.attempt.status === "failed") { job = { ...job, stageIntents: job.stageIntents?.map(i => i.stage === stage ? { ...i, state: "settled" as const } : i) }; return this.fail(job, result.attempt.error); }
+              if (mode === "real") break; // Uma cena paga por clique, nunca a próxima automaticamente.
+            }
+          }
+          job = { ...job, stageIntents: job.stageIntents?.map(i => i.stage === stage ? { ...i, state: "settled" as const } : i) };
+          if (stage === "narration" && activeAttempt(job.audioAttempts)?.narration?.fit?.action === "review") { const next = transitionJob(job, "audio_review", this.deps.clock()); await this.deps.store.saveJob(next); return { kind: "AUDIO_REVIEW", job: next }; }
+          job = { ...job, renderStale: true, waitingForStage: stage, updatedAt: this.deps.clock() };
+          await this.deps.store.saveJob(job);
+          return { kind: "WAITING_STAGE", job };
+        });
+      });
+    } catch (error) {
+      const job = await this.getJob(jobId);
+      if (error instanceof PresenterPendingError) return { kind: "WAITING_STAGE", job };
+      return this.fail(job, messageOf(error));
+    } finally { this.hybridInvocations.delete(jobId); }
+  }
+  private async runHybridMocks(jobId: string): Promise<GenerationOutcome> {
+    for (const stage of ["narration", "scenes", "avatar", "render"] as const) {
+      const job = await this.getJob(jobId);
+      if (job.stageModes?.[stage] === "real" && !(await this.quoteStage(jobId, stage, true)).done) { const next = { ...job, waitingForStage: stage }; await this.deps.store.saveJob(next); return { kind: "WAITING_STAGE", job: next }; }
+      const quote = await this.quoteStage(jobId, stage, true);
+      if (quote.done) continue;
+      // A execução ativa é nossa; bloqueios de dependência permanecem válidos.
+      if (quote.blocked && quote.blocked !== "Etapa em andamento") { const next = { ...job, waitingForStage: stage }; await this.deps.store.saveJob(next); return { kind: "WAITING_STAGE", job: next }; }
+      const result = await this.performHybridStage(jobId, stage);
+      if (result.kind !== "WAITING_STAGE") return result;
+    }
+    return { kind: "WAITING_STAGE", job: await this.getJob(jobId) };
+  }
 
   // ---------------------------------------------------------------- planejamento
 
@@ -204,8 +430,10 @@ export class PipelineService {
    */
   async startPlanning(input: CampaignRequest): Promise<{ campaign: Campaign; completion: Promise<Campaign> }> {
     const { store, clock, ids } = this.deps;
-    this.assertPlannerAvailable();
     const request = CampaignRequestSchema.parse(input);
+    const planningMode = request.stageModes?.planning ?? "mock";
+    if (!this.deps.hybrid) this.assertPlannerAvailable();
+    if (this.deps.hybrid) for (const [stage, mode] of Object.entries(request.stageModes ?? {})) { if (mode === "real" && !this.deps.hybrid.capabilities[stage as ExecutionStage].available) throw new Error(this.deps.hybrid.capabilities[stage as ExecutionStage].reason); }
     const resolved = resolveQualitySettings(request.quality, request.customSettings);
     const settings = this.deps.videoChoice && request.quality !== "custom" ? { ...resolved, video: this.deps.videoChoice } : resolved;
     await this.assertPlanningFitsBudget(request, settings, 0);
@@ -214,15 +442,16 @@ export class PipelineService {
     let campaign: Campaign = {
       id: ids("campaign"),
       status: "draft",
-      executionMode: this.deps.offlineOnly ? "offline" : undefined,
+      executionMode: this.deps.hybrid ? "hybrid" : this.deps.offlineOnly ? "offline" : undefined,
       request,
       settings,
-      plannerId: this.deps.planner.id,
+      plannerId: this.deps.hybrid ? (planningMode === "real" ? "anthropic" : "mock") : this.deps.planner.id,
       jobIds: [],
       createdAt,
       updatedAt: createdAt,
     };
     await store.saveCampaign(campaign);
+    if (this.deps.hybrid && planningMode === "real") return { campaign, completion: Promise.resolve(campaign) };
     campaign = this.beginPlanningRun(campaign);
     await store.saveCampaign(campaign);
     return { campaign, completion: this.launchPlanning(campaign) };
@@ -237,6 +466,7 @@ export class PipelineService {
     return this.campaignLocks.run(campaignId, async () => {
       let campaign = await this.deps.store.getCampaign(campaignId);
       this.assertExecutionMode(campaign);
+      if (campaign.executionMode === "hybrid" && campaign.request.stageModes?.planning === "real") throw new Error("Use a aprovação explícita da etapa de planejamento.");
       if (this.isPlanningActive(campaignId)) {
         throw new PlanningInProgressError("O planejamento desta campanha ainda está em andamento");
       }
@@ -346,7 +576,7 @@ export class PipelineService {
 
     let outcome: { ok: true; result: PlanningResult } | { ok: false; error: unknown };
     try {
-      outcome = { ok: true, result: await this.deps.planner.plan(this.toPlanningRequest(started.request, settings)) };
+      outcome = { ok: true, result: await (this.deps.hybrid ? this.deps.hybrid.planner(started.request.stageModes?.planning ?? "mock") : this.deps.planner).plan(this.toPlanningRequest(started.request, settings)) };
     } catch (error) {
       outcome = { ok: false, error };
     }
@@ -382,7 +612,7 @@ export class PipelineService {
         }),
       } : outcome.result.plan;
       const review = reviewCampaignPlan(selectedPlan, settings, pricing, rate);
-      const jobs = review.plan.creatives.map((creative) => this.newJob(campaign.id, creative));
+      const jobs = review.plan.creatives.map((creative) => ({ ...this.newJob(campaign.id, creative), ...(this.deps.hybrid ? { stageModes: started.request.stageModes ?? { ...MOCK_STAGE_MODES } } : {}) }));
       for (const job of jobs) await store.saveJob(job);
       campaign = {
         ...transitionCampaign(campaign, "planned", clock()),
@@ -517,12 +747,13 @@ export class PipelineService {
       this.assertJobIdle(jobId);
       const ctx = await this.load(jobId);
       assertStatus(ctx.job, "awaiting_approval");
+      if (this.deps.hybrid) await this.adoptOfflineCampaign(ctx.campaign);
       assertApprovalValid(ctx.job);
       const next = transitionJob(ctx.job, "generating", this.deps.clock());
       await this.deps.store.saveJob(next);
       return next;
     });
-    return { job, completion: this.launchJob(jobId, () => this.continueGeneration(jobId)) };
+    return { job, completion: this.launchJob(jobId, () => this.deps.hybrid ? this.runHybridMocks(jobId) : this.continueGeneration(jobId)) };
   }
 
   /** Como startGeneration, mas espera o desfecho (scripts e testes). */
@@ -562,7 +793,7 @@ export class PipelineService {
       const cancelled: GenerationOutcome = { kind: "FAILED", job, error: "Cancelado pelo usuário por orçamento" };
       return { job, completion: Promise.resolve(cancelled) };
     }
-    return { job, completion: this.launchJob(jobId, () => this.continueGeneration(jobId)) };
+    return { job, completion: this.launchJob(jobId, () => this.deps.hybrid ? this.runHybridMocks(jobId) : this.continueGeneration(jobId)) };
   }
 
   async resolveBudgetDecision(jobId: string, choice: "cancel" | "authorize"): Promise<GenerationOutcome> {
@@ -577,6 +808,13 @@ export class PipelineService {
    * orçamento antes de cada chamada.
    */
   async startRerender(jobId: string): Promise<{ job: GenerationJob; completion: Promise<GenerationOutcome> }> {
+    if (this.deps.hybrid) {
+      const job = await this.getJob(jobId);
+      if (!job.stageModes) throw new Error("Crie uma cópia híbrida para continuar.");
+      if (job.status !== "generating") throw new Error("Use a execução ou nova versão no painel de etapas.");
+      this.assertJobIdle(jobId);
+      return { job, completion: this.launchJob(jobId, () => this.runHybridMocks(jobId)) };
+    }
     let resumeGeneration = false;
     const job = await this.withJobLock(jobId, async () => {
       this.assertJobIdle(jobId);
@@ -599,7 +837,7 @@ export class PipelineService {
       await this.deps.store.saveJob(next);
       return next;
     });
-    const run = resumeGeneration ? () => this.continueGeneration(jobId) : () => this.renderPhase(jobId);
+    const run = this.deps.hybrid ? () => this.runHybridMocks(jobId) : resumeGeneration ? () => this.continueGeneration(jobId) : () => this.renderPhase(jobId);
     return { job, completion: this.launchJob(jobId, run) };
   }
 
@@ -616,7 +854,7 @@ export class PipelineService {
       if (!active?.narration) throw new UnexpectedStatusError("Não há narração ativa para aceitar");
       const acceptedAt = this.deps.clock();
       const next: GenerationJob = {
-        ...transitionJob(ctx.job, ctx.creative.scenes.some(s => s.visualSource === "presenter") ? "generating" : "rendering", acceptedAt),
+        ...transitionJob(ctx.job, this.deps.hybrid || ctx.creative.scenes.some(s => s.visualSource === "presenter") ? "generating" : "rendering", acceptedAt),
         audioAttempts: ctx.job.audioAttempts.map((a) =>
           a.id === active.id && a.narration ? { ...a, narration: { ...a.narration, reviewAcceptedAt: acceptedAt } } : a,
         ),
@@ -625,7 +863,7 @@ export class PipelineService {
       await this.deps.store.saveJob(next);
       return next;
     });
-    return { job, completion: this.launchJob(jobId, () => job.status === "generating" ? this.continueGeneration(jobId) : this.renderPhase(jobId)) };
+    return { job, completion: this.launchJob(jobId, () => this.deps.hybrid ? this.runHybridMocks(jobId) : job.status === "generating" ? this.continueGeneration(jobId) : this.renderPhase(jobId)) };
   }
 
   /**
@@ -642,6 +880,7 @@ export class PipelineService {
       this.assertJobIdle(jobId);
       const ctx = await this.load(jobId);
       let job = ctx.job;
+      if (ctx.campaign.executionMode === "hybrid") throw new Error("Use a execução explícita no painel de etapas.");
       assertStatus(job, "completed", "audio_review");
       assertApprovalValid(job);
       assertAttemptsAvailable(job.audioAttempts, this.deps.maxAttemptsPerScene);
@@ -694,7 +933,7 @@ export class PipelineService {
 
   /** Job em "generating"/"rendering" sem execução neste processo = interrompido (derivado). */
   isJobInterrupted(job: GenerationJob): boolean {
-    return (job.status === "generating" || job.status === "rendering") && !this.isJobActive(job.id);
+    return (job.status === "generating" || job.status === "rendering") && !job.waitingForStage && !this.isJobActive(job.id);
   }
 
   /** Progresso REAL de frames do render em andamento (só em memória). */
@@ -724,8 +963,8 @@ export class PipelineService {
 
       let additional = sceneEstimateBrl(job, sceneId);
       if (scene.visualSource === "presenter") {
-        const preview = await presenterPreview(this.deps, ctx.campaign, ctx.creative, job, scene, this.presenterProvider().descriptor.isMock);
-        additional = this.presenterProvider().estimateCost(preview.durationSeconds).costUsd * (await this.deps.exchangeRates.getUsdBrl()).rate;
+        const preview = await presenterPreview(this.deps, ctx.campaign, ctx.creative, job, scene, this.presenterProvider(ctx).descriptor.isMock);
+        additional = this.presenterProvider(ctx).estimateCost(preview.durationSeconds).costUsd * (await this.deps.exchangeRates.getUsdBrl()).rate;
       }
       let check = await this.checkJobBudget({ ...ctx, job }, additional);
       if (check.kind === "BUDGET_EXCEEDED") {
@@ -746,7 +985,7 @@ export class PipelineService {
       let video: VideoProvider | undefined;
       try {
         if (scene.visualSource !== "presenter") {
-          video = this.deps.videoProviderFactory(ctx.pricing.video);
+          video = this.videoProvider(ctx);
           await video.validateRequest?.(this.videoRequest(ctx, scene));
         }
       } catch (error) { return { kind: "FAILED", job, error: messageOf(error) }; }
@@ -794,19 +1033,22 @@ export class PipelineService {
   async getJobCostReport(jobId: string): Promise<JobCostReport> {
     const job = await this.deps.store.getJob(jobId);
     const entries = await this.deps.ledger.list({ jobId });
-    return { estimate: job.estimate, actual: summarizeActualCosts(entries, discardedAttemptIds(job)) };
+    const hybrid = (await this.getCampaign(job.campaignId)).executionMode === "hybrid";
+    return { estimate: job.estimate, actual: summarizeActualCosts(hybrid ? entries.filter(e => !e.simulated) : entries, discardedAttemptIds(job)) };
   }
 
   async getCampaignCostReport(campaignId: string): Promise<ActualCostSummary> {
     const jobs = await this.deps.store.listJobs(campaignId);
     const discarded = new Set(jobs.flatMap((j) => [...discardedAttemptIds(j)]));
-    return summarizeActualCosts(await this.deps.ledger.list({ campaignId }), discarded);
+    const entries = await this.deps.ledger.list({ campaignId });
+    return summarizeActualCosts((await this.getCampaign(campaignId)).executionMode === "hybrid" ? entries.filter(e => !e.simulated) : entries, discarded);
   }
 
   // ---------------------------------------------------------------- internos
 
   /** Geração (sob o lock da campanha: chamadas pagas + orçamento) e depois render (fora do lock). */
   private async continueGeneration(jobId: string): Promise<GenerationOutcome> {
+    if (this.deps.hybrid) throw new Error("Use a nova versão no painel de etapas, com custo e aprovação próprios.");
     const outcome = await this.withJobLock(jobId, async () => this.runGeneration(await this.load(jobId)));
     if (outcome.kind !== "READY_TO_RENDER") return outcome;
     return this.renderPhase(jobId);
@@ -819,10 +1061,10 @@ export class PipelineService {
     try {
       if (hasPresenter) {
         if (!ctx.campaign.request.presenterPresetId) throw new Error("Selecione um avatar para o presenter antes de aprovar.");
-        this.presenterProvider();
+        this.presenterProvider(ctx);
       }
       const genericScenes = ctx.creative.scenes.filter(s => s.requiresGeneratedVideo && s.visualSource !== "presenter");
-      if (genericScenes.length) video = this.deps.videoProviderFactory(ctx.pricing.video);
+      if (genericScenes.length) video = this.videoProvider(ctx);
       for (const scene of genericScenes) {
         await video!.validateRequest?.(this.videoRequest(ctx, scene));
       }
@@ -854,9 +1096,9 @@ export class PipelineService {
       let additional = remainingEstimateBrl(job);
       if (scene.visualSource === "presenter" && !pendingPresenter) {
         try {
-          const preview = await presenterPreview(this.deps, ctx.campaign, ctx.creative, job, scene, this.presenterProvider().descriptor.isMock);
+          const preview = await presenterPreview(this.deps, ctx.campaign, ctx.creative, job, scene, this.presenterProvider(ctx).descriptor.isMock);
           const rate = (await this.deps.exchangeRates.getUsdBrl()).rate;
-          additional = Math.max(0, additional - sceneEstimateBrl(job, scene.id)) + this.presenterProvider().estimateCost(preview.durationSeconds).costUsd * rate;
+          additional = Math.max(0, additional - sceneEstimateBrl(job, scene.id)) + this.presenterProvider(ctx).estimateCost(preview.durationSeconds).costUsd * rate;
         } catch (error) { return this.fail(job, messageOf(error)); }
       }
       const paused = pendingPresenter ? undefined : await this.pauseIfOverBudget({ ...ctx, job }, additional);
@@ -906,7 +1148,7 @@ export class PipelineService {
 
   private createAudioProvider(ctx: JobContext): { ok: true; provider: AudioProvider } | { ok: false; error: string } {
     try {
-      return { ok: true, provider: this.deps.audioProviderFactory(ctx.pricing.audio) };
+      return { ok: true, provider: this.deps.hybrid ? this.deps.hybrid.audio(ctx.pricing.audio, ctx.job.stageModes?.narration ?? "mock") : this.deps.audioProviderFactory(ctx.pricing.audio) };
     } catch (error) {
       if (error instanceof ProviderError) return { ok: false, error: error.message };
       throw error;
@@ -925,7 +1167,8 @@ export class PipelineService {
     return { kind: "BUDGET_EXCEEDED", decision: check, job };
   }
 
-  private presenterProvider(): PresenterProvider {
+  private presenterProvider(ctx?: JobContext): PresenterProvider {
+    if (this.deps.hybrid && ctx) return this.deps.hybrid.presenter(this.deps.pricing.requireOne(RUNWAY_PRESENTER), ctx.job.stageModes?.avatar ?? "mock");
     if (!this.deps.presenterProviderFactory) throw new Error("Presenter Runway não configurado.");
     return this.deps.presenterProviderFactory(this.deps.pricing.requireOne(RUNWAY_PRESENTER));
   }
@@ -975,7 +1218,8 @@ export class PipelineService {
     return this.estimateCost(job.id);
   }
   private async generatePresenterScene(ctx: JobContext, scene: ScenePlan, regenerate = false) {
-    const provider = this.presenterProvider();
+    this.assertHybridInvocation(ctx.job, "avatar");
+    const provider = this.presenterProvider(ctx);
     return generatePresenter(this.presenterDeps(), { campaign: ctx.campaign, plan: ctx.creative, job: ctx.job, scene, provider,
       exchangeRate: (await this.deps.exchangeRates.getUsdBrl()).rate, regenerate });
   }
@@ -989,6 +1233,7 @@ export class PipelineService {
     scene: ScenePlan,
     provider: VideoProvider,
   ): Promise<{ job: GenerationJob; attempt: MediaAttempt }> {
+    this.assertHybridInvocation(ctx.job, "scenes");
     assertCanStartPaidCall(ctx.job);
     return this.executeAttempt(ctx, {
       kind: "video",
@@ -997,14 +1242,31 @@ export class PipelineService {
       category: "video",
       operation: "video_generation",
       description: `Vídeo IA — cena ${scene.order + 1}`,
-      run: async () => {
+      run: async (attemptId) => {
+        const durable = ctx.campaign.executionMode === "hybrid" && !provider.descriptor.isMock;
+        const previous = durable ? ctx.job.videoTasks?.findLast(t => t.sceneId === scene.id && (t.state === "pending" || t.state === "submitting")) : undefined;
+        if (previous) {
+          if (!previous.providerJobId || !provider.resumeTask) throw new Error("Envio de vídeo incerto. Sem reenvio pago automático.");
+          const ref = { providerJobId: previous.providerJobId };
+          provider.resumeTask(ref, this.videoRequest(ctx, scene));
+          try { return await this.awaitResult(ref, provider); }
+          catch (error) { if (error instanceof ProviderError && error.billedUsage) ctx.job = { ...ctx.job, videoTasks: ctx.job.videoTasks?.map(t => t.providerJobId === ref.providerJobId ? { ...t, state: "settled" as const } : t) }; throw error; }
+        }
+        if (durable) {
+          ctx.job = { ...ctx.job, videoTasks: [...(ctx.job.videoTasks ?? []), { attemptId, sceneId: scene.id, providerJobId: "", provider: provider.descriptor.id, model: provider.descriptor.model, createdAt: this.deps.clock(), state: "submitting" }] };
+          await this.deps.store.saveJob(ctx.job);
+        }
         const ref = await provider.generateScene(this.videoRequest(ctx, scene));
-        ctx.job = { ...ctx.job, videoTasks: [...(ctx.job.videoTasks ?? []), {
-          sceneId: scene.id, providerJobId: ref.providerJobId, provider: provider.descriptor.id,
-          model: provider.descriptor.model, createdAt: this.deps.clock(),
-        }] };
+        const task = { attemptId, sceneId: scene.id, providerJobId: ref.providerJobId, provider: provider.descriptor.id, model: provider.descriptor.model, createdAt: this.deps.clock(), ...(durable ? { state: "pending" as const } : {}) };
+        ctx.job = { ...ctx.job, videoTasks: [...(ctx.job.videoTasks ?? []).filter(t => !(durable && t.sceneId === scene.id && t.state === "submitting")), task] };
         await this.deps.store.saveJob(ctx.job);
-        return this.awaitResult(ref, provider);
+        try { return await this.awaitResult(ref, provider); }
+        catch (error) {
+          if (error instanceof ProviderError && error.billedUsage) {
+            ctx.job = { ...ctx.job, videoTasks: ctx.job.videoTasks?.map(t => t.providerJobId === ref.providerJobId ? { ...t, state: "settled" as const } : t) };
+          }
+          throw error;
+        }
       },
       finalize: async (result, attemptId, ref) => {
         if (result.isMock) return { uri: result.uri, durationSeconds: result.durationSeconds };
@@ -1035,6 +1297,7 @@ export class PipelineService {
     ctx: JobContext,
     provider: AudioProvider,
   ): Promise<{ job: GenerationJob; attempt: MediaAttempt }> {
+    this.assertHybridInvocation(ctx.job, "narration");
     assertCanStartPaidCall(ctx.job);
     // Narração CONTÍNUA por criativo (D55): um texto falado, uma chamada, um timing.
     const speaker = getSpeakerProfile(ctx.campaign.request.speakerProfileId);
@@ -1102,7 +1365,7 @@ export class PipelineService {
       fit,
       note,
     };
-    if (!result.data) return { uri: result.uri, durationSeconds: result.durationSeconds, narration: result.isMock && ctx.campaign.executionMode === "offline" ? { ...narration, version: `mock-v${ctx.job.audioAttempts.length + 1}` } : narration };
+    if (!result.data) return { uri: result.uri, durationSeconds: result.durationSeconds, narration: result.isMock && ["offline", "hybrid"].includes(ctx.campaign.executionMode ?? "") ? { ...narration, version: `mock-v${ctx.job.audioAttempts.length + 1}` } : narration };
 
     const stored = await this.deps.audioAssets.save({
       campaignId: ctx.campaign.id,
@@ -1158,7 +1421,7 @@ export class PipelineService {
       category: CostCategory;
       operation: CostOperation;
       description: string;
-      run: () => Promise<{ ref: ProviderJobRef; result: MediaResult }>;
+      run: (attemptId: string) => Promise<{ ref: ProviderJobRef; result: MediaResult }>;
       /** Pós-processamento DEPOIS do custo registrado (ex.: salvar a narração). Falha = tentativa falha (custo mantido). */
       finalize?: (result: MediaResult, attemptId: string, ref: ProviderJobRef) => Promise<{ uri: string; durationSeconds: number; narration?: NarrationInfo; media?: ClipDurationCheck }>;
     },
@@ -1167,20 +1430,22 @@ export class PipelineService {
     const previous = spec.kind === "audio"
       ? ctx.job.audioAttempts
       : (ctx.job.scenes.find((s) => s.sceneId === spec.sceneId)?.attempts ?? []);
-    const attemptId = ids("attempt");
+    const pendingVideoTask = ctx.campaign.executionMode === "hybrid" && spec.kind === "video" ? ctx.job.videoTasks?.findLast(t => t.sceneId === spec.sceneId && t.state === "pending") : undefined;
+    const attemptId = pendingVideoTask?.attemptId ?? ids("attempt");
     const base = {
       id: attemptId,
       kind: spec.kind,
       sceneId: spec.sceneId,
-      attemptNumber: previous.length + 1,
+      attemptNumber: previous.find(a => a.id === attemptId)?.attemptNumber ?? previous.length + 1,
       provider: spec.provider.id,
       model: spec.provider.model,
       isMock: spec.provider.isMock,
       createdAt: clock(),
     };
     const rate = (await this.deps.exchangeRates.getUsdBrl()).rate;
-    const recordCost = (usage: Usage) =>
-      this.deps.ledger.record(
+    const recordCost = async (usage: Usage) => {
+      if (pendingVideoTask && (await this.deps.ledger.list({ jobId: ctx.job.id })).some(e => e.attemptId === attemptId)) return;
+      return this.deps.ledger.record(
         buildActualCost({
           id: ids("cost"),
           campaignId: ctx.campaign.id,
@@ -1198,10 +1463,11 @@ export class PipelineService {
           createdAt: clock(),
         }),
       );
+    };
 
     let attempt: MediaAttempt;
     try {
-      const { ref, result } = await spec.run();
+      const { ref, result } = await spec.run(attemptId);
       await recordCost(result.billedUsage);
       let output: { uri: string; durationSeconds: number; narration?: NarrationInfo; media?: ClipDurationCheck } = {
         uri: result.uri,
@@ -1262,7 +1528,7 @@ export class PipelineService {
   ): Promise<{ job: GenerationJob; attempt: MediaAttempt }> {
     const { clock } = this.deps;
     const withAttempt = (list: readonly MediaAttempt[]) => [
-      ...list.map((a) => (attempt.status === "succeeded" ? { ...a, active: false } : a)),
+      ...list.filter(a => a.id !== attempt.id).map((a) => (attempt.status === "succeeded" ? { ...a, active: false } : a)),
       attempt,
     ];
     const job: GenerationJob =
@@ -1275,6 +1541,9 @@ export class PipelineService {
             ),
             updatedAt: clock(),
           };
+    if (spec.kind === "video" && (attempt.status === "succeeded" || attempt.media || attempt.error && ctx.job.videoTasks?.some(t => t.state === "settled" && t.providerJobId === attempt.providerJobId))) {
+      job.videoTasks = job.videoTasks?.map(t => t.sceneId === spec.sceneId && t.state === "pending" ? { ...t, state: "settled" as const } : t);
+    }
     await this.deps.store.saveJob(job);
     return { job, attempt };
   }
@@ -1286,7 +1555,10 @@ export class PipelineService {
    * 3. (lock) grava o desfecho: completed + output, ou failed + erro. Custo local (R$0) no ledger.
    */
   private async renderPhase(jobId: string): Promise<GenerationOutcome> {
-    const { clock, ids, renderer } = this.deps;
+    const { clock, ids } = this.deps;
+    const current = await this.deps.store.getJob(jobId);
+    this.assertHybridInvocation(current, "render");
+    const renderer = this.deps.hybrid ? this.deps.hybrid.renderer(current.stageModes?.render ?? "mock") : this.deps.renderer;
     const prepared = await this.withJobLock(jobId, async () => {
       const ctx = await this.load(jobId);
       let job = ctx.job;
@@ -1400,6 +1672,7 @@ export class PipelineService {
           warnings: result.warnings,
         }),
         outputUri: result.outputUri,
+        renderStale: false, waitingForStage: undefined,
         error: undefined,
       };
       await this.deps.store.saveJob(job);
@@ -1457,7 +1730,9 @@ export class PipelineService {
       this.deps.store.listJobs(ctx.campaign.id),
       this.deps.ledger.list({ campaignId: ctx.campaign.id }),
     ]);
-    const snapshot = budgetSnapshot(ctx.job, jobs, entries);
+    const countedEntries = ctx.campaign.executionMode === "hybrid" ? entries.filter(e => !e.simulated) : entries;
+    const snapshot = budgetSnapshot(ctx.job, jobs, countedEntries);
+    if (ctx.campaign.executionMode === "hybrid") snapshot.creativeCurrentBrl = countedEntries.filter(e => e.jobId === ctx.job.id).reduce((a,e) => a+e.costBrl,0) + countedEntries.filter(e => e.jobId === null).reduce((a,e) => a+e.costBrl,0) / Math.max(1, jobs.length);
     return checkBudget({
       budget: ctx.campaign.request.budget,
       authorization: ctx.job.overBudgetAuthorization,
@@ -1467,7 +1742,7 @@ export class PipelineService {
   }
 
   private assertExecutionMode(campaign: Campaign): void {
-    if (this.deps.offlineOnly && campaign.executionMode !== "offline") throw new UnexpectedStatusError("Projeto anterior em consulta. Crie uma cópia offline para continuar sem alterar dados reais.");
+    if ((this.deps.hybrid && !["hybrid", "offline"].includes(campaign.executionMode ?? "")) || (this.deps.offlineOnly && campaign.executionMode !== "offline")) throw new UnexpectedStatusError("Projeto anterior em consulta. Crie uma cópia offline para continuar sem alterar dados reais.");
   }
   private async stage(job: GenerationJob, currentStage: NonNullable<GenerationJob["currentStage"]>): Promise<GenerationJob> {
     const next = { ...job, currentStage, updatedAt: this.deps.clock() };
@@ -1481,7 +1756,7 @@ export class PipelineService {
     this.assertExecutionMode(campaign);
     const creative = campaign.plan?.creatives.find((c) => c.id === job.creativeId);
     if (!creative) throw new UnexpectedStatusError(`Criativo ${job.creativeId} não encontrado no plano`);
-    return { job, campaign, creative, pricing: resolvePricing(campaign.settings, this.deps.pricing) };
+    return { job, campaign, creative, pricing: resolvePricing(job.stageModes?.scenes === "real" ? { ...campaign.settings, video: RUNWAY_VIDEO } : campaign.settings, this.deps.pricing) };
   }
 
   private newJob(campaignId: string, creative: CreativePlan): GenerationJob {
@@ -1509,7 +1784,7 @@ export class PipelineService {
   }
 
   private toWorstCaseParams(request: PlanningRequest): PlanningWorstCase {
-    return this.deps.planner.worstCase(request);
+    return (this.deps.planner).worstCase(request);
   }
 
   /** Preço do modelo que REALMENTE respondeu; se ausente no catálogo, usa o do modelo solicitado e avisa. */

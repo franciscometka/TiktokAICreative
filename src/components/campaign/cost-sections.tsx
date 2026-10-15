@@ -122,7 +122,7 @@ export function CreativeCostCard({
             </Notice>
           )}
 
-          {creative.jobId && (
+          {creative.jobId && (!creative.hybrid || creative.stageQuotes?.every(q => q.mode === "mock")) && (
             <ApprovalControls
               jobId={creative.jobId}
               estimateId={estimate.estimateId}

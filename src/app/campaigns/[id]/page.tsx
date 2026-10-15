@@ -1,3 +1,4 @@
+import { StageExecutionPanel } from "@/components/campaign/stage-execution-panel";
 import { WorkflowPanel } from "@/components/campaign/workflow-panel";
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -25,6 +26,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 }
 
 function stepStates(view: CampaignView): StepState[] {
+  if (view.planningQuote?.ready && view.planning.runs === 0) return ["done", "done", "current"];
   switch (view.state) {
     case "planning":
       return ["done", "done", "current"];
@@ -102,9 +104,11 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
 
       {view.videoConcept ? <p className="mt-4 max-w-3xl text-sm leading-relaxed text-zinc-600">{view.videoConcept}</p> : null}
       {view.offlineReadOnly ? <div className="mt-6"><Notice title="Projeto anterior em consulta">
-        As chamadas reais estão bloqueadas. Os dados e custos originais foram preservados.
-        <Link href={`/create?from=${view.id}`} className={`${buttonClasses("secondary", "sm")} mt-3`}>Criar cópia offline para continuar</Link>
+        Os dados e custos originais foram preservados. Crie uma cópia para escolher modos por etapa.
+        <Link href={`/create?from=${view.id}`} className={`${buttonClasses("secondary", "sm")} mt-3`}>Criar cópia híbrida para continuar</Link>
       </Notice></div> : null}
+      {view.stageCapabilities && view.planningQuote ? <div className="mt-6"><StageExecutionPanel campaignId={id} quotes={[view.planningQuote]} capabilities={view.stageCapabilities} /></div> : null}
+      {view.stageCapabilities ? view.creatives.map(c => c.stageQuotes ? <div className="mt-6" key={c.id}><StageExecutionPanel jobId={c.jobId} campaignId={id} quotes={c.stageQuotes} capabilities={view.stageCapabilities!} /></div> : null) : null}
       {planned ? <section className="mt-6 space-y-4" aria-label="Jobs do projeto">{view.creatives.map(creative => <WorkflowPanel key={creative.id} creative={creative} />)}</section> : null}
       {view.planning.simulated && (
         <div className="mt-6">

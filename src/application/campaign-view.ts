@@ -1,3 +1,4 @@
+import type { StageQuote, StageCapabilities } from "@/domain/execution";
 import { jobWorkflow, type WorkflowStep } from "./job-workflow";
 import { presenterSceneViews, type PresenterSceneView } from "./presenter-view";
 import { claudeModelName } from "@/config/llm-models";
@@ -111,6 +112,8 @@ export interface JobActivity {
 }
 
 export interface CreativeView {
+  stageQuotes?: StageQuote[];
+  hybrid?: boolean;
   workflow?: WorkflowStep[];
   offline?: boolean;
   presenters?: PresenterSceneView[];
@@ -154,6 +157,8 @@ export interface CreativeView {
 }
 
 export interface CampaignView {
+  stageCapabilities?: StageCapabilities;
+  planningQuote?: StageQuote;
   projectName?: string;
   videoConcept?: string;
   offlineReadOnly?: boolean;
@@ -275,7 +280,7 @@ function creativeView(
   const status = job?.status;
   const running = status === "generating" || status === "rendering";
   const active = running && activity?.active === true;
-  const interrupted = running && !active;
+  const interrupted = running && !active && !job?.waitingForStage;
   const renders = (job?.renders ?? [])
     .map((r) => (job ? renderView(r, campaign.id, job.creativeId) : undefined))
     .filter((r): r is RenderView => r !== undefined)
@@ -289,7 +294,7 @@ function creativeView(
     id: creative.id,
     jobId: job?.id,
     jobStatus: status,
-    jobStatusLabel: interrupted ? "Interrompido" : status ? JOB_STATUS_NAMES[status] : "Sem job",
+    jobStatusLabel: interrupted ? "Interrompido" : job?.waitingForStage ? "Aguardando etapa" : status ? JOB_STATUS_NAMES[status] : "Sem job",
     concept: {
       title: creative.concept.title,
       angle: creative.concept.angle,

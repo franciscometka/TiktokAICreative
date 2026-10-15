@@ -1,3 +1,4 @@
+import { campaignPlanPromptV1_4_0 } from "./campaign-plan.v1_4_0";
 import { campaignPlanPromptV1_3_0 } from "./campaign-plan.v1_3_0";
 import { campaignPlanPromptV1_2_0 } from "./campaign-plan.v1_2_0";
 import { campaignPlanPromptV1 } from "./campaign-plan.v1";
@@ -14,10 +15,11 @@ export const PROMPTS = {
     "1.0.1": campaignPlanPromptV1_0_1,
     "1.2.0": campaignPlanPromptV1_2_0,
     "1.3.0": campaignPlanPromptV1_3_0,
+    "1.4.0": campaignPlanPromptV1_4_0,
   },
 } as const;
 
 /** Versão em uso de cada prompt. Trocar versão = uma linha aqui. */
 export const ACTIVE_PROMPTS = {
-  campaignPlan: PROMPTS.campaignPlan["1.3.0"],
+  campaignPlan: PROMPTS.campaignPlan["1.4.0"],
 } as const;

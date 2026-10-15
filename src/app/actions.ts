@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import {
+  executeHybridStage, configureHybridStage, executeHybridPlanning,
   acceptNarration,
   approveCreative,
   cancelCreative,
@@ -103,4 +104,21 @@ export async function regenerateSceneAction(input: unknown): Promise<ActionResul
     revalidatePath(`/campaigns/${result.job.campaignId}`);
     return { ok: true, value: { message: result.kind === "REGENERATED" ? "Nova versão gerada." : result.kind === "FAILED" ? result.error : "Limite de orçamento excedido; nenhuma nova geração autorizada." } };
   } catch { return { ok: true, value: { message: "Não foi possível iniciar a regeneração. Consulte o estado do criativo antes de repetir." } }; }
+}
+
+const StageActionInput = z.object({ jobId: id, stage: z.enum(["narration", "scenes", "avatar", "render"]), token: z.string().length(64), regenerate: z.boolean().optional(), authorizeOverBudget: z.boolean().optional() });
+export async function executeStageAction(input: unknown): Promise<ActionResult<{ started: boolean }>> {
+  const parsed = StageActionInput.safeParse(input);
+  if (!parsed.success) return badInput();
+  return executeHybridStage(getRuntime().deps, parsed.data);
+}
+export async function configureStageAction(input: unknown): Promise<ActionResult<{ saved: boolean }>> {
+  const parsed = z.object({ jobId: id, stage: z.enum(["narration", "scenes", "avatar", "render"]), mode: z.enum(["mock", "real"]) }).safeParse(input);
+  if (!parsed.success) return badInput();
+  return configureHybridStage(getRuntime().deps, parsed.data);
+}
+export async function executePlanningStageAction(input: unknown): Promise<ActionResult<{ started: boolean }>> {
+  const parsed = z.object({ campaignId: id, token: z.string().length(64) }).safeParse(input);
+  if (!parsed.success) return badInput();
+  return executeHybridPlanning(getRuntime().deps, parsed.data);
 }

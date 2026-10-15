@@ -1,4 +1,4 @@
-> **Modo atual: offline.** Crie projetos em `/create` e acompanhe em `/jobs`. Todas as chamadas reais/pagas estão bloqueadas no servidor, inclusive com `--confirm`. [Guia do fluxo offline](docs/OFFLINE-WORKFLOW.md).
+> **Modo atual: híbrido por etapa.** MOCK é o padrão; REAL exige provider configurado, estimativa e aprovação explícita da etapa. [Guia do fluxo híbrido](docs/HYBRID-WORKFLOW.md).
 
 # TikTok AI Creative Factory
 

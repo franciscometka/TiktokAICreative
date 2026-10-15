@@ -1,5 +1,5 @@
-import { offlineConfig } from "@/config/execution-policy";
-import { createOfflinePipelineService } from "@/pipeline/offline-service";
+import { createHybridPipelineService, hybridCapabilities } from "@/pipeline/hybrid-service";
+import type { StageCapabilities } from "@/domain/execution";
 import type { AppDeps } from "@/application/campaign-actions";
 import { loadAppConfig, type AppConfig } from "@/config/env";
 import { RUNWAY_VIDEO } from "@/config/video-models";
@@ -28,17 +28,17 @@ type GlobalWithRuntime = typeof globalThis & { [KEY]?: Runtime };
 export function getRuntime(): Runtime {
   const g = globalThis as GlobalWithRuntime;
   if (!g[KEY]) {
-    const config = offlineConfig(loadAppConfig());
+    const config = loadAppConfig();
     g[KEY] = {
       config,
       deps: {
-        service: createOfflinePipelineService(config),
+        service: createHybridPipelineService(config),
         uploads: new LocalUploadStore(config.uploadsDir),
         rendersDir: config.rendersDir,
         audioDir: config.audioDir,
         videosDir: config.videosDir,
-        audioProvider: config.audioProvider,
-        offlineOnly: true,
+        audioProvider: "mock",
+        offlineOnly: false,
       },
     };
   }
@@ -47,6 +47,7 @@ export function getRuntime(): Runtime {
 
 /** Configuração SEGURA para a interface: sem API key, sem caminhos, sem variáveis privadas. */
 export interface PublicAppConfig {
+  stageCapabilities: StageCapabilities;
   planner: "mock" | "anthropic";
   planningAvailable: boolean;
   /** true enquanto vídeo e áudio usam providers mock (nada real é gerado ou cobrado). */
@@ -61,14 +62,15 @@ export interface PublicAppConfig {
 }
 
 export function getPublicConfig(): PublicAppConfig {
-  const { config, deps } = getRuntime();
+  const { config } = getRuntime();
   return {
-    planner: config.llmProvider,
-    planningAvailable: deps.service.planningAvailable(),
-    mediaIsMock: config.videoProvider === "mock" && config.audioProvider === "mock",
-    audioProvider: config.audioProvider,
-    videoIsMock: config.videoProvider === "mock",
-    renderer: config.renderer.id,
+    stageCapabilities: hybridCapabilities(config),
+    planner: "mock",
+    planningAvailable: true,
+    mediaIsMock: true,
+    audioProvider: "mock",
+    videoIsMock: true,
+    renderer: "mock",
     defaultBudget: config.defaultBudget,
     exchangeRate: { rate: config.exchangeRate.rate, source: config.exchangeRate.source },
   };

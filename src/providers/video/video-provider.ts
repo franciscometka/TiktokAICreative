@@ -18,6 +18,7 @@ export interface VideoGenerationRequest {
  * e apenas depois de passar pelo guard de aprovação/orçamento (pipeline/guards.ts).
  */
 export interface VideoProvider {
+  resumeTask?(ref: ProviderJobRef, request: VideoGenerationRequest): void;
   readonly descriptor: ProviderDescriptor;
   validateRequest?(request: VideoGenerationRequest): Promise<unknown>;
   estimateCost(request: VideoGenerationRequest): CostQuote;

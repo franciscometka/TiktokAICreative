@@ -68,10 +68,11 @@ export default async function CreatePage({ searchParams }: { searchParams: Promi
         </h1>
         <p className="mt-1.5 max-w-2xl text-sm text-zinc-600">
           Informe produto, imagens, conceito, roteiro e avatar. Você revisa as cenas e o custo de referência antes de iniciar a
-          simulação offline.
+          execução de cada etapa.
         </p>
       </div>
       <CampaignWizard
+        stageCapabilities={publicConfig.stageCapabilities}
         presets={getPresetSummaries()}
         initial={initial}
         initialImages={initialImages}

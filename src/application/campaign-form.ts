@@ -1,3 +1,4 @@
+import { StageModesSchema, type StageModes } from "@/domain/execution";
 import { z } from "zod";
 import { AvatarPresetSchema, type AvatarPreset } from "@/domain/presenter";
 import { PRESET_ORDER, type PresetQuality } from "@/config/quality-presets";
@@ -27,6 +28,7 @@ export const FORM_LIMITS = {
 
 /** Dados crus do formulário, como o componente cliente envia. */
 export interface CampaignFormInput {
+  stageModes?: StageModes;
   projectName?: string;
   videoConcept?: string;
   scriptMode?: "manual" | "generate";
@@ -54,6 +56,7 @@ export interface CampaignFormInput {
 export type FieldErrors = Partial<Record<string, string>>;
 
 export interface ParsedCampaignForm {
+  stageModes?: StageModes;
   projectName?: string;
   videoConcept?: string;
   scriptMode?: "manual" | "generate";
@@ -122,6 +125,7 @@ const money = (label: string, required: boolean) =>
 
 const FormSchema = z
   .object({
+    stageModes: StageModesSchema.optional(),
     projectName: z.string().trim().max(120).optional(),
     videoConcept: z.string().trim().max(2000).optional(),
     scriptMode: z.enum(["manual", "generate"]).optional(),
@@ -194,6 +198,7 @@ export function parseCampaignForm(input: unknown): Result<ParsedCampaignForm, Fi
   const styles: CreativeStyle[] =
     f.styleMode === "auto" ? [...CREATIVE_STYLES] : [...new Set(f.styles as CreativeStyle[])];
   return ok({
+    stageModes: f.stageModes,
     projectName: f.projectName, videoConcept: f.videoConcept, scriptMode: f.scriptMode, script: f.script,
     productId: f.productId,
     name: f.name,
@@ -223,6 +228,7 @@ export function parseCampaignForm(input: unknown): Result<ParsedCampaignForm, Fi
 /** Monta o pedido do domínio. `images` vem do UploadStore (nunca de caminhos enviados pelo browser). */
 export function toCampaignRequest(form: ParsedCampaignForm, images: readonly ProductImage[]): CampaignRequest {
   return {
+    stageModes: form.stageModes,
     projectName: form.projectName, videoConcept: form.videoConcept, scriptMode: form.scriptMode, script: form.script,
     product: {
       id: form.productId,
@@ -251,6 +257,7 @@ export function formInputFromRequest(request: CampaignRequest): CampaignFormInpu
   const p = request.product;
   const toInput = (n: number) => n.toFixed(2).replace(".", ",");
   return {
+    stageModes: request.stageModes,
     projectName: request.projectName, videoConcept: request.videoConcept, scriptMode: request.scriptMode, script: request.script,
     productId: p.id,
     name: p.name,

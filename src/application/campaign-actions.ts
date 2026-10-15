@@ -1,3 +1,4 @@
+import type { ExecutionStage, ExecutionMode } from "@/domain/execution";
 import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
@@ -117,7 +118,21 @@ export async function getCampaignView(deps: AppDeps, campaignId: string): Promis
       jobActivity,
       audioProvider: deps.audioProvider,
     });
-    if (deps.offlineOnly && campaign.executionMode !== "offline") {
+    const capabilities = service.getStageCapabilities();
+    if (capabilities && ["hybrid", "offline"].includes(campaign.executionMode ?? "")) {
+      view.stageCapabilities = capabilities;
+      view.planningQuote = await service.quotePlanning(campaignId);
+      if (campaign.status === "draft") view.statusLabel = "Aguardando aprovação do planejamento";
+      for (const creative of view.creatives) {
+        if (!creative.jobId) continue;
+        creative.hybrid = true;
+        creative.stageQuotes = await Promise.all((["narration", "scenes", "avatar", "render"] as const).map(stage => service.quoteStage(creative.jobId!, stage)));
+        for (const quote of creative.stageQuotes) if (quote.done) quote.repeat = await service.quoteStage(creative.jobId, quote.stage, false, true);
+        creative.narration.canRegenerate = false;
+        for (const presenter of creative.presenters ?? []) presenter.canRegenerate = false;
+      }
+    }
+    if ((deps.offlineOnly && campaign.executionMode !== "offline") || (capabilities && !["hybrid", "offline"].includes(campaign.executionMode ?? ""))) {
       view.offlineReadOnly = true;
       for (const creative of view.creatives) {
         creative.canApprove = false; creative.canCancel = false; creative.canRerender = false; creative.budgetDecision = undefined;
@@ -400,4 +415,17 @@ export async function resolveSceneVideoFile(deps: AppDeps, ids: { campaignId: st
   if (!absolutePath.startsWith(resolve(deps.videosDir) + sep) || absolutePath !== resolve(attempt.assetUri)) return undefined;
   const info = await stat(absolutePath).catch(() => undefined);
   return info?.isFile() ? { absolutePath, sizeBytes: info.size, fileName: `cena-${ids.sceneId}-${ids.version}.mp4` } : undefined;
+}
+
+export async function executeHybridStage(deps: AppDeps, input: { jobId: string; stage: ExecutionStage; token: string; regenerate?: boolean; authorizeOverBudget?: boolean }): Promise<ActionResult<{ started: boolean }>> {
+  try { const result = await deps.service.executeStage(input.jobId, input.stage, input.token, input); logBackground(input.jobId, result.completion); return { ok: true, value: { started: true } }; }
+  catch (error) { return fail(error); }
+}
+export async function configureHybridStage(deps: AppDeps, input: { jobId: string; stage: ExecutionStage; mode: ExecutionMode }): Promise<ActionResult<{ saved: boolean }>> {
+  try { await deps.service.configureStage(input.jobId, input.stage, input.mode); return { ok: true, value: { saved: true } }; }
+  catch (error) { return fail(error); }
+}
+export async function executeHybridPlanning(deps: AppDeps, input: { campaignId: string; token: string }): Promise<ActionResult<{ started: boolean }>> {
+  try { const result = await deps.service.executePlanning(input.campaignId, input.token); logBackground(input.campaignId, result.completion); return { ok: true, value: { started: true } }; }
+  catch (error) { return fail(error); }
 }
