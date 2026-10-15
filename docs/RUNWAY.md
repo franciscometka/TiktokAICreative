@@ -22,3 +22,14 @@ O terminal mostra o erro sanitizado; `scenes[].attempts[].diagnostic` no job pre
 - `billing=confirmed`: tarefa informa consumo, inclusive zero. O ledger preserva esse consumo.
 
 Somente campos diagnósticos selecionados são persistidos, com limites de tamanho e remoção de chave, credenciais, prompt, imagem e URLs. O corpo bruto e a mensagem bruta de transporte nunca são registrados. Nenhum retry foi acrescentado. A primeira tentativa histórica continua com cobrança desconhecida; confira o painel antes de autorizar outra geração.
+
+## Integridade de duração (após a 1ª geração real)
+
+Primeiro MP4 real (campanha `campaign_f738c092-e087-4158-ac3e-79dbae1a6c4e`, cena `scene_a76b29a5…`, `v1/clip.mp4`), medido localmente com o ffprobe do Remotion, sem chamar a Runway:
+- duração do container e da trilha: **5,042s** (121 quadros, 24 fps, H.264 High, 720×1280, sem áudio, 1,26 MB); todos os quadros decodificam;
+- caixas: `ftyp`, `uuid` (~354 KB, metadados do provider), `free`, `mdat`, `moov` no FIM (sem faststart);
+- quadros de 0s, 1s, 2,5s e 4,9s diferem (aproximação lenta contínua): o vídeo se move até o fim; o produto já sai cortado nas laterais (crop do centro para 720:1280);
+- o render daquela campanha foi `mock` (não existe MP4 final) e a cena no plano tinha 3s.
+Conclusão: o ARQUIVO tem ~5s; a impressão de ~1s veio da reprodução (movimento muito sutil depois do 1º segundo e/ou player que não lê o `moov` no fim), não de truncamento.
+
+Agora cada clipe salvo é medido: `requestedDurationSeconds`, `providerReportedDurationSeconds` (Runway: indisponível) e `actualMediaDurationSeconds` ficam em `attempt.media` e em `integrity.json`. Fora da tolerância (max 0,25s; 5%): clipe rejeitado, custo mantido, sem retry, fora do render, erro claro. `video:real` imprime `solicitado / provider / arquivo real`.

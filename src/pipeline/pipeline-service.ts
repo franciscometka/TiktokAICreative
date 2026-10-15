@@ -53,7 +53,8 @@ import { roundBrl, roundUsd, toCents, usdToBrl } from "@/lib/money";
 import type { AudioProviderFactory } from "@/providers/audio";
 import type { AudioProvider, AudioResult } from "@/providers/audio/audio-provider";
 import { waitForCompletion, type PollOptions } from "@/providers/poll";
-import { ProviderError, type MediaResult, type ProviderJobRef } from "@/providers/types";
+import { InvalidMediaError, ProviderError, type MediaResult, type ProviderJobRef } from "@/providers/types";
+import { checkClipDuration, clipRejectionMessage, type ClipDurationCheck } from "@/domain/media-integrity";
 import type { VideoProviderFactory } from "@/providers/video";
 import type { VideoProvider } from "@/providers/video/video-provider";
 import { buildRenderManifest } from "@/render/manifest";
@@ -874,10 +875,24 @@ export class PipelineService {
       finalize: async (result, attemptId, ref) => {
         if (result.isMock) return { uri: result.uri, durationSeconds: result.durationSeconds };
         if (!result.data || !this.deps.videoAssets) throw new Error("Armazenamento de vídeo indisponível");
+        const requested = result.requestedDurationSeconds ?? result.durationSeconds;
         const stored = await this.deps.videoAssets.save({ campaignId: ctx.campaign.id, sceneId: scene.id, data: result.data,
           metadata: { attemptId, providerJobId: ref.providerJobId, provider: provider.descriptor.id, model: provider.descriptor.model,
-            durationSeconds: result.durationSeconds, billedUsage: result.billedUsage } });
-        return { uri: stored.uri, durationSeconds: result.durationSeconds };
+            requestedDurationSeconds: requested, providerReportedDurationSeconds: result.providerReportedDurationSeconds ?? null,
+            billedUsage: result.billedUsage } });
+        // Integridade: duração REAL do arquivo salvo × pedida (nunca confiar só no pedido/provider).
+        const media = checkClipDuration({
+          requestedSeconds: requested,
+          providerReportedSeconds: result.providerReportedDurationSeconds,
+          actualSeconds: stored.inspection.durationSeconds,
+          fileComplete: stored.inspection.complete,
+        });
+        await this.deps.videoAssets.writeIntegrity?.(stored.uri, { ...media, checkedAt: this.deps.clock() }).catch(() => {});
+        if (media.status !== "valid") {
+          console.warn(`[vídeo] clipe rejeitado job=${ctx.job.id} cena=${scene.id} solicitado=${requested}s arquivo=${media.actualMediaDurationSeconds ?? "?"}s status=${media.status}`);
+          throw new InvalidMediaError(clipRejectionMessage(media, scene.order + 1), media, stored.uri);
+        }
+        return { uri: stored.uri, durationSeconds: media.actualMediaDurationSeconds ?? requested, media };
       },
     });
   }
@@ -1011,7 +1026,7 @@ export class PipelineService {
       description: string;
       run: () => Promise<{ ref: ProviderJobRef; result: MediaResult }>;
       /** Pós-processamento DEPOIS do custo registrado (ex.: salvar a narração). Falha = tentativa falha (custo mantido). */
-      finalize?: (result: MediaResult, attemptId: string, ref: ProviderJobRef) => Promise<{ uri: string; durationSeconds: number; narration?: NarrationInfo }>;
+      finalize?: (result: MediaResult, attemptId: string, ref: ProviderJobRef) => Promise<{ uri: string; durationSeconds: number; narration?: NarrationInfo; media?: ClipDurationCheck }>;
     },
   ): Promise<{ job: GenerationJob; attempt: MediaAttempt }> {
     const { clock, ids } = this.deps;
@@ -1054,7 +1069,7 @@ export class PipelineService {
     try {
       const { ref, result } = await spec.run();
       await recordCost(result.billedUsage);
-      let output: { uri: string; durationSeconds: number; narration?: NarrationInfo } = {
+      let output: { uri: string; durationSeconds: number; narration?: NarrationInfo; media?: ClipDurationCheck } = {
         uri: result.uri,
         durationSeconds: result.durationSeconds,
       };
@@ -1063,6 +1078,7 @@ export class PipelineService {
           output = await spec.finalize(result, attemptId, ref);
         } catch (error) {
           // Custo já registrado acima; não registra de novo nem re-tenta.
+          if (error instanceof InvalidMediaError) throw Object.assign(error, { providerJobId: ref.providerJobId });
           throw new ProviderError(`Mídia gerada (e cobrada), mas não foi possível salvar: ${messageOf(error)}`, ref.providerJobId);
         }
       }
@@ -1074,8 +1090,22 @@ export class PipelineService {
         assetUri: output.uri,
         durationSeconds: output.durationSeconds,
         ...(output.narration ? { narration: output.narration } : {}),
+        ...(output.media ? { media: output.media } : {}),
       };
     } catch (error) {
+      if (error instanceof InvalidMediaError) {
+        // Clipe inválido: tentativa falha, nunca ativa (não vai ao render); custo já está no ledger.
+        attempt = {
+          ...base,
+          providerJobId: (error as InvalidMediaError & { providerJobId?: string }).providerJobId ?? null,
+          status: "failed",
+          active: false,
+          error: error.message,
+          media: error.media,
+          ...(error.rejectedAssetUri ? { rejectedAssetUri: error.rejectedAssetUri } : {}),
+        };
+        return this.saveAttempt(ctx, spec, attempt);
+      }
       if (!(error instanceof ProviderError)) throw error;
       if (error.billedUsage) await recordCost(error.billedUsage);
       attempt = {
@@ -1088,6 +1118,15 @@ export class PipelineService {
       };
     }
 
+    return this.saveAttempt(ctx, spec, attempt);
+  }
+
+  private async saveAttempt(
+    ctx: JobContext,
+    spec: { kind: MediaKind; sceneId: string | null },
+    attempt: MediaAttempt,
+  ): Promise<{ job: GenerationJob; attempt: MediaAttempt }> {
+    const { clock } = this.deps;
     const withAttempt = (list: readonly MediaAttempt[]) => [
       ...list.map((a) => (attempt.status === "succeeded" ? { ...a, active: false } : a)),
       attempt,

@@ -11,6 +11,7 @@ import { randomId } from "../src/lib/ids";
 import { createPipelineService } from "../src/pipeline/create-pipeline-service";
 import { imageDimensions } from "../src/render/image-dimensions";
 import { LocalUploadStore } from "../src/storage/upload-store";
+import { durationReport } from "../src/domain/media-integrity";
 
 async function main() {
   const { values } = parseArgs({ options: { image: { type: "string" }, confirm: { type: "boolean", default: false } }, strict: true });
@@ -54,6 +55,9 @@ async function main() {
   const approval = await service.approve(jobId, { estimateId: estimated.estimate!.id });
   if (approval.kind !== "APPROVED") throw new Error("Orçamento excedido: nenhuma chamada paga. Revise o limite antes de uma nova validação.");
   const outcome = await service.generate(jobId);
+  // Integridade de duração: sempre imprime as três medidas, inclusive quando o clipe foi rejeitado.
+  const attempt = (await service.getJob(jobId)).scenes.flatMap((s) => s.attempts).find((a) => a.kind === "video");
+  console.log(durationReport(attempt?.media));
   if (outcome.kind !== "COMPLETED") throw new Error(`Validação terminou em ${outcome.kind}: ${outcome.job.error ?? "consulte o job persistido"}. Não houve retry automático.`);
   console.log("Clipe salvo e custo registrado no ledger. Consulte a campanha; o renderer mock não cria MP4 final.");
 }

@@ -1,4 +1,5 @@
 import { ProviderDiagnosticSchema } from "./provider-diagnostic";
+import { ClipDurationCheckSchema } from "./media-integrity";
 import { z } from "zod";
 import { NarrationInfoSchema } from "./audio";
 import { CampaignPlanSchema } from "./campaign";
@@ -129,6 +130,13 @@ export const MediaAttemptSchema = z.object({
   isMock: z.boolean(),
   error: z.string().optional(),
   diagnostic: ProviderDiagnosticSchema.optional(),
+  /**
+   * Vídeo real: duração pedida × informada pelo provider × medida do arquivo salvo. Clipe fora da
+   * tolerância é rejeitado (tentativa "failed", nunca ativa, nunca vai ao render; custo mantido).
+   */
+  media: ClipDurationCheckSchema.optional(),
+  /** Arquivo de um clipe REJEITADO (guardado só para auditoria; nunca usado no render). */
+  rejectedAssetUri: z.string().optional(),
   /** Só em tentativas de áudio (Lote 4+): voz, request id, versão, timing e AudioFit. */
   narration: NarrationInfoSchema.optional(),
   createdAt: nonEmpty,

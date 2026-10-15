@@ -108,7 +108,9 @@ export class RunwayVideoProvider implements VideoProvider {
       }
       const data = Buffer.concat(chunks);
       if (!isMp4(data)) throw new Error("Conteúdo não é MP4");
-      return { uri: "", data, mimeType: "video/mp4", durationSeconds: job.seconds, billedUsage: job.usage, isMock: false };
+      // A tarefa da Runway não informa a duração do vídeo: só a pedida é conhecida aqui. A duração
+      // REAL é medida pelo pipeline no arquivo salvo.
+      return { uri: "", data, mimeType: "video/mp4", durationSeconds: job.seconds, requestedDurationSeconds: job.seconds, billedUsage: job.usage, isMock: false };
     } catch {
       throw new ProviderError("Runway gerou o clipe, mas o download falhou. Custo preservado; não houve nova geração.", ref.providerJobId, job.usage);
     }

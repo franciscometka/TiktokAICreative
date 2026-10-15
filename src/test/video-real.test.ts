@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { runwayFixture } from "./runway-fake";
+import { makeMp4 } from "./mp4-fixture";
 it("dry-run com foto real local não exige chave, não faz chamadas nem cria campanha", async () => {
   const fake = await runwayFixture();
   const output = execFileSync(process.execPath, ["--import", "tsx", "scripts/video-real.ts", "--image", fake.image], {
@@ -36,7 +37,7 @@ it("--confirm com transporte totalmente falso executa uma geração via aprovaç
         return Response.json({ id: 'manual_task' });
       }
       if (url === 'https://api.dev.runwayml.com/v1/tasks/manual_task') return Response.json({ id: 'manual_task', status: 'SUCCEEDED', cost: { credits: 25 }, output: ['https://cdn.runwayml.com/manual.mp4'] });
-      if (url === 'https://cdn.runwayml.com/manual.mp4') return new Response(Buffer.from('000000186674797069736f6d00000200', 'hex'));
+      if (url === 'https://cdn.runwayml.com/manual.mp4') return new Response(Buffer.from('${Buffer.from(makeMp4(5)).toString("hex")}', 'hex'));
       throw new Error('Rede proibida: ' + url);
     };
   `);
@@ -48,6 +49,9 @@ it("--confirm com transporte totalmente falso executa uma geração via aprovaç
       LLM_PROVIDER: "mock", VIDEO_PROVIDER: "mock", AUDIO_PROVIDER: "mock", MAX_COST_PER_CREATIVE_BRL: "20", MAX_COST_PER_CAMPAIGN_BRL: "100" },
   });
   expect(output).toContain("Clipe salvo e custo registrado no ledger");
+  expect(output).toContain("solicitado: 5.00s");
+  expect(output).toContain("provider: indisponível");
+  expect(output).toContain("arquivo real: 5.00s");
   expect((await readFile(counter, "utf8")).trim()).toBe("POST");
   const entries = (await readFile(join(dataDir, "ledger.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
   const videoCosts = entries.filter((entry) => entry.category === "video");

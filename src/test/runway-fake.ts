@@ -5,8 +5,10 @@ import { PRICING_TABLE } from "@/config/pricing";
 import { RUNWAY_VIDEO } from "@/config/video-models";
 import { RunwayVideoProvider } from "@/providers/video/runway-video-provider";
 const pricing = PRICING_TABLE.find((p) => p.provider === RUNWAY_VIDEO.provider)!;
-export const MP4 = Buffer.from("000000186674797069736f6d00000200", "hex");
-export async function runwayFixture(options: { failure?: boolean; downloadFailure?: boolean; statusInvalid?: boolean; pending?: boolean; outputUrl?: string; httpError?: boolean; response?: () => Response; transportError?: Error } = {}) {
+import { makeMp4 } from "./mp4-fixture";
+/** Clipe falso com duração REAL legível (5s = o que o Gen-4 Turbo cobra para cenas até 5s). */
+export const MP4 = Buffer.from(makeMp4(5));
+export async function runwayFixture(options: { clip?: Uint8Array; failure?: boolean; downloadFailure?: boolean; statusInvalid?: boolean; pending?: boolean; outputUrl?: string; httpError?: boolean; response?: () => Response; transportError?: Error } = {}) {
   const root = await mkdtemp(join(tmpdir(), "runway-"));
   await mkdir(join(root, "uploads"));
   const image = join(root, "uploads", "photo.png");
@@ -19,7 +21,7 @@ export async function runwayFixture(options: { failure?: boolean; downloadFailur
     if (options.httpError) throw new Error("secret-test-key");
     if (url.endsWith("/image_to_video")) return Response.json({ id: "task_1" });
     if (url.includes("/tasks/")) return Response.json(options.statusInvalid ? {} : { id: "task_1", status: options.pending ? "RUNNING" : options.failure ? "FAILED" : "SUCCEEDED", cost: { credits: options.failure ? 0 : 25 }, output: [options.outputUrl ?? "https://cdn.runwayml.com/clip.mp4"] });
-    return options.downloadFailure ? new Response("bad", { status: 500 }) : new Response(MP4);
+    return options.downloadFailure ? new Response("bad", { status: 500 }) : new Response(Buffer.from(options.clip ?? MP4));
   };
   const provider = new RunwayVideoProvider({ pricing, apiKey: "secret-test-key", uploadsDir: join(root, "uploads"), transport });
   const request = { sceneId: "scene_1", prompt: "Slow push in", durationSeconds: 3, aspectRatio: "9:16" as const, referenceImageUris: [image] };

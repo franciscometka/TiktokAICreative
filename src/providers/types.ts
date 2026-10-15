@@ -1,3 +1,4 @@
+import type { ClipDurationCheck } from "@/domain/media-integrity";
 import type { ProviderDiagnostic } from "@/domain/provider-diagnostic";
 import type { ProviderPricing } from "@/domain/cost";
 import type { Usage } from "@/costs/calculate";
@@ -31,6 +32,10 @@ export interface MediaResult {
   uri: string;
   mimeType: string;
   durationSeconds: number;
+  /** Duração PEDIDA ao provider (a que é cobrada). Vídeo real (Lote 5). */
+  requestedDurationSeconds?: number;
+  /** Duração que o provider informou, se informou (Runway não informa). Nunca substitui a medida. */
+  providerReportedDurationSeconds?: number;
   /** Consumo efetivamente faturado — base do custo REAL. */
   billedUsage: Usage;
   isMock: boolean;
@@ -42,6 +47,21 @@ export interface CostQuote {
   quantity: number;
   costUsd: number;
   pricing: ProviderPricing;
+}
+
+/**
+ * Clipe gerado (e cobrado) mas REJEITADO pela checagem de integridade. O custo já foi registrado
+ * antes; não carrega billedUsage para não registrar de novo. Nunca é re-tentado.
+ */
+export class InvalidMediaError extends Error {
+  override name = "InvalidMediaError";
+  constructor(
+    message: string,
+    readonly media: ClipDurationCheck,
+    readonly rejectedAssetUri?: string,
+  ) {
+    super(message);
+  }
 }
 
 export class ProviderError extends Error {

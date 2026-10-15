@@ -157,3 +157,4 @@ Validação offline do Lote 5 (2026-10-14): `npm run check` aprovado (451 testes
 - AUTO envia todos os formatos ao prompt sem instrução extra de "escolha os melhores" (pode entrar junto com a `1.0.1`).
 - Uploads órfãos (imagens enviadas sem campanha planejada) não são limpos automaticamente.
 - Sem testes de componentes React (só lógica em `application/`); o fluxo visual foi verificado manualmente.
+- Integridade de duração: a tolerância (max 0,25s; 5%) ainda não foi calibrada com vários clipes reais; MP4 com `moov` no fim não é reescrito para faststart (o player do browser precisa de Range para tocar).
