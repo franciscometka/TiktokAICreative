@@ -2,6 +2,11 @@ import type { ExchangeRate, ProviderPricing } from "@/domain/cost";
 import { ANTHROPIC_PROVIDER, CLAUDE_MODELS } from "./llm-models";
 import { ELEVENLABS_MODELS, ELEVENLABS_PROVIDER } from "./tts-models";
 
+import { RUNWAY_VIDEO } from "./video-models";
+
+export const RUNWAY_CREDITS_PER_SECOND = 5;
+export const RUNWAY_CREDIT_USD = 0.01;
+
 const CLAUDE_PRICES_DATE = "2026-10-06";
 
 /**
@@ -35,6 +40,8 @@ function claudePricing(
  * com preço oficial (Lote 4). Antes de integrar um provider real, use o preço oficial e isPlaceholder = false.
  */
 export const PRICING_TABLE: readonly ProviderPricing[] = [
+  { ...RUNWAY_VIDEO, unit: "per_second", priceUsd: RUNWAY_CREDITS_PER_SECOND * RUNWAY_CREDIT_USD,
+    updatedAt: "2026-10-14", isPlaceholder: false, source: "https://docs.dev.runwayml.com/guides/pricing/" },
   // ---- LLM (preços oficiais Anthropic, tabela de 2026-10-06) ----
   ...claudePricing(CLAUDE_MODELS.opus, { input: 4, output: 20, cacheRead: 0.2 }),
   ...claudePricing(CLAUDE_MODELS.sonnet, { input: 2, output: 10, cacheRead: 0.2 }),

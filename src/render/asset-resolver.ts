@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve, sep } from "node:path";
 import { detectImageType, type ImageContentType } from "@/domain/upload";
+import { isMp4 } from "@/providers/video/mp4";
 import { isMp3 } from "@/providers/audio/mp3";
 import { imageDimensions, type ImageSize } from "./image-dimensions";
 
@@ -17,6 +18,7 @@ export type ResolvedAsset =
   | { kind: "mock"; uri: string }
   | { kind: "file"; media: "image"; uri: string; absolutePath: string; contentType: ImageContentType; size: ImageSize }
   | { kind: "file"; media: "audio"; uri: string; absolutePath: string; contentType: AudioContentType }
+  | { kind: "file"; media: "video"; uri: string; absolutePath: string; contentType: "video/mp4" }
   | { kind: "missing"; uri: string };
 
 export type AudioContentType = "audio/mpeg" | "audio/wav";
@@ -56,7 +58,7 @@ export class AssetResolver {
     if (!this.roots.some((root) => full.startsWith(root + sep))) {
       throw new AssetSecurityError("Asset fora das pastas autorizadas");
     }
-    if (!IMAGE_EXTENSION.test(full) && !AUDIO_EXTENSION.test(full)) throw new AssetSecurityError("Tipo de asset não suportado");
+    if (!IMAGE_EXTENSION.test(full) && !AUDIO_EXTENSION.test(full) && !/\.mp4$/i.test(full)) throw new AssetSecurityError("Tipo de asset não suportado");
     return full;
   }
 
@@ -69,6 +71,10 @@ export class AssetResolver {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return { kind: "missing", uri };
       throw error;
+    }
+    if (/\.mp4$/i.test(absolutePath)) {
+      if (!isMp4(bytes)) throw new AssetCorruptedError("Arquivo não é MP4 válido");
+      return { kind: "file", media: "video", uri, absolutePath, contentType: "video/mp4" };
     }
     if (AUDIO_EXTENSION.test(absolutePath)) {
       // Conteúdo precisa bater com a extensão (MP3: ID3/frame sync; WAV: RIFF....WAVE).

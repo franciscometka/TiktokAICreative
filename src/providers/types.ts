@@ -25,6 +25,7 @@ export interface ProviderJobStatus {
 }
 
 export interface MediaResult {
+  data?: Uint8Array;
   uri: string;
   mimeType: string;
   durationSeconds: number;

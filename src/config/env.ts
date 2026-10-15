@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEFAULT_VIDEOS_DIR } from "./video-models";
 import type { CostBudget, ExchangeRate } from "@/domain/cost";
 import { DEFAULT_EXCHANGE_RATE } from "./pricing";
 
@@ -31,9 +32,9 @@ export const DEFAULT_LLM_POLICY = {
   timeoutMs: 600_000,
 } as const;
 
-/** Providers disponíveis. Vídeo só tem mock; áudio: mock ou ElevenLabs (Lote 4). */
+/** Providers disponíveis. Vídeo: mock ou Runway; áudio: mock ou ElevenLabs. */
 export const LLM_PROVIDER_IDS = ["mock", "anthropic"] as const;
-export const VIDEO_PROVIDER_IDS = ["mock"] as const;
+export const VIDEO_PROVIDER_IDS = ["mock", "runway"] as const;
 export const AUDIO_PROVIDER_IDS = ["mock", "elevenlabs"] as const;
 
 const emptyToUndefined = (value: unknown) =>
@@ -60,6 +61,7 @@ const EnvSchema = z.object({
   DATA_DIR: z.preprocess(emptyToUndefined, z.string().default("data")),
   UPLOADS_DIR: z.preprocess(emptyToUndefined, z.string().default(DEFAULT_UPLOADS_DIR)),
   RENDERS_DIR: z.preprocess(emptyToUndefined, z.string().default(DEFAULT_RENDERS_DIR)),
+  VIDEOS_DIR: z.preprocess(emptyToUndefined, z.string().default(DEFAULT_VIDEOS_DIR)),
   AUDIO_DIR: z.preprocess(emptyToUndefined, z.string().default(DEFAULT_AUDIO_DIR)),
   TTS_TIMEOUT_MS: z.preprocess(emptyToUndefined, z.coerce.number().int().min(5_000).max(300_000).default(DEFAULT_TTS_TIMEOUT_MS)),
   RENDERER: z.preprocess(emptyToUndefined, z.enum(RENDERER_IDS).default("mock")),
@@ -89,6 +91,7 @@ export interface AppConfig {
   uploadsDir: string;
   rendersDir: string;
   audioDir: string;
+  videosDir: string;
   /** Timeout de UMA chamada de TTS (sem retry automático). */
   ttsTimeoutMs: number;
   renderer: {
@@ -132,6 +135,7 @@ export function loadAppConfig(
     uploadsDir: e.UPLOADS_DIR,
     rendersDir: e.RENDERS_DIR,
     audioDir: e.AUDIO_DIR,
+    videosDir: e.VIDEOS_DIR,
     ttsTimeoutMs: e.TTS_TIMEOUT_MS,
     renderer: {
       id: e.RENDERER,
@@ -179,4 +183,9 @@ export function readElevenLabsApiKey(env: Record<string, string | undefined> = p
 export function readRemotionLicenseKey(env: Record<string, string | undefined> = process.env): string | null {
   const key = env.REMOTION_LICENSE_KEY?.trim();
   return key ? key : null;
+}
+
+/** Segredo lido só no servidor; nunca entra em AppConfig. */
+export function readRunwayApiKey(env: Record<string, string | undefined> = process.env): string | undefined {
+  return env.RUNWAYML_API_SECRET?.trim() || undefined;
 }

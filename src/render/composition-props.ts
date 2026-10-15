@@ -85,7 +85,9 @@ export function buildCompositionProps({ manifest, assets, urlFor, debug = false 
 
     if (asset.kind === "generated_video") {
       const resolved = asset.uri ? assets.get(asset.uri) : undefined;
-      // Lote 3: só existe provider mock. Um vídeo real (Lote 5) entra aqui como mídia de vídeo.
+      if (resolved?.kind === "file" && resolved.media === "video") return {
+        ...base, kind: "generated_video", image: null, placeholder: null, video: { src: urlFor(resolved.uri) },
+      };
       warnings.push({
         sceneId: asset.sceneId,
         code: "generated_video_placeholder",

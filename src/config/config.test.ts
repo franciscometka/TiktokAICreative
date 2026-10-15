@@ -102,3 +102,10 @@ describe("resolveQualitySettings", () => {
     expect(custom.quality).toBe("custom");
   });
 });
+
+ it("Runway é opt-in e a chave nunca entra no AppConfig", () => {
+  const config = loadAppConfig({ VIDEO_PROVIDER: "runway", RUNWAYML_API_SECRET: "private-secret" });
+  expect(config.videoProvider).toBe("runway");
+  expect(config.videosDir).toBe("outputs/videos");
+  expect(JSON.stringify(config)).not.toContain("private-secret");
+});

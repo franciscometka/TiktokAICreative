@@ -207,3 +207,7 @@ Campanha: `draft → planning → planned | failed`, `failed → planning`. Na i
 4. Testes com HTTP mockado. Nenhuma mudança em domain/ ou pipeline/.
 
 Pré-requisito já atendido: ledger persistido em `ledger.jsonl`.
+
+
+## Vídeo real Runway (Lote 5)
+`VIDEO_PROVIDER=runway` → configuração de vídeo anexada aos settings de NOVAS campanhas → estimativa por cena (duração comprada 5/10s) → aprovação existente → guard/orçamento → preflight de todas as imagens/prompts → POST único → task id persistido → polling limitado → download MP4 → ledger real → `LocalVideoAssetStore` vN → tentativa ativa → manifest → AssetResolver (inclui VIDEOS_DIR) → OffthreadVideo mudo → MP4 final pelo renderer existente. Sem chave/entrada inválida, falha antes de qualquer mídia paga. Sem retry pago; restart só mantém auditoria e estado interrompido. `scripts/video-real.ts` exercita o mesmo pipeline com uma cena e outros providers mock. Ver D69–D72 e `docs/RUNWAY.md`.

@@ -16,7 +16,8 @@
     "plan:real": "tsx scripts/plan-real.ts",
     "test:render": "vitest run --config vitest.render.config.ts",
     "render:setup": "tsx scripts/render-setup.ts",
-    "tts:real": "tsx scripts/tts-real.ts"
+    "tts:real": "tsx scripts/tts-real.ts",
+    "video:real": "tsx scripts/video-real.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",

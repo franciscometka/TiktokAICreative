@@ -5,7 +5,7 @@
  */
 
 export const COMPOSITION_ID = "TikTokCreative";
-export const COMPOSITION_VERSION = "tiktok-creative@1.1.0";
+export const COMPOSITION_VERSION = "tiktok-creative@1.2.0";
 
 /** Mesmos valores de SceneAssetKind / VisualSource / Motion / Transition do domínio. */
 export type SceneKind = "generated_video" | "product_image" | "text_card";
@@ -38,6 +38,7 @@ export interface SceneProps {
   transition: SceneTransition;
   onScreenText: string;
   image: ImageProps | null;
+  video?: { src: string };
   /** Presente quando a cena é um vídeo IA ainda simulado. */
   placeholder: { label: string; description: string | null } | null;
 }

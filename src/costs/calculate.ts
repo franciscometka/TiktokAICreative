@@ -15,6 +15,7 @@ import { spokenNarrationCharacters } from "@/speech/narration-script";
 import type { TokenUsage } from "@/domain/llm";
 import type { PricingRef, QualitySettings } from "@/domain/quality";
 import { roundBrl, roundUsd, usdToBrl } from "@/lib/money";
+import { RUNWAY_VIDEO, runwayDuration } from "@/config/video-models";
 import type { PricingCatalog } from "./pricing-catalog";
 
 /**
@@ -207,8 +208,9 @@ function lineItem(
 
 // ---------- Estimativas ----------
 
-export function sceneVideoUsage(scene: Pick<ScenePlan, "estimatedGenerationSeconds">): Usage {
-  return { seconds: scene.estimatedGenerationSeconds, generations: 1 };
+export function sceneVideoUsage(scene: Pick<ScenePlan, "estimatedGenerationSeconds">, pricing?: ProviderPricing): Usage {
+  const seconds = pricing?.provider === RUNWAY_VIDEO.provider ? runwayDuration(scene.estimatedGenerationSeconds) : scene.estimatedGenerationSeconds;
+  return { seconds, generations: 1 };
 }
 
 export function narrationUsage(plan: Pick<CreativePlan, "scenes" | "duration">): Usage {
@@ -223,7 +225,7 @@ export function renderUsage(plan: Pick<CreativePlan, "duration">): Usage {
 /** Custo estimado (USD, sem arredondar) para gerar o vídeo de UMA cena. 0 se não usa IA. */
 export function estimateSceneVideoCostUsd(scene: ScenePlan, videoPricing: ProviderPricing): number {
   if (!scene.requiresGeneratedVideo) return 0;
-  return costForUsage(videoPricing, sceneVideoUsage(scene)).costUsd;
+  return costForUsage(videoPricing, sceneVideoUsage(scene, videoPricing)).costUsd;
 }
 
 /** Linhas de custo FUTURO (vídeo por cena, áudio, render) de um plano. */
@@ -232,7 +234,7 @@ export function futureCostLines(plan: CreativePlan, pricing: Omit<ResolvedPricin
     ...plan.scenes
       .filter((s) => s.requiresGeneratedVideo)
       .map((s) =>
-        lineItem(pricing.video, sceneVideoUsage(s), {
+        lineItem(pricing.video, sceneVideoUsage(s, pricing.video), {
           category: "video",
           phase: "generation",
           description: `Vídeo IA — cena ${s.order + 1} (${s.estimatedGenerationSeconds}s)`,

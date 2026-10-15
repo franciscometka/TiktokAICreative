@@ -8,9 +8,9 @@ produto → análise/hooks/conceitos/roteiro/cenas (Claude) → validação + aj
 Custo é preocupação central; nada pago de mídia acontece sem aprovação explícita.
 
 ## Estado atual
-- Lotes 0 a 4 concluídos. Lote 4 = narração real pt-BR com ElevenLabs (opcional), legendas com timing real, AudioFit/revisão, áudio versionado e MP4 com AAC. Lote 2 = experiência `/create` → `/campaigns/[id]` (planejar, revisar, custo, aprovar). Lote 3 = render real do MP4 com Remotion (local, R$0).
+- Lotes 0 a 5 implementados (Runway ainda sem validação paga). Lote 4 = narração real pt-BR com ElevenLabs (opcional), legendas com timing real, AudioFit/revisão, áudio versionado e MP4 com AAC. Lote 2 = experiência `/create` → `/campaigns/[id]` (planejar, revisar, custo, aprovar). Lote 3 = render real do MP4 com Remotion (local, R$0).
 - Planejamento: `LLM_PROVIDER=mock` (padrão, sem custo) ou `anthropic` (Claude real, pago).
-- Renderer: `RENDERER=mock` (padrão, sem arquivo) ou `remotion` (MP4 real). Narração: `AUDIO_PROVIDER=mock` (padrão, "MODO DE TESTE", sem som) ou `elevenlabs` (real, paga). Vídeo IA continua **mock** (placeholder "MOCK · VÍDEO IA").
+- Renderer: `RENDERER=mock` (padrão, sem arquivo) ou `remotion` (MP4 real). Narração: `AUDIO_PROVIDER=mock` (padrão, "MODO DE TESTE", sem som) ou `elevenlabs` (real, paga). Vídeo IA: `VIDEO_PROVIDER=mock|runway` (default mock); Runway Gen-4 Turbo real, ver `docs/RUNWAY.md`.
 - Prompt ativo: `campaign-plan@1.0.1` (1.0.0 + regras da D42). A 1.0.0 foi validada com o Claude real em 2026-10-14; a 1.0.1 ainda não. ElevenLabs validada com UMA chamada real em 2026-10-14 (D68).
 - **Não avance de lote sem instrução do usuário.** Ver `docs/TASKS.md`.
 
@@ -128,3 +128,7 @@ Para ver a tela de processamento com o mock: `MOCK_PLANNER_DELAY_MS=20000` em `.
 - Não apresentar placeholder como vídeo gerado; não sintetizar voz (Web Speech/TTS) nem inventar progresso de render.
 - Não aceitar caminhos de arquivo vindos do browser (só IDs gerados: `SAFE_PRODUCT_ID`, `STORED_IMAGE_NAME`, `SAFE_ENTITY_ID`, `RENDER_ID`); não servir arquivos fora de `UPLOADS_DIR`/`RENDERS_DIR`.
 - Não colocar regra de negócio/custo em componentes ou Server Actions; não serializar `AppConfig` para o cliente (use `getPublicConfig`).
+
+
+## Runway (Lote 5)
+`npm run video:real -- --image "C:/fotos/produto.jpg"`: dry-run, sem custo/gravações. Só `--confirm` permite UMA geração de 5s via pipeline persistido, com demais providers mock. Nunca executar pago sem instrução. `RUNWAYML_API_SECRET` só no servidor; não logar/serializar. Modelos em `config/video-models.ts`, preços em `config/pricing.ts`. Settings de campanhas antigas não são migrados: criar nova campanha após mudar VIDEO_PROVIDER. Custo estimado por duração comprada 5/10s, task id salvo antes do polling, ledger antes do armazenamento local em VIDEOS_DIR. Sem retry pago. Testes usam `test/runway-fake.ts`. Ver DECISIONS D69–D72.

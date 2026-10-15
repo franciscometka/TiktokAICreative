@@ -17,6 +17,7 @@ export interface VideoGenerationRequest {
  */
 export interface VideoProvider {
   readonly descriptor: ProviderDescriptor;
+  validateRequest?(request: VideoGenerationRequest): Promise<unknown>;
   estimateCost(request: VideoGenerationRequest): CostQuote;
   generateScene(request: VideoGenerationRequest): Promise<ProviderJobRef>;
   getStatus(ref: ProviderJobRef): Promise<ProviderJobStatus>;

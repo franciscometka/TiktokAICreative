@@ -77,10 +77,14 @@ import {
   StaleEstimateError,
   UnexpectedStatusError,
 } from "./guards";
+import type { VideoAssetStore } from "@/storage/video-asset-store";
+import type { PricingRef } from "@/domain/quality";
 import { transitionCampaign, transitionJob } from "./states";
 
 export interface PipelineDeps {
   planner: CreativePlanner;
+  videoChoice?: PricingRef;
+  videoAssets?: VideoAssetStore;
   videoProviderFactory: VideoProviderFactory;
   audioProviderFactory: AudioProviderFactory;
   renderer: Renderer;
@@ -187,7 +191,8 @@ export class PipelineService {
     const { store, clock, ids } = this.deps;
     this.assertPlannerAvailable();
     const request = CampaignRequestSchema.parse(input);
-    const settings = resolveQualitySettings(request.quality, request.customSettings);
+    const resolved = resolveQualitySettings(request.quality, request.customSettings);
+    const settings = this.deps.videoChoice && request.quality !== "custom" ? { ...resolved, video: this.deps.videoChoice } : resolved;
     await this.assertPlanningFitsBudget(request, settings, 0);
 
     const createdAt = clock();
@@ -707,10 +712,14 @@ export class PipelineService {
         if (check.kind === "BUDGET_EXCEEDED") return this.returnDecisionWithoutStateChange(job, check);
       }
 
+      let video: VideoProvider;
+      try {
+        video = this.deps.videoProviderFactory(ctx.pricing.video);
+        await video.validateRequest?.(this.videoRequest(ctx, scene));
+      } catch (error) { return { kind: "FAILED", job, error: messageOf(error) }; }
       job = transitionJob(job, "generating", this.deps.clock());
       await this.deps.store.saveJob(job);
 
-      const video = this.deps.videoProviderFactory(ctx.pricing.video);
       const result = await this.generateSceneVideo({ ...ctx, job }, scene, video);
       job = result.job;
       if (result.attempt.status === "failed") {
@@ -763,7 +772,13 @@ export class PipelineService {
 
   private async runGeneration(ctx: JobContext): Promise<GenerationOutcome | { kind: "READY_TO_RENDER" }> {
     let job = ctx.job;
-    const video = this.deps.videoProviderFactory(ctx.pricing.video);
+    let video: VideoProvider;
+    try {
+      video = this.deps.videoProviderFactory(ctx.pricing.video);
+      for (const scene of ctx.creative.scenes.filter((s) => s.requiresGeneratedVideo)) {
+        await video.validateRequest?.(this.videoRequest(ctx, scene));
+      }
+    } catch (error) { return this.fail(job, messageOf(error)); }
     // Provider de áudio indisponível (ex.: sem chave) falha ANTES de qualquer chamada paga.
     const audio = this.createAudioProvider(ctx);
     if (!audio.ok) return this.fail(job, audio.error);
@@ -829,13 +844,17 @@ export class PipelineService {
     return { kind: "BUDGET_EXCEEDED", decision: check, job };
   }
 
+  private videoRequest(ctx: JobContext, scene: ScenePlan) {
+    return { sceneId: scene.id, prompt: scene.generationPrompt, durationSeconds: scene.estimatedGenerationSeconds,
+      aspectRatio: "9:16" as const, referenceImageUris: ctx.campaign.request.product.images.map((i) => i.uri) };
+  }
+
   private async generateSceneVideo(
     ctx: JobContext,
     scene: ScenePlan,
     provider: VideoProvider,
   ): Promise<{ job: GenerationJob; attempt: MediaAttempt }> {
     assertCanStartPaidCall(ctx.job);
-    const imageUris = ctx.campaign.request.product.images.map((i) => i.uri);
     return this.executeAttempt(ctx, {
       kind: "video",
       sceneId: scene.id,
@@ -844,14 +863,21 @@ export class PipelineService {
       operation: "video_generation",
       description: `Vídeo IA — cena ${scene.order + 1}`,
       run: async () => {
-        const ref = await provider.generateScene({
-          sceneId: scene.id,
-          prompt: scene.generationPrompt,
-          durationSeconds: scene.estimatedGenerationSeconds,
-          aspectRatio: "9:16",
-          referenceImageUris: imageUris,
-        });
+        const ref = await provider.generateScene(this.videoRequest(ctx, scene));
+        ctx.job = { ...ctx.job, videoTasks: [...(ctx.job.videoTasks ?? []), {
+          sceneId: scene.id, providerJobId: ref.providerJobId, provider: provider.descriptor.id,
+          model: provider.descriptor.model, createdAt: this.deps.clock(),
+        }] };
+        await this.deps.store.saveJob(ctx.job);
         return this.awaitResult(ref, provider);
+      },
+      finalize: async (result, attemptId, ref) => {
+        if (result.isMock) return { uri: result.uri, durationSeconds: result.durationSeconds };
+        if (!result.data || !this.deps.videoAssets) throw new Error("Armazenamento de vídeo indisponível");
+        const stored = await this.deps.videoAssets.save({ campaignId: ctx.campaign.id, sceneId: scene.id, data: result.data,
+          metadata: { attemptId, providerJobId: ref.providerJobId, provider: provider.descriptor.id, model: provider.descriptor.model,
+            durationSeconds: result.durationSeconds, billedUsage: result.billedUsage } });
+        return { uri: stored.uri, durationSeconds: result.durationSeconds };
       },
     });
   }
@@ -985,7 +1011,7 @@ export class PipelineService {
       description: string;
       run: () => Promise<{ ref: ProviderJobRef; result: MediaResult }>;
       /** Pós-processamento DEPOIS do custo registrado (ex.: salvar a narração). Falha = tentativa falha (custo mantido). */
-      finalize?: (result: MediaResult, attemptId: string) => Promise<{ uri: string; durationSeconds: number; narration?: NarrationInfo }>;
+      finalize?: (result: MediaResult, attemptId: string, ref: ProviderJobRef) => Promise<{ uri: string; durationSeconds: number; narration?: NarrationInfo }>;
     },
   ): Promise<{ job: GenerationJob; attempt: MediaAttempt }> {
     const { clock, ids } = this.deps;
@@ -1034,7 +1060,7 @@ export class PipelineService {
       };
       if (spec.finalize) {
         try {
-          output = await spec.finalize(result, attemptId);
+          output = await spec.finalize(result, attemptId, ref);
         } catch (error) {
           // Custo já registrado acima; não registra de novo nem re-tenta.
           throw new ProviderError(`Mídia gerada (e cobrada), mas não foi possível salvar: ${messageOf(error)}`, ref.providerJobId);

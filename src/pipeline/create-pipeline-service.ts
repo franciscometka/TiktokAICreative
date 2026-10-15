@@ -4,7 +4,9 @@ import { LlmCreativePlanner } from "@/ai/llm-planner";
 import { UnavailablePlanner } from "@/ai/unavailable-planner";
 import { MockCreativePlanner } from "@/ai/mock-planner";
 import type { CreativePlanner } from "@/ai/planner";
-import { readElevenLabsApiKey, readRemotionLicenseKey, type AppConfig } from "@/config/env";
+import { readElevenLabsApiKey, readRemotionLicenseKey, readRunwayApiKey, type AppConfig } from "@/config/env";
+import { RUNWAY_VIDEO } from "@/config/video-models";
+import { LocalVideoAssetStore } from "@/storage/video-asset-store";
 import { PRICING_TABLE } from "@/config/pricing";
 import { StaticExchangeRateProvider } from "@/costs/exchange-rate";
 import { InMemoryCostLedger } from "@/costs/ledger";
@@ -56,7 +58,7 @@ function createStorage(config: AppConfig): Pick<PipelineDeps, "store" | "ledger"
 /**
  * Raiz de composição: o ÚNICO lugar que escolhe implementações concretas.
  * Planner mock ou Claude (LLM_PROVIDER); renderer mock ou Remotion (RENDERER); áudio mock ou
- * ElevenLabs (AUDIO_PROVIDER); vídeo continua mock;
+ * ElevenLabs (AUDIO_PROVIDER); vídeo mock ou Runway (VIDEO_PROVIDER);
  * persistência local em arquivos (STORAGE=file, padrão) ou memória.
  */
 export function createPipelineService(
@@ -67,7 +69,9 @@ export function createPipelineService(
   const ids = overrides.ids ?? randomId;
   return new PipelineService({
     planner: overrides.planner ?? createPlanner(config, ids, env),
-    videoProviderFactory: createVideoProviderFactory(config.videoProvider),
+    videoProviderFactory: createVideoProviderFactory(config.videoProvider, { apiKey: readRunwayApiKey(env), uploadsDir: config.uploadsDir }),
+    videoChoice: config.videoProvider === "runway" ? RUNWAY_VIDEO : undefined,
+    videoAssets: new LocalVideoAssetStore(config.videosDir),
     audioProviderFactory: createAudioProviderFactory(config.audioProvider, {
       elevenLabsApiKey: readElevenLabsApiKey(env),
       ttsTimeoutMs: config.ttsTimeoutMs,
@@ -75,7 +79,7 @@ export function createPipelineService(
     audioAssets: new LocalAudioAssetStore(config.audioDir),
     renderer: createRenderer(config.renderer.id, {
       rendersDir: config.rendersDir,
-      allowedAssetRoots: [config.uploadsDir, config.audioDir],
+      allowedAssetRoots: [config.uploadsDir, config.audioDir, config.videosDir],
       concurrency: config.renderer.concurrency,
       debug: config.renderer.debug,
       browserExecutable: config.renderer.browserExecutable,

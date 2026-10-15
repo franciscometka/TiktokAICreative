@@ -93,3 +93,7 @@ Vídeo IA real, avatar/apresentador, voice cloning, lip sync, publicação/TikTo
 
 ## Fora do escopo do Lote 3
 Vídeo/áudio reais (ElevenLabs, Veo, Runway, Kling), TTS, publicação/TikTok API, analytics, banco/fila externos, render em nuvem (Lambda) e qualquer chamada paga nova.
+
+
+## Lote 5 — Vídeo real Runway
+Integração modular opt-in com Gen-4 Turbo, estimativa oficial da duração comprada antes da aprovação, task id persistido, ledger real inclusive falhas cobradas, download e assets locais versionados, clipe real na composição Remotion. Nenhuma repetição paga automática. Validação manual sem custo por padrão; `--confirm` autoriza uma cena de 5s (não 2s), com planejamento/áudio/render mock. Testes normais usam transporte falso e rede bloqueada. Upload dedicado de screenshots/assets existentes continua separado desta integração; o fallback explícito existente é preservado.

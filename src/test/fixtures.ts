@@ -1,3 +1,6 @@
+import type { VideoProviderFactory } from "@/providers/video";
+import type { VideoAssetStore } from "@/storage/video-asset-store";
+import type { PricingRef } from "@/domain/quality";
 import type { AudioProvider } from "@/providers/audio/audio-provider";
 import { InMemoryAudioAssetStore, type AudioAssetStore } from "@/storage/audio-asset-store";
 import { MockCreativePlanner } from "@/ai/mock-planner";
@@ -135,6 +138,9 @@ export interface HarnessOptions {
   /** Provider de áudio próprio (ex.: ElevenLabs com transporte falso). Padrão: MockAudioProvider. */
   audioProvider?: (pricing: ProviderPricing) => AudioProvider;
   audioAssets?: AudioAssetStore;
+  videoProvider?: VideoProviderFactory;
+  videoAssets?: VideoAssetStore;
+  videoChoice?: PricingRef;
 }
 
 /** Pipeline completo com mocks compartilhados para inspeção nos testes. */
@@ -153,7 +159,9 @@ export function createHarness(options: HarnessOptions = {}) {
   const service = new PipelineService({
     planner: options.planner ? options.planner(ids) : new MockCreativePlanner(ids),
     llmCallLog,
-    videoProviderFactory: () => video,
+    videoProviderFactory: options.videoProvider ?? (() => video),
+    videoChoice: options.videoChoice,
+    videoAssets: options.videoAssets,
     audioProviderFactory: options.audioProvider ?? (() => audio),
     audioAssets,
     renderer,

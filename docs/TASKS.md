@@ -112,8 +112,15 @@ Correções depois da validação: `character-cost` separado de caracteres envia
 ## Roadmap (próximos lotes — não iniciar sem autorização)
 
 ### Lote 5 — Primeiro provider de vídeo real (ex.: Veo/Runway/Kling)
-- [ ] `VideoProvider` real + preço oficial; vídeo real substitui o placeholder no nível do asset
+- [x] Runway Gen-4 Turbo modular, configuração opt-in, preço oficial e estimativa pela duração comprada
+- [x] Aprovação/orçamento/limite existentes; task id persistido; sem retry pago
+- [x] Clipe local versionado, ledger antes de salvar, consumo preservado em falha de download/disco; vídeo real no Remotion
+- [x] `npm run video:real` com dry-run e `--confirm` explícito para uma cena de 5s via pipeline
+- [x] Testes com transporte falso, offline, incluindo persistência, versões e falhas cobradas
+- [ ] Primeira validação real autorizada (chave, qualidade, CDN e composição final) — não executada neste lote
 - [ ] Upload de `screenshot`/`existing_asset` (hoje caem para imagem do produto/card de texto)
+
+Validação offline do Lote 5 (2026-10-14): `npm run check` aprovado (451 testes / 40 arquivos, lint e TypeScript), `npm run build` aprovado. Inclui `video:real` em dry-run e com `--confirm` usando transporte integralmente falso; nenhuma chamada real/paga e nenhum push.
 
 ### Lote 6 — Operação em escala
 - [ ] Campanhas em volume, fila de execução, persistência mais robusta (SQLite) quando necessária, múltiplos processos

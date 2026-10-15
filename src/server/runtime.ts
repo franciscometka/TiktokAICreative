@@ -1,5 +1,6 @@
 import type { AppDeps } from "@/application/campaign-actions";
 import { loadAppConfig, type AppConfig } from "@/config/env";
+import { RUNWAY_VIDEO } from "@/config/video-models";
 import { PRICING_TABLE } from "@/config/pricing";
 import { summarizePresets, type PresetSummary } from "@/costs/preset-summary";
 import { StaticPricingCatalog } from "@/costs/pricing-catalog";
@@ -71,6 +72,7 @@ export function getPublicConfig(): PublicAppConfig {
 }
 
 export function getPresetSummaries(): PresetSummary[] {
-  return summarizePresets(new StaticPricingCatalog(PRICING_TABLE), getRuntime().config.exchangeRate);
+  const config = getRuntime().config;
+  return summarizePresets(new StaticPricingCatalog(PRICING_TABLE), config.exchangeRate, config.videoProvider === "runway" ? RUNWAY_VIDEO : undefined);
 }
 

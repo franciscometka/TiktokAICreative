@@ -151,6 +151,7 @@ export const ApprovalSchema = z.object({
 export type Approval = z.infer<typeof ApprovalSchema>;
 
 export const GenerationJobSchema = z.object({
+  videoTasks: z.array(z.object({ sceneId: z.string(), providerJobId: z.string(), provider: z.string(), model: z.string(), createdAt: z.string() })).optional(),
   id: nonEmpty,
   campaignId: nonEmpty,
   creativeId: nonEmpty,

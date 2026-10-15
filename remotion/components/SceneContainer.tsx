@@ -1,4 +1,4 @@
-import { AbsoluteFill, useCurrentFrame } from "remotion";
+import { AbsoluteFill, OffthreadVideo, useCurrentFrame } from "remotion";
 import { transitionIn } from "../styles/animation";
 import type { SceneProps } from "../types/props";
 import { GeneratedVideoPlaceholder } from "./GeneratedVideoPlaceholder";
@@ -11,7 +11,9 @@ export function SceneContainer({ scene }: { scene: SceneProps }) {
   const t = transitionIn(scene.transition, frame);
 
   let content;
-  if (scene.kind === "generated_video") {
+  if (scene.video) {
+    content = <OffthreadVideo src={scene.video.src} muted style={{ width: "100%", height: "100%", objectFit: "cover" }} />;
+  } else if (scene.kind === "generated_video") {
     content = (
       <GeneratedVideoPlaceholder
         image={scene.image}
