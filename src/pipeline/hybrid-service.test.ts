@@ -59,6 +59,62 @@ async function setup(modes: Partial<StageModes> = {}, avatar = true, options: { 
 }
 
 describe("execução híbrida por etapa — somente transportes falsos", () => {
+  it("percorre projeto → roteiro → narração → avatar → cena → render inteiramente MOCK pelos botões de etapa", async () => {
+    const f = await setup();
+    const id = f.campaign.jobIds[0]!;
+    const stages = [["narration", "Gerar narração"], ["avatar", "Gerar avatar"], ["scenes", "Gerar cena de produto"], ["render", "Renderizar vídeo final"]] as const;
+    for (const [stage, expectedAction] of stages) {
+      const view = await getCampaignView({ service: f.service, uploads: new LocalUploadStore(f.config.uploadsDir), audioDir: f.config.audioDir, rendersDir: f.config.rendersDir }, f.campaign.id);
+      expect(view.ok && view.value.creatives[0]!.nextAction?.label).toContain(expectedAction);
+      for (let clicks = 0; clicks < 10; clicks++) {
+        const quote = await f.service.quoteStage(id, stage);
+        if (quote.done) break;
+        expect(quote.mode).toBe("mock");
+        expect(quote.estimatedBrl).toBe(0);
+        expect(quote.ready, quote.blocked).toBe(true);
+        await (await f.service.executeStage(id, stage, quote.token)).completion;
+      }
+      expect((await f.service.quoteStage(id, stage)).done).toBe(true);
+    }
+    expect((await f.service.getJob(id)).status).toBe("completed");
+    expect((await f.ledger()).every(entry => entry.simulated)).toBe(true);
+    expect(f.llm.requests).toHaveLength(0);
+    expect(f.audio.calls).toHaveLength(0);
+    expect(f.presenter.posts).toBe(0);
+    expect(f.video.calls).toHaveLength(0);
+  });
+
+  it("percorre o protocolo completo da interface com transportes falsos e sem rede externa", async () => {
+    const f = await setup({ planning: "real", narration: "real", scenes: "real", avatar: "real", render: "real" });
+    const planning = await f.service.quotePlanning(f.campaign.id);
+    expect(planning.preflight?.every(check => check.ok)).toBe(true);
+    await (await f.service.executePlanning(f.campaign.id, planning.token)).completion;
+    const jobId = (await f.service.getCampaign(f.campaign.id)).jobIds[0]!;
+
+    const runUntilDone = async (stage: "narration" | "avatar" | "scenes" | "render") => {
+      for (let clicks = 0; clicks < 10; clicks++) {
+        const quote = await f.service.quoteStage(jobId, stage);
+        if (quote.done) return;
+        expect(quote.ready, quote.blocked).toBe(true);
+        expect(quote.preflight?.filter(check => check.id !== "budget").every(check => check.ok), `${stage}: ${JSON.stringify(quote.preflight)}`).toBe(true);
+        await (await f.service.executeStage(jobId, stage, quote.token)).completion;
+      }
+      throw new Error(`Etapa ${stage} não concluiu dentro do limite do teste`);
+    };
+
+    await runUntilDone("narration");
+    await runUntilDone("avatar");
+    await runUntilDone("scenes");
+    await runUntilDone("render");
+
+    const completed = await f.service.getJob(jobId);
+    expect(completed.status).toBe("completed");
+    expect(f.llm.requests).toHaveLength(1);
+    expect(f.audio.calls).toHaveLength(1);
+    expect(f.presenter.posts).toBeGreaterThanOrEqual(1);
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video")).length).toBeGreaterThanOrEqual(1);
+    expect(f.realRenders).toBe(1);
+  });
   it("mantém o fluxo inteiro MOCK com aprovação, ledger e render versionado", async () => {
     const f = await setup(); const id = f.campaign.jobIds[0]!;
     const job = await f.service.getJob(id); await f.service.requestApproval(id); await f.service.approve(id, { estimateId: job.estimate!.id });

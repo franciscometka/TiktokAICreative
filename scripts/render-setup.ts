@@ -6,8 +6,10 @@
  *   npm run render:setup
  */
 import { ensureBrowser } from "@remotion/renderer";
+import { existsSync } from "node:fs";
 
 async function main() {
+  if (existsSync(".env.local")) process.loadEnvFile(".env.local");
   const status = await ensureBrowser({ logLevel: "info", browserExecutable: process.env.RENDER_BROWSER_EXECUTABLE ?? null });
   console.log("Navegador do Remotion pronto:", status);
 }

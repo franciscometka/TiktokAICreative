@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { CreativeView } from "@/application/campaign-view";
 import { formatBrl } from "@/lib/money";
-import { Badge, buttonClasses, Panel } from "../ui/primitives";
+import { Badge, buttonClasses, Notice, Panel } from "../ui/primitives";
 const labels = { ready: "Concluído", running: "Em andamento", waiting: "Aguardando", paused: "Pausado", failed: "Falhou", skipped: "Não se aplica" } as const;
 export function WorkflowPanel({ creative }: { creative: CreativeView }) {
   return <Panel className="scroll-mt-24 p-5 sm:p-6" id={`job-${creative.jobId}`}>
@@ -11,6 +11,7 @@ export function WorkflowPanel({ creative }: { creative: CreativeView }) {
         <p className="mt-1 break-all text-xs text-zinc-500">{creative.jobId} · {creative.jobStatusLabel}</p></div>
       <Badge tone={creative.offline ? "blue" : "neutral"}>{creative.hybrid ? "Modos por etapa" : creative.offline ? "Offline · gasto real R$ 0,00" : "Histórico"}</Badge>
     </div>
+    {creative.nextAction ? <div className="mt-4"><Notice tone={creative.nextAction.ready ? "blue" : creative.nextAction.label === "Fluxo concluído" ? "green" : "amber"} title="Próxima etapa recomendada"><span className="font-semibold">{creative.nextAction.label}</span><span className="block">{creative.nextAction.detail}</span></Notice></div> : null}
     <dl className="mt-4 flex flex-wrap gap-x-8 gap-y-2 text-sm"><div><dt className="text-zinc-500">Duração planejada</dt><dd className="font-medium">≈ {creative.durationSeconds.toFixed(1)}s</dd></div>
       <div><dt className="text-zinc-500">Custo de referência antes de simular</dt><dd className="font-medium">{creative.estimate ? formatBrl(creative.estimate.futureTotalBrl) : "Calculando"}</dd></div></dl>
     <ol className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label="Etapas do pipeline">

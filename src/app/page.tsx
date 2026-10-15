@@ -4,6 +4,7 @@ import { CampaignList } from "@/components/campaign-list";
 import { QualityPresetCard } from "@/components/quality-preset-card";
 import { buttonClasses, Notice } from "@/components/ui/primitives";
 import { getPresetSummaries, getPublicConfig, getRuntime } from "@/server/runtime";
+import { ReadinessPanel } from "@/components/readiness-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,7 @@ export default async function HomePage() {
       </section>
 
       <div className="mt-8 space-y-2">
+        <ReadinessPanel readiness={config.readiness} compact />
         {config.planner === "mock" && (
           <Notice title="Planejamento simulado">LLM_PROVIDER=mock: nenhuma chamada ao Claude e nenhum custo real.</Notice>
         )}

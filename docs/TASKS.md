@@ -184,3 +184,16 @@ Validação offline do Lote 5 (2026-10-14): `npm run check` aprovado (451 testes
 - [ ] Validação REAL paga integrada, incluindo primeira validação do presenter (não autorizada nesta implementação).
 
 Guia: [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md).
+
+## Lote 5.1 — Fechamento ponta a ponta pela interface ✅
+- [x] Diagnóstico sanitizado de Anthropic, ElevenLabs, Runway, providers selecionados, renderer e navegador Remotion
+- [x] Configuração inválida mantém UI acessível em fallback MOCK e mostra correção orientada
+- [x] Configuração pública reflete o runtime em vez de valores hardcoded MOCK
+- [x] Preflight local por cotação: provider, assets, dependências, duração, tentativas, orçamento e aprovação
+- [x] Rechecagem sob lock imediatamente antes da autorização efêmera de uma unidade
+- [x] "Próxima etapa recomendada" derivada do estado/cotações do job
+- [x] Detecção do navegador sem download + `npm run render:check`; instalação somente por `render:setup`
+- [x] Fluxo completo por botões em MOCK e protocolo completo com transportes falsos
+- [x] Protocolo futuro limitado a 1 narração, 1 avatar, 1 cena de produto e 1 render local
+- [ ] Validação integrada REAL/paga — exige autorização futura
+- [ ] Product UGC real — fora de escopo

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { StaticPricingCatalog, PricingNotFoundError } from "@/costs/pricing-catalog";
 import { resolveQualitySettings, QualitySettingsError } from "@/costs/quality";
 import { pricing } from "@/test/fixtures";
-import { ConfigError, DEFAULT_BUDGET, DEFAULT_LLM_POLICY, loadAppConfig, readAnthropicApiKey } from "./env";
+import { ConfigError, DEFAULT_BUDGET, DEFAULT_LLM_POLICY, loadAppConfig, loadAppConfigSafe, readAnthropicApiKey } from "./env";
 import { DEFAULT_EXCHANGE_RATE, PRICING_TABLE } from "./pricing";
 import { QUALITY_PRESETS } from "./quality-presets";
 
@@ -35,6 +35,14 @@ describe("loadAppConfig", () => {
     expect(() => loadAppConfig({ MAX_COST_PER_CREATIVE_BRL: "-5" })).toThrow(ConfigError);
     expect(() => loadAppConfig({ VIDEO_PROVIDER: "veo" })).toThrow(ConfigError);
     expect(() => loadAppConfig({ MAX_ATTEMPTS_PER_SCENE: "1000" })).toThrow(ConfigError);
+  });
+
+  it("mantém a interface em MOCK e explica provider inválido sem expor segredos", () => {
+    const result = loadAppConfigSafe({ VIDEO_PROVIDER: "RUNWAYML", RUNWAYML_API_SECRET: "segredo" });
+    expect(result.config.videoProvider).toBe("mock");
+    expect(result.issues[0]).toMatchObject({ variable: "VIDEO_PROVIDER" });
+    expect(result.issues[0]?.message).toMatch(/runway.*RUNWAYML/i);
+    expect(JSON.stringify(result)).not.toContain("segredo");
   });
 });
 

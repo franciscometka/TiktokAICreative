@@ -16,6 +16,7 @@ import { Stepper, stepsFor, type StepState } from "@/components/stepper";
 import { Badge, buttonClasses, Notice, Panel, SectionHeading } from "@/components/ui/primitives";
 import { formatBrl } from "@/lib/money";
 import { getPublicConfig, getRuntime } from "@/server/runtime";
+import { ReadinessPanel } from "@/components/readiness-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -101,6 +102,7 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
       <div className="mt-6">
         <Stepper steps={stepsFor(stepStates(view), planned ? [undefined, undefined, undefined, "#analise", "#custo"] : [])} />
       </div>
+      <div className="mt-6"><ReadinessPanel readiness={publicConfig.readiness} compact /></div>
 
       {view.videoConcept ? <p className="mt-4 max-w-3xl text-sm leading-relaxed text-zinc-600">{view.videoConcept}</p> : null}
       {view.offlineReadOnly ? <div className="mt-6"><Notice title="Projeto anterior em consulta">

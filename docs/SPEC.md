@@ -101,3 +101,11 @@ Integração modular opt-in com Gen-4 Turbo, estimativa oficial da duração com
 ## Execução híbrida por etapa
 
 A interface oferece MOCK/REAL por planejamento, narração, cenas, presenter e render; MOCK é o default. REAL só disponível com provider configurado e requer cotação + confirmação da etapa. Planejamento REAL aguarda em draft; mídia REAL executa uma unidade por clique. Render REAL é local e não pode chamar outros providers. Novas versões e excedentes têm aprovação própria. Dados antigos permanecem consultáveis; troca de modo preserva arquivos e ledger. Ver [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md) e D76.
+
+## Lote 5.1 — Fechamento ponta a ponta da interface
+- Diagnóstico local mostra provider selecionado, presença de credenciais sem revelar valores, renderer e navegador Remotion.
+- Configuração inválida nunca habilita provider por aproximação: cai para MOCK, mantém a interface acessível e mostra correção orientada.
+- Cada cotação inclui preflight sem rede: provider, assets, dependências, duração, tentativas, orçamento e confirmação explícita. A execução recalcula a cotação sob lock antes de autorizar transporte.
+- O job mostra uma única "Próxima etapa recomendada", incluindo revisão de áudio, cena de avatar/produto e render.
+- `render:check` apenas verifica o navegador; `render:setup` continua sendo a única instalação explícita.
+- Testes cobrem o percurso completo por etapas em MOCK e o protocolo REAL com transportes falsos. Product UGC real permanece fora de escopo.

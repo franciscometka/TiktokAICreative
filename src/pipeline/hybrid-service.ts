@@ -10,17 +10,19 @@ import { MockPresenterProvider } from "@/providers/presenter/mock-presenter-prov
 import { RunwayPresenterProvider } from "@/providers/presenter/runway-presenter-provider";
 import { createRenderer } from "@/render/create-renderer";
 import type { StageCapabilities } from "@/domain/execution";
+import { detectRemotionBrowser } from "@/render/remotion/browser-readiness";
 import { createOfflinePipelineService, VersionedMockRenderer } from "./offline-service";
 import type { PipelineDeps } from "./pipeline-service";
 
 export function hybridCapabilities(config: AppConfig, env: Record<string, string | undefined> = process.env): StageCapabilities {
   const available = (ok: boolean, provider: string, reason: string) => ({ available: ok, provider, reason: ok ? undefined : reason });
+  const browser = detectRemotionBrowser(config.renderer.browserExecutable);
   return {
     planning: available(config.llmProvider === "anthropic" && !!readAnthropicApiKey(env), "anthropic", "Configure LLM_PROVIDER=anthropic e ANTHROPIC_API_KEY no servidor."),
     narration: available(config.audioProvider === "elevenlabs" && !!readElevenLabsApiKey(env), "elevenlabs", "Configure AUDIO_PROVIDER=elevenlabs e ELEVENLABS_API_KEY no servidor."),
     scenes: available(config.videoProvider === "runway" && !!readRunwayApiKey(env), "runway", "Configure VIDEO_PROVIDER=runway e RUNWAYML_API_SECRET no servidor."),
     avatar: available(!!readRunwayApiKey(env), "runway", "Configure RUNWAYML_API_SECRET no servidor. Avatar real exige também narração real com alignment."),
-    render: available(config.renderer.id === "remotion", "remotion", "Configure RENDERER=remotion e prepare o navegador local com npm run render:setup."),
+    render: available(config.renderer.id === "remotion" && browser.available, "remotion", config.renderer.id !== "remotion" ? "Configure RENDERER=remotion no servidor." : browser.detail),
   };
 }
 /** Defaults sempre MOCK. As implementações reais só são instanciadas na etapa selecionada. */

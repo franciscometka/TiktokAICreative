@@ -222,3 +222,11 @@ Pré-requisito já atendido: ledger persistido em `ledger.jsonl`.
 `createHybridPipelineService` usa a mesma composição/storage do fluxo offline, acrescentando factories por modo e capabilities sem segredos. `domain/execution.ts` define modos/etapas; os schemas de Campaign/GenerationJob persistem escolhas, intenções, revisão e aprovações. `PipelineService.quotePlanning/quoteStage` só leem/calculam. `executePlanning/executeStage` verificam cotação e orçamento sob lock, persistem autorização e iniciam trabalho em background. Cada etapa real termina sem encadear outra paga.
 
 `config/execution-policy` protege transportes reais com escopo efêmero limitado a uma criação; mocks e transportes falsos preservam injeção de dependências. `application` monta cotações e bloqueios para `StageExecutionPanel`; Server Actions validam argumentos e delegam. O render real reusa AssetResolver/Remotion e seu registro versionado. Retomada Runway restaura a referência para polling/download sem POST novo; intenção sem ID requer reconciliação externa. Compatibilidade: campos novos opcionais, projetos antigos sem conversão destrutiva. Guia em HYBRID-WORKFLOW.md.
+
+## Diagnóstico e preflight (Lote 5.1 / D77)
+
+`loadAppConfigSafe` mantém a aplicação acessível quando um valor local é inválido: somente o campo inválido volta ao default seguro e uma mensagem sanitizada chega ao diagnóstico. `runtimeReadiness` combina seleção de provider, presença booleana das credenciais e inspeção local do navegador. Nenhuma chave é serializada.
+
+`detectRemotionBrowser` consulta apenas o filesystem; nunca chama `ensureBrowser`. A preparação continua exclusiva de `npm run render:setup`, enquanto `npm run render:check` é read-only e sem rede.
+
+`quotePlanning` e `quoteStage` expõem checks de preflight junto da cotação. O painel os mostra antes da confirmação; `executePlanning`/`executeStage` recalculam a mesma cotação sob lock e só então criam a autorização efêmera de uma unidade. `application/job-workflow.ts` deriva a próxima ação recomendada do estado e das cotações, sem duplicar regras de execução no componente.

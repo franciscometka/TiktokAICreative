@@ -3,6 +3,7 @@ import { newProductId } from "@/application/campaign-actions";
 import { formInputFromRequest, type CampaignFormInput } from "@/application/campaign-form";
 import { imagePreviewUrl, type ImageView } from "@/application/campaign-view";
 import { CampaignWizard } from "@/components/create/campaign-wizard";
+import { ReadinessPanel } from "@/components/readiness-panel";
 import { DEFAULT_SPEAKER_PROFILE_ID, SPEAKER_PROFILES } from "@/config/voices";
 import { getPresetSummaries, getPublicConfig, getRuntime } from "@/server/runtime";
 
@@ -71,6 +72,7 @@ export default async function CreatePage({ searchParams }: { searchParams: Promi
           execução de cada etapa.
         </p>
       </div>
+      <div className="mb-6"><ReadinessPanel readiness={publicConfig.readiness} /></div>
       <CampaignWizard
         stageCapabilities={publicConfig.stageCapabilities}
         presets={getPresetSummaries()}

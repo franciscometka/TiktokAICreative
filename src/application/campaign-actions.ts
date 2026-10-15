@@ -10,6 +10,7 @@ import { FINAL_FILE, RENDER_ID, renderDir, SAFE_ENTITY_ID } from "@/render/outpu
 import { LocalAudioAssetStore } from "@/storage/audio-asset-store";
 import type { LocalUploadStore } from "@/storage/upload-store";
 import { parseCampaignForm, toCampaignRequest, type FieldErrors } from "./campaign-form";
+import { recommendedNextAction } from "./job-workflow";
 import {
   buildCampaignView,
   campaignListItem,
@@ -128,6 +129,9 @@ export async function getCampaignView(deps: AppDeps, campaignId: string): Promis
         creative.hybrid = true;
         creative.stageQuotes = await Promise.all((["narration", "scenes", "avatar", "render"] as const).map(stage => service.quoteStage(creative.jobId!, stage)));
         for (const quote of creative.stageQuotes) if (quote.done) quote.repeat = await service.quoteStage(creative.jobId, quote.stage, false, true);
+        const job = jobs.find(item => item.id === creative.jobId);
+        const plan = campaign.plan?.creatives.find(item => item.id === creative.id);
+        if (job && plan) creative.nextAction = recommendedNextAction(plan, job, creative.stageQuotes, service.isJobActive(job.id));
         creative.narration.canRegenerate = false;
         for (const presenter of creative.presenters ?? []) presenter.canRegenerate = false;
       }

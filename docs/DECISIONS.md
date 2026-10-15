@@ -323,3 +323,13 @@ Modes/revisões/intenções/aprovações vivem no job; request guarda seleção 
 Ledger continua append-only, com custo simulado separado do dinheiro real no orçamento híbrido. Cada escopo de excedente tem confirmação própria e teto mostrado. Runway genérico ganha intenção antes do POST e retomada pelo ID; envio sem ID bloqueia repetição. Tentativa/custo de vídeo são deduplicados na retomada. Duração, integridade e versionamento reais continuam nas camadas existentes. Ver HYBRID-WORKFLOW.md. Nenhuma chamada paga na implementação.
 
 Compatibilidade D76: os projetos offline de ff176bb podem adotar o modo híbrido explicitamente no próprio job, preservando plano, assets, aprovação e ledger. Só projetos reais antigos/sem identificação ficam em consulta e usam cópia.
+
+## D77 — Prontidão e preflight locais antes da validação integrada
+
+Configuração inválida não deve derrubar toda a interface nem ser corrigida implicitamente para um provider real. `loadAppConfigSafe` remove apenas campos rejeitados pelo schema, usa o default MOCK e publica mensagens orientadas, nunca valores de segredo. O diagnóstico informa seleção e presença booleana de Anthropic, ElevenLabs e Runway, renderer, navegador e dependências. `VIDEO_PROVIDER=RUNWAYML`, por exemplo, orienta usar `runway` e permanece MOCK.
+
+O navegador do Remotion é detectado por existência do executável configurado ou do Chrome Headless Shell baixado; a leitura nunca instala nada. Render REAL só fica disponível quando `RENDERER=remotion` e o navegador existe. `render:setup` é instalação explícita; `render:check` é diagnóstico sem rede.
+
+Toda cotação por etapa inclui preflight de provider/configuração, assets, narração/alignment e avatar quando aplicáveis, duração, tentativas, orçamento e confirmação. O painel é informativo; a segurança continua no servidor: a execução refaz a cotação sob lock, verifica token/orçamento/estado e cria autorização efêmera para uma única chamada. A próxima ação é derivada das cotações na camada application. Nenhuma cascata, retry pago, mutação do ledger ou simplificação das proteções existentes.
+
+O protocolo futuro é deliberadamente pequeno: uma narração, uma cena curta de avatar, uma cena curta de produto e um render local, cada item com cotação e clique próprios. A implementação é validada em MOCK e com transportes falsos; chamadas reais continuam pendentes de autorização. Product UGC real permanece desabilitado.

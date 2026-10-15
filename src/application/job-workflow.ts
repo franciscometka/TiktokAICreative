@@ -1,8 +1,25 @@
 import type { Campaign, GenerationJob } from "@/domain/pipeline";
 import type { CreativePlan } from "@/domain/creative";
 import { activeAttempt } from "@/pipeline/guards";
+import type { StageQuote } from "@/domain/execution";
 export type WorkflowState = "ready" | "running" | "waiting" | "paused" | "failed" | "skipped";
 export interface WorkflowStep { id: string; label: string; state: WorkflowState; detail: string; simulated: boolean }
+export interface RecommendedAction { label: string; detail: string; stage?: StageQuote["stage"]; ready: boolean }
+
+export function recommendedNextAction(creative: CreativePlan, job: GenerationJob, quotes: StageQuote[], active: boolean): RecommendedAction {
+  if (active) return { label: "Aguardar a etapa em andamento", detail: "A página será atualizada; não repita a ação enquanto o job estiver ativo.", ready: false };
+  if (job.status === "audio_review") return { label: "Revisar duração da narração", detail: "Aceite a duração maior, gere uma nova versão explicitamente ou cancele antes de continuar.", stage: "narration", ready: true };
+  const order = ["narration", "avatar", "scenes", "render"] as const;
+  for (const stage of order) {
+    const quote = quotes.find(item => item.stage === stage);
+    if (!quote || quote.done) continue;
+    const sceneId = quote.unit.split(":")[0];
+    const sceneNumber = creative.scenes.find(scene => scene.id === sceneId)?.order;
+    const label = stage === "narration" ? "Gerar narração" : stage === "avatar" ? `Gerar avatar${sceneNumber === undefined ? "" : ` da cena ${sceneNumber + 1}`}` : stage === "scenes" ? `Gerar cena de produto${sceneNumber === undefined ? "" : ` ${sceneNumber + 1}`}` : "Renderizar vídeo final";
+    return { label, detail: quote.blocked ?? `${quote.mode.toUpperCase()} · ${quote.provider} · revise o preflight e confirme somente esta ação.`, stage, ready: quote.ready || !!quote.budgetDecision?.canAuthorizeOverBudget };
+  }
+  return { label: "Fluxo concluído", detail: "Todas as etapas selecionadas têm uma versão válida e o render está atualizado.", ready: false };
+}
 export function jobWorkflow(campaign: Campaign, creative: CreativePlan, job: GenerationJob | undefined, active: boolean): WorkflowStep[] {
   const offline = campaign.executionMode === "offline" || campaign.executionMode === "hybrid";
   const narration = job ? activeAttempt(job.audioAttempts) : undefined;

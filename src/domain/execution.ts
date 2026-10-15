@@ -1,4 +1,5 @@
 import type { BudgetExceededDecision } from "./cost";
+import type { PreflightCheck } from "./readiness";
 import { z } from "zod";
 
 export const EXECUTION_STAGES = ["planning", "narration", "scenes", "avatar", "render"] as const;
@@ -19,4 +20,5 @@ export interface StageQuote {
   stage: ExecutionStage; mode: ExecutionMode; unit: string; token: string;
   provider: string; model: string; estimatedBrl: number; actualBrl: number; simulatedBrl: number;
   ready: boolean; blocked?: string; done: boolean; state: string;
+  preflight?: PreflightCheck[];
 }

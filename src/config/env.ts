@@ -80,6 +80,11 @@ const EnvSchema = z.object({
   ),
 });
 
+export interface ConfigIssue {
+  variable: string;
+  message: string;
+}
+
 /** Configuração NÃO secreta. A API key nunca entra aqui (ver readAnthropicApiKey). */
 export interface AppConfig {
   llmProvider: (typeof LLM_PROVIDER_IDS)[number];
@@ -156,6 +161,47 @@ export function loadAppConfig(
     },
     maxAttemptsPerScene: e.MAX_ATTEMPTS_PER_SCENE,
   };
+}
+
+const CONFIG_HINTS: Record<string, string> = {
+  LLM_PROVIDER: 'Use "mock" ou "anthropic".',
+  VIDEO_PROVIDER: 'Use "mock" ou "runway" (não use RUNWAYML).',
+  AUDIO_PROVIDER: 'Use "mock" ou "elevenlabs".',
+  RENDERER: 'Use "mock" ou "remotion".',
+};
+
+/**
+ * Mantém a interface acessível quando uma variável está inválida, mas nunca habilita
+ * um provider por aproximação: o campo inválido volta ao default seguro (MOCK) e a
+ * falha é devolvida para o diagnóstico público. Segredos não fazem parte do schema.
+ */
+export function loadAppConfigSafe(
+  env: Record<string, string | undefined> = process.env,
+  now: () => string = () => new Date().toISOString(),
+): { config: AppConfig; issues: ConfigIssue[] } {
+  const parsed = EnvSchema.safeParse(env);
+  if (parsed.success) return { config: loadAppConfig(env, now), issues: [] };
+
+  const sanitized = { ...env };
+  const invalidVariables = new Set<string>();
+  for (const issue of parsed.error.issues) {
+    const variable = String(issue.path[0] ?? "CONFIG");
+    invalidVariables.add(variable);
+    if (variable !== "CONFIG") sanitized[variable] = undefined;
+  }
+  const issues = [...invalidVariables].map((variable) => ({
+    variable,
+    message: `${variable} tem um valor inválido. ${CONFIG_HINTS[variable] ?? "Revise o valor em .env.local."} Enquanto isso, o runtime usa o padrão seguro.`,
+  }));
+
+  const fallback = EnvSchema.safeParse(sanitized);
+  if (!fallback.success) {
+    return {
+      config: loadAppConfig({}, now),
+      issues: [{ variable: "CONFIG", message: "A configuração local não pôde ser validada. O runtime foi aberto integralmente em MOCK; revise .env.local." }],
+    };
+  }
+  return { config: loadAppConfig(sanitized, now), issues };
 }
 
 /**

@@ -8,6 +8,7 @@ produto → análise/hooks/conceitos/roteiro/cenas (Claude) → validação + aj
 Custo é preocupação central; nada pago de mídia acontece sem aprovação explícita.
 
 ## Estado atual
+- Lote 5.1: diagnóstico público sem segredos, configuração inválida com fallback seguro para MOCK, preflight local por ação, navegador Remotion detectado sem download e "Próxima etapa recomendada" no job. Protocolo completo validado só com mocks/transportes falsos; nenhuma chamada paga.
 - Prompt ativo: `campaign-plan@1.4.0` (inclui brief e valida preservação do roteiro manual; ainda sem validação paga).
 - Interface híbrida por etapa (D76): MOCK default; REAL apenas com provider configurado, cotação e confirmação por unidade. Nenhuma cascata paga. Planejamento real aguarda draft/aprovação. Guia: `docs/HYBRID-WORKFLOW.md`. CLI `--confirm` isolado continua bloqueada.
 - Lotes 0 a 5 implementados (Runway ainda sem validação paga). Lote 4 = narração real pt-BR com ElevenLabs (opcional), legendas com timing real, AudioFit/revisão, áudio versionado e MP4 com AAC. Lote 2 = experiência `/create` → `/campaigns/[id]` (planejar, revisar, custo, aprovar). Lote 3 = render real do MP4 com Remotion (local, R$0).
@@ -28,6 +29,7 @@ npm run plan:real         # validação manual com Claude real: sem --confirm s�
 npm run test:integration  # testes PAGOS; só rodam com RUN_PAID_TESTS=1 e ANTHROPIC_API_KEY
 npm run tts:real          # validação manual ElevenLabs: sem --confirm só mostra custo; com --confirm UMA chamada curta
 npm run render:setup      # baixa o Chrome Headless Shell do Remotion (1× por máquina)
+npm run render:check      # somente verifica localmente; nunca baixa navegador
 npm run test:render       # teste PESADO: MP4 real de 3s (fora do npm test e do check)
 ```
 Para ver a tela de processamento com o mock: `MOCK_PLANNER_DELAY_MS=20000` em `.env.local`.

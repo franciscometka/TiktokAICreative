@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { MOCK_STAGE_MODES, type ExecutionStage, type ExecutionMode, type StageCapabilities, type StageQuote } from "@/domain/execution";
+import type { PreflightCheck } from "@/domain/readiness";
 import { withRealStageAuthorization } from "@/config/execution-policy";
 import { RUNWAY_VIDEO } from "@/config/video-models";
 import { generatePresenter, presenterPreview, PresenterPendingError, type PresenterFlowDeps } from "./presenter-flow";
@@ -238,8 +239,21 @@ export class PipelineService {
     const pricing = resolvePricing(campaign.settings, this.deps.pricing);
     const estimatedBrl = mode === "real" ? usdToBrl(worstCaseLlmCostUsd(pricing.llm, this.toWorstCaseParams(this.toPlanningRequest(campaign.request, campaign.settings))), (await this.deps.exchangeRates.getUsdBrl()).rate) : 0;
     const entries = await this.planningEntries(campaignId);
-    const blocked = mode === "real" && !this.deps.hybrid?.capabilities.planning.available ? this.deps.hybrid?.capabilities.planning.reason ?? "Claude não configurado" : campaign.status === "planned" ? "O plano já existe; crie uma cópia para replanejar." : this.isPlanningActive(campaignId) ? "Planejamento em andamento" : (campaign.planningRuns ?? 0) >= this.deps.maxAttemptsPerScene ? "Limite de tentativas de planejamento atingido" : undefined;
-    return { stage: "planning", mode, unit: campaignId, token: this.fingerprint({ campaign, estimatedBrl }), provider: mode === "real" ? campaign.settings.llm.provider : "mock", model: campaign.settings.llm.model, estimatedBrl, actualBrl: entries.filter(e => !e.simulated).reduce((a,e) => a+e.costBrl,0), simulatedBrl: entries.filter(e => e.simulated).reduce((a,e) => a+e.costBrl,0), ready: !blocked, blocked, done: campaign.status === "planned", state: campaign.status === "planned" ? "Concluído" : campaign.status === "draft" ? "Aguardando aprovação" : campaign.status === "planning" ? "Em andamento ou interrompido" : "Falhou" };
+    let blocked = mode === "real" && !this.deps.hybrid?.capabilities.planning.available ? this.deps.hybrid?.capabilities.planning.reason ?? "Claude não configurado" : campaign.status === "planned" ? "O plano já existe; crie uma cópia para replanejar." : this.isPlanningActive(campaignId) ? "Planejamento em andamento" : (campaign.planningRuns ?? 0) >= this.deps.maxAttemptsPerScene ? "Limite de tentativas de planejamento atingido" : undefined;
+    if (!blocked && mode === "real") {
+      const spent = entries.filter(entry => !entry.simulated).reduce((total, entry) => total + entry.costBrl, 0);
+      try { await this.assertPlanningFitsBudget(campaign.request, campaign.settings, spent); }
+      catch { blocked = "Orçamento insuficiente para o pior caso do planejamento REAL."; }
+    }
+    const capabilityOk = mode === "mock" || !!this.deps.hybrid?.capabilities.planning.available;
+    const attemptsOk = (campaign.planningRuns ?? 0) < this.deps.maxAttemptsPerScene;
+    const preflight: PreflightCheck[] = [
+      { id: "provider", label: "Provider e configuração", ok: capabilityOk, detail: capabilityOk ? `${mode === "real" ? campaign.settings.llm.provider : "mock"} selecionado e disponível.` : this.deps.hybrid?.capabilities.planning.reason ?? "Provider indisponível." },
+      { id: "attempts", label: "Limite de tentativas", ok: attemptsOk, detail: attemptsOk ? `${campaign.planningRuns ?? 0}/${this.deps.maxAttemptsPerScene} tentativas usadas.` : "Limite de tentativas atingido." },
+      { id: "budget", label: "Orçamento", ok: !blocked || !blocked.toLowerCase().includes("orçamento"), detail: `Pior caso estimado: R$ ${estimatedBrl.toFixed(2)}. O orçamento será rechecado sob lock.` },
+      { id: "approval", label: "Aprovação explícita", ok: true, detail: "O botão de confirmação aprova somente esta execução; nenhuma outra etapa será iniciada." },
+    ];
+    return { stage: "planning", mode, unit: campaignId, token: this.fingerprint({ campaign, estimatedBrl }), provider: mode === "real" ? campaign.settings.llm.provider : "mock", model: campaign.settings.llm.model, estimatedBrl, actualBrl: entries.filter(e => !e.simulated).reduce((a,e) => a+e.costBrl,0), simulatedBrl: entries.filter(e => e.simulated).reduce((a,e) => a+e.costBrl,0), ready: !blocked, blocked, done: campaign.status === "planned", state: campaign.status === "planned" ? "Concluído" : campaign.status === "draft" ? "Aguardando aprovação" : campaign.status === "planning" ? "Em andamento ou interrompido" : "Falhou", preflight };
   }
   async executePlanning(campaignId: string, token: string) {
     if (!this.deps.hybrid) throw new Error("Fluxo híbrido indisponível");
@@ -318,7 +332,24 @@ export class PipelineService {
     const category = stage === "narration" ? "audio" : stage === "render" ? "rendering" : "video";
     const sceneIds = new Set(scenes.map(s => s.id));
     const entries = (await this.deps.ledger.list({ jobId })).filter(e => e.category === category && (category !== "video" || !!e.sceneId && sceneIds.has(e.sceneId)));
-    return { regenerate, budgetDecision, stage, mode, unit, token: this.fingerprint({ job, stage, mode, unit, estimatedBrl, model, provider, budgetDecision, regenerate }), provider, model, estimatedBrl, actualBrl: entries.filter(e => !e.simulated).reduce((a,e) => a+e.costBrl,0), simulatedBrl: entries.filter(e => e.simulated).reduce((a,e) => a+e.costBrl,0), ready: !blocked && !done, blocked, done, state: this.isJobActive(jobId) && job.currentStage === stage ? "Em andamento" : done ? "Concluído" : blocked ? "Bloqueado" : "Aguardando ação explícita" };
+    const capabilityOk = mode === "mock" || !!this.deps.hybrid?.capabilities[stage].available;
+    const attemptsUsed = stage === "narration" ? job.audioAttempts.length : scene ? job.scenes.find(s => s.sceneId === scene.id)?.attempts.length ?? 0 : 0;
+    const attemptsOk = done || attemptsUsed < this.deps.maxAttemptsPerScene;
+    const hasRealNarration = !!narration && !narration.isMock && !!narration.assetUri && !!narration.narration?.timingUri;
+    const assetsOk = stage !== "scenes" || mode === "mock" || (!!scene && campaign.request.product.images.length > 0 && !blocked?.toLowerCase().includes("imagem"));
+    const durationLimit = stage === "avatar" ? 30 : 10;
+    const durationOk = !scene || scene.estimatedGenerationSeconds > 0 && scene.estimatedGenerationSeconds <= durationLimit || stage === "render" || stage === "narration";
+    const dependenciesOk = stage === "avatar" ? !!campaign.request.presenterPresetId && (mode === "mock" ? !!narration : hasRealNarration) : stage === "render" ? mediaComplete(job) : true;
+    const preflight: PreflightCheck[] = [
+      { id: "provider", label: "Provider e configuração", ok: capabilityOk, detail: capabilityOk ? `${provider} · ${model} disponível para ${mode.toUpperCase()}.` : this.deps.hybrid?.capabilities[stage].reason ?? "Provider indisponível." },
+      { id: "assets", label: "Assets exigidos", ok: assetsOk, detail: stage === "scenes" ? (assetsOk ? "Imagem local e pedido da cena passaram pela validação sem rede." : "A cena REAL exige uma imagem local válida do produto.") : "Nenhum asset de entrada adicional falta nesta etapa." },
+      { id: "dependencies", label: "Dependências da etapa", ok: dependenciesOk, detail: stage === "avatar" ? (dependenciesOk ? "Avatar selecionado e narração/alignment compatíveis." : "Selecione avatar e conclua a narração REAL com alignment.") : stage === "render" ? (dependenciesOk ? "Mídias completas e render atualizado." : "Conclua narração, avatar e cenas antes do render.") : "Dependências anteriores atendidas." },
+      { id: "duration", label: "Duração", ok: durationOk, detail: scene ? `${scene.estimatedGenerationSeconds}s editoriais; o provider validará a duração comprada antes do POST.` : "Duração compatível com esta etapa." },
+      { id: "attempts", label: "Limite de tentativas", ok: attemptsOk, detail: done ? "Etapa concluída." : `${attemptsUsed}/${this.deps.maxAttemptsPerScene} tentativas usadas nesta unidade.` },
+      { id: "budget", label: "Orçamento", ok: !budgetDecision, detail: budgetDecision ? `A execução excede o limite de R$ ${budgetDecision.budgetBrl.toFixed(2)} e exige decisão própria.` : `Estimativa R$ ${estimatedBrl.toFixed(2)}; será rechecada sob lock.` },
+      { id: "approval", label: "Aprovação explícita", ok: true, detail: "A confirmação registra cotação, unidade, provider e modelo; autoriza somente uma criação." },
+    ];
+    return { regenerate, budgetDecision, stage, mode, unit, token: this.fingerprint({ job, stage, mode, unit, estimatedBrl, model, provider, budgetDecision, regenerate }), provider, model, estimatedBrl, actualBrl: entries.filter(e => !e.simulated).reduce((a,e) => a+e.costBrl,0), simulatedBrl: entries.filter(e => e.simulated).reduce((a,e) => a+e.costBrl,0), ready: !blocked && !done, blocked, done, state: this.isJobActive(jobId) && job.currentStage === stage ? "Em andamento" : done ? "Concluído" : blocked ? "Bloqueado" : "Aguardando ação explícita", preflight };
   }
   async executeStage(jobId: string, stage: ExecutionStage, token: string, options: { regenerate?: boolean; authorizeOverBudget?: boolean } = {}) {
     if (stage === "planning") throw new Error("Use a ação de planejamento do projeto.");

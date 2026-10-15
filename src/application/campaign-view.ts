@@ -1,5 +1,5 @@
 import type { StageQuote, StageCapabilities } from "@/domain/execution";
-import { jobWorkflow, type WorkflowStep } from "./job-workflow";
+import { jobWorkflow, type RecommendedAction, type WorkflowStep } from "./job-workflow";
 import { presenterSceneViews, type PresenterSceneView } from "./presenter-view";
 import { claudeModelName } from "@/config/llm-models";
 import type { ActualCostSummary } from "@/costs/ledger";
@@ -114,6 +114,7 @@ export interface JobActivity {
 export interface CreativeView {
   stageQuotes?: StageQuote[];
   hybrid?: boolean;
+  nextAction?: RecommendedAction;
   workflow?: WorkflowStep[];
   offline?: boolean;
   presenters?: PresenterSceneView[];
