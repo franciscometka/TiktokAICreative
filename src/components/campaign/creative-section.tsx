@@ -1,3 +1,4 @@
+import { PresenterPanel } from "./presenter-panel";
 import { formatSeconds } from "@/application/cost-presentation";
 import type { CreativeView, SceneView } from "@/application/campaign-view";
 import type { VisualSource } from "@/domain/creative";
@@ -140,6 +141,7 @@ export function CreativeSection({ creative }: { creative: CreativeView }) {
         </header>
 
         <div className="space-y-5 p-5 sm:p-6">
+          <PresenterPanel scenes={creative.presenters ?? []} jobId={creative.jobId} />
           {creative.adjustment && (
             <Notice tone="blue" title={`Plano otimizado para caber no modo ${creative.adjustment.qualityLabel}.`}>
               <p>

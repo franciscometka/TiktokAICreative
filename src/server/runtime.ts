@@ -35,6 +35,7 @@ export function getRuntime(): Runtime {
         uploads: new LocalUploadStore(config.uploadsDir),
         rendersDir: config.rendersDir,
         audioDir: config.audioDir,
+        videosDir: config.videosDir,
         audioProvider: config.audioProvider,
       },
     };

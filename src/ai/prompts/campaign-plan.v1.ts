@@ -10,6 +10,7 @@ export interface CampaignPlanPromptInput {
   product: ProductInput;
   styles: readonly CreativeStyle[];
   creativeCount: number;
+  presenterPresetId?: string;
   settings: QualitySettings;
 }
 

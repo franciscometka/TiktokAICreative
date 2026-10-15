@@ -16,6 +16,7 @@ import type { TokenUsage } from "@/domain/llm";
 import type { PricingRef, QualitySettings } from "@/domain/quality";
 import { roundBrl, roundUsd, usdToBrl } from "@/lib/money";
 import { RUNWAY_VIDEO, runwayDuration } from "@/config/video-models";
+import { RUNWAY_PRESENTER, presenterBilledSeconds } from "@/config/presenters";
 import type { PricingCatalog } from "./pricing-catalog";
 
 /**
@@ -175,6 +176,7 @@ export function worstCaseLlmCostUsd(
 export interface ResolvedPricing {
   llm: LlmPricing;
   video: ProviderPricing;
+  presenter?: ProviderPricing;
   audio: ProviderPricing;
   rendering: ProviderPricing;
 }
@@ -183,6 +185,7 @@ export function resolvePricing(settings: QualitySettings, catalog: PricingCatalo
   return {
     llm: resolveLlmPricing(settings.llm, catalog),
     video: catalog.requireOne(settings.video),
+    presenter: catalog.requireOne(RUNWAY_PRESENTER),
     audio: catalog.requireOne(settings.audio),
     rendering: catalog.requireOne(settings.rendering),
   };
@@ -208,8 +211,8 @@ function lineItem(
 
 // ---------- Estimativas ----------
 
-export function sceneVideoUsage(scene: Pick<ScenePlan, "estimatedGenerationSeconds">, pricing?: ProviderPricing): Usage {
-  const seconds = pricing?.provider === RUNWAY_VIDEO.provider ? runwayDuration(scene.estimatedGenerationSeconds) : scene.estimatedGenerationSeconds;
+export function sceneVideoUsage(scene: Pick<ScenePlan, "estimatedGenerationSeconds"> & Partial<Pick<ScenePlan, "duration">>, pricing?: ProviderPricing): Usage {
+  const seconds = pricing?.model === RUNWAY_PRESENTER.model ? presenterBilledSeconds(scene.duration ?? scene.estimatedGenerationSeconds) : pricing?.provider === RUNWAY_VIDEO.provider ? runwayDuration(scene.estimatedGenerationSeconds) : scene.estimatedGenerationSeconds;
   return { seconds, generations: 1 };
 }
 
@@ -234,7 +237,7 @@ export function futureCostLines(plan: CreativePlan, pricing: Omit<ResolvedPricin
     ...plan.scenes
       .filter((s) => s.requiresGeneratedVideo)
       .map((s) =>
-        lineItem(pricing.video, sceneVideoUsage(s, pricing.video), {
+        lineItem(s.visualSource === "presenter" ? pricing.presenter! : pricing.video, sceneVideoUsage(s, s.visualSource === "presenter" ? pricing.presenter : pricing.video), {
           category: "video",
           phase: "generation",
           description: `Vídeo IA — cena ${s.order + 1} (${s.estimatedGenerationSeconds}s)`,
@@ -259,6 +262,7 @@ export function sumLinesUsd(lines: readonly CostLineItem[], category?: CostCateg
 }
 
 export interface EstimateCreativeCostInput {
+  reusedNarration?: boolean;
   id: string;
   plan: CreativePlan;
   settings: QualitySettings;
@@ -275,7 +279,7 @@ export interface EstimateCreativeCostInput {
  */
 export function estimateCreativeCost(input: EstimateCreativeCostInput): CostEstimate {
   const { plan, settings, pricing, exchangeRate, incurred } = input;
-  const breakdown = futureCostLines(plan, pricing);
+  const breakdown = futureCostLines(plan, pricing).filter(line => !(input.reusedNarration && line.category === "audio"));
   const futureUsd = sumLinesUsd(breakdown);
   const projectedUsd = incurred.llmCost.usd + futureUsd;
 

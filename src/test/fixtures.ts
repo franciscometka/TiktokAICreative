@@ -1,3 +1,4 @@
+import type { PipelineDeps } from "@/pipeline/pipeline-service";
 import type { VideoProviderFactory } from "@/providers/video";
 import type { VideoAssetStore } from "@/storage/video-asset-store";
 import type { PricingRef } from "@/domain/quality";
@@ -141,6 +142,8 @@ export interface HarnessOptions {
   videoProvider?: VideoProviderFactory;
   videoAssets?: VideoAssetStore;
   videoChoice?: PricingRef;
+  presenterProvider?: PipelineDeps["presenterProviderFactory"];
+  presenterAudioSlicer?: PipelineDeps["presenterAudioSlicer"];
 }
 
 /** Pipeline completo com mocks compartilhados para inspeção nos testes. */
@@ -161,6 +164,8 @@ export function createHarness(options: HarnessOptions = {}) {
     llmCallLog,
     videoProviderFactory: options.videoProvider ?? (() => video),
     videoChoice: options.videoChoice,
+    presenterProviderFactory: options.presenterProvider,
+    presenterAudioSlicer: options.presenterAudioSlicer,
     videoAssets: options.videoAssets,
     audioProviderFactory: options.audioProvider ?? (() => audio),
     audioAssets,

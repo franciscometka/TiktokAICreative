@@ -211,3 +211,8 @@ Pré-requisito já atendido: ledger persistido em `ledger.jsonl`.
 
 ## Vídeo real Runway (Lote 5)
 `VIDEO_PROVIDER=runway` → configuração de vídeo anexada aos settings de NOVAS campanhas → estimativa por cena (duração comprada 5/10s) → aprovação existente → guard/orçamento → preflight de todas as imagens/prompts → POST único → task id persistido → polling limitado → download MP4 → ledger real → `LocalVideoAssetStore` vN → tentativa ativa → manifest → AssetResolver (inclui VIDEOS_DIR) → OffthreadVideo mudo → MP4 final pelo renderer existente. Sem chave/entrada inválida, falha antes de qualquer mídia paga. Sem retry pago; restart só mantém auditoria e estado interrompido. `scripts/video-real.ts` exercita o mesmo pipeline com uma cena e outros providers mock. Ver D69–D72 e `docs/RUNWAY.md`.
+
+
+## Presenter de áudio (Lote 5)
+
+`PresenterProvider` é separado de `VideoProvider`. `RunwayPresenterProvider` envia exclusivamente áudio a `/v1/avatar_videos` (`gwm1_avatars`). HTTP sanitizado compartilhado em `providers/runway-http.ts`; nenhum retry. `pipeline/presenter-flow.ts` mantém a intenção e task duráveis, reutiliza aprovação/orçamento/ledger e grava o clipe com `VideoAssetStore` e a integridade existente. `speech/presenter-audio.ts` resolve as janelas do alignment e recorta PCM com FFmpeg local. `pipeline-service` antecipa a narração quando há presenter e alinha a timeline do render à fala real. UI seleciona preset, mostra custo/status/preview por IDs e confirma regeneração. A CLI isola uma chamada em nova campanha, copiando áudio existente sem novo TTS. Ver [PRESENTERS.md](PRESENTERS.md) para contratos e limites.

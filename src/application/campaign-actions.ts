@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import type { ActualCostSummary } from "@/costs/ledger";
 import { SAFE_PRODUCT_ID } from "@/domain/upload";
 import type { PipelineService } from "@/pipeline/pipeline-service";
@@ -33,6 +33,7 @@ export interface AppDeps {
   rendersDir: string;
   /** Pasta das narrações (AUDIO_DIR), para servir o áudio por ID. */
   audioDir: string;
+  videosDir?: string;
   /** Provider de narração configurado (só o id; nunca a chave). */
   audioProvider?: "mock" | "elevenlabs";
 }
@@ -378,4 +379,16 @@ export async function resolveNarrationFile(
   if (!registered) return undefined;
   const file = await new LocalAudioAssetStore(deps.audioDir).resolveNarrationFile(ids);
   return file ? { ...file, fileName: `narracao-${ids.creativeId}-${ids.version}.mp3` } : undefined;
+}
+
+export async function resolveSceneVideoFile(deps: AppDeps, ids: { campaignId: string; creativeId: string; sceneId: string; version: string }) {
+  if (![ids.campaignId, ids.creativeId, ids.sceneId].every(id => SAFE_ENTITY_ID.test(id)) || !RENDER_ID.test(ids.version) || !deps.videosDir) return undefined;
+  const jobs = await deps.service.listJobs(ids.campaignId).catch(() => []);
+  const attempt = jobs.find(j => j.creativeId === ids.creativeId)?.scenes.find(s => s.sceneId === ids.sceneId)?.attempts.find(a =>
+    a.status === "succeeded" && !a.isMock && a.assetUri?.replaceAll("\\", "/").endsWith(`/${ids.sceneId}/${ids.version}/clip.mp4`));
+  if (!attempt?.assetUri || attempt.media?.status !== "valid") return undefined;
+  const absolutePath = resolve(deps.videosDir, ids.campaignId, ids.sceneId, ids.version, "clip.mp4");
+  if (!absolutePath.startsWith(resolve(deps.videosDir) + sep) || absolutePath !== resolve(attempt.assetUri)) return undefined;
+  const info = await stat(absolutePath).catch(() => undefined);
+  return info?.isFile() ? { absolutePath, sizeBytes: info.size, fileName: `cena-${ids.sceneId}-${ids.version}.mp4` } : undefined;
 }

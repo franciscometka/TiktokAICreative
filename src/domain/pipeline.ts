@@ -1,6 +1,7 @@
 import { ProviderDiagnosticSchema } from "./provider-diagnostic";
 import { ClipDurationCheckSchema } from "./media-integrity";
 import { z } from "zod";
+import { AvatarPresetSchema, PresenterTaskSchema, PresenterAudioSchema } from "./presenter";
 import { NarrationInfoSchema } from "./audio";
 import { CampaignPlanSchema } from "./campaign";
 import {
@@ -62,6 +63,7 @@ export const CampaignRequestSchema = z.object({
   budget: CostBudgetSchema,
   /** Perfil de voz da narração (config/voices.ts). Ausente = perfil padrão. */
   speakerProfileId: z.string().optional(),
+  presenterPresetId: AvatarPresetSchema.optional(),
 });
 export type CampaignRequest = z.infer<typeof CampaignRequestSchema>;
 
@@ -130,6 +132,8 @@ export const MediaAttemptSchema = z.object({
   isMock: z.boolean(),
   error: z.string().optional(),
   diagnostic: ProviderDiagnosticSchema.optional(),
+  requestId: z.string().optional(),
+  presenter: z.object({ avatarPresetId: AvatarPresetSchema, audio: PresenterAudioSchema }).optional(),
   /**
    * Vídeo real: duração pedida × informada pelo provider × medida do arquivo salvo. Clipe fora da
    * tolerância é rejeitado (tentativa "failed", nunca ativa, nunca vai ao render; custo mantido).
@@ -161,6 +165,7 @@ export const ApprovalSchema = z.object({
 export type Approval = z.infer<typeof ApprovalSchema>;
 
 export const GenerationJobSchema = z.object({
+  presenterTasks: z.array(PresenterTaskSchema).optional(),
   videoTasks: z.array(z.object({ sceneId: z.string(), providerJobId: z.string(), provider: z.string(), model: z.string(), createdAt: z.string() })).optional(),
   id: nonEmpty,
   campaignId: nonEmpty,

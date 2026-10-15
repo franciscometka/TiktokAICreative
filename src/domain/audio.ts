@@ -102,6 +102,8 @@ export type AudioFit = z.infer<typeof AudioFitSchema>;
 
 /** Dados da narração guardados na tentativa de áudio (sem bytes, sem caminho absoluto). */
 export const NarrationInfoSchema = z.object({
+  /** Local validation copy; TTS was already charged to the source job. */
+  reusedFromJobId: z.string().optional(),
   speakerProfileId: nonEmpty,
   /** voiceId do provider (só para auditoria; nunca usado pela UI para decidir nada). */
   voiceId: z.string().optional(),

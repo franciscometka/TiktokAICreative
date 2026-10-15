@@ -1,5 +1,7 @@
 # Primeira validação Runway
 
+Para o caminho **presenter/avatar falando com áudio ElevenLabs**, veja [PRESENTERS.md](PRESENTERS.md). Ele usa provider separado e `npm run presenter:real`; o comando `video:real` abaixo continua sendo image-to-video de produto.
+
 Implementado sem chamadas reais ou pagas. Preços: https://docs.dev.runwayml.com/guides/pricing/; contrato HTTP: https://github.com/runwayml/sdk-node/tree/main/src/resources.
 
 1. Em `.env.local`, defina `RUNWAYML_API_SECRET` (não commitar). Use foto JPG/PNG/WebP pequena: até 5 MB depois de base64 (~3,7 MB original).

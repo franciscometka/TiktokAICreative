@@ -1,5 +1,6 @@
 "use client";
 
+import { RUNWAY_AVATAR_PRESETS } from "@/domain/presenter";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore, useTransition } from "react";
 import { startPlanningAction } from "@/app/actions";
@@ -428,6 +429,14 @@ export function CampaignWizard({
                 );
               })}
             </div>
+            <Field id="presenter-avatar" label="Avatar apresentador (opcional)">
+              <select id="presenter-avatar" className={inputClasses()} aria-label="Avatar apresentador" value={form.presenterPresetId ?? ""} onChange={e => update("presenterPresetId", e.target.value)}>
+                <option value="">Sem apresentador</option>
+                {RUNWAY_AVATAR_PRESETS.map(id => <option key={id} value={id}>{id}</option>)}
+              </select>
+              <p className="mt-2 text-xs text-zinc-500">O avatar fala com a voz ElevenLabs escolhida. Exige narração real com alinhamento; geração do avatar é cobrada separadamente e aparece na estimativa.</p>
+            </Field>
+            {errors.presenterPresetId && <p role="alert">{errors.presenterPresetId}</p>}
             {errors.speakerProfileId && <p className="mt-1.5 text-xs font-medium text-red-600">{errors.speakerProfileId}</p>}
           </Panel>
 

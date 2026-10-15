@@ -5,6 +5,7 @@ import { UnavailablePlanner } from "@/ai/unavailable-planner";
 import { MockCreativePlanner } from "@/ai/mock-planner";
 import type { CreativePlanner } from "@/ai/planner";
 import { readElevenLabsApiKey, readRemotionLicenseKey, readRunwayApiKey, type AppConfig } from "@/config/env";
+import { RunwayPresenterProvider } from "@/providers/presenter/runway-presenter-provider";
 import { RUNWAY_VIDEO } from "@/config/video-models";
 import { LocalVideoAssetStore } from "@/storage/video-asset-store";
 import { PRICING_TABLE } from "@/config/pricing";
@@ -72,6 +73,7 @@ export function createPipelineService(
     videoProviderFactory: createVideoProviderFactory(config.videoProvider, { apiKey: readRunwayApiKey(env), uploadsDir: config.uploadsDir }),
     videoChoice: config.videoProvider === "runway" ? RUNWAY_VIDEO : undefined,
     videoAssets: new LocalVideoAssetStore(config.videosDir),
+    presenterProviderFactory: pricing => new RunwayPresenterProvider({ pricing, apiKey: readRunwayApiKey(env) ?? "" }),
     audioProviderFactory: createAudioProviderFactory(config.audioProvider, {
       elevenLabsApiKey: readElevenLabsApiKey(env),
       ttsTimeoutMs: config.ttsTimeoutMs,

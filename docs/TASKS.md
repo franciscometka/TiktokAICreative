@@ -158,3 +158,14 @@ Validação offline do Lote 5 (2026-10-14): `npm run check` aprovado (451 testes
 - Uploads órfãos (imagens enviadas sem campanha planejada) não são limpos automaticamente.
 - Sem testes de componentes React (só lógica em `application/`); o fluxo visual foi verificado manualmente.
 - Integridade de duração: a tolerância (max 0,25s; 5%) ainda não foi calibrada com vários clipes reais; MP4 com `moov` no fim não é reescrito para faststart (o player do browser precisa de Range para tocar).
+
+
+### Presenter/avatar real — implementação de 2026-10-15
+- [x] Provider independente para Avatar Videos/gwm1_avatars com áudio existente, sem TTS Runway
+- [x] Alignment → janela → WAV PCM local → envio, polling, task durável, retomada explícita sem POST duplicado
+- [x] Aprovação/orçamento/ledger/versionamento/integridade preservados; IDs e custos auditáveis
+- [x] Avatar selecionável, painel de status/custo/preview e regeneração explícita
+- [x] CLI presenter:real com dry-run e validação isolada de uma chamada; origem preservada
+- [x] Product UGC: contrato local com consentimento, imagens, informações/script e audio=false; geração desabilitada
+- [ ] Primeira validação paga de presenter autorizada (nenhuma feita na implementação)
+- [ ] Product UGC real e estratégia de fala sincronizada: verificar rota compatível antes de habilitar

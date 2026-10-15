@@ -94,3 +94,13 @@ export async function regenerateNarrationAction(input: unknown): Promise<ActionR
   if (!parsed.success) return badInput();
   return regenerateNarration(getRuntime().deps, parsed.data);
 }
+
+export async function regenerateSceneAction(input: unknown): Promise<ActionResult<{ message: string }>> {
+  const parsed = z.object({ jobId: id, sceneId: id }).safeParse(input);
+  if (!parsed.success) return badInput();
+  try {
+    const result = await getRuntime().deps.service.regenerateScene(parsed.data.jobId, parsed.data.sceneId);
+    revalidatePath(`/campaigns/${result.job.campaignId}`);
+    return { ok: true, value: { message: result.kind === "REGENERATED" ? "Nova versão gerada." : result.kind === "FAILED" ? result.error : "Limite de orçamento excedido; nenhuma nova geração autorizada." } };
+  } catch { return { ok: true, value: { message: "Não foi possível iniciar a regeneração. Consulte o estado do criativo antes de repetir." } }; }
+}

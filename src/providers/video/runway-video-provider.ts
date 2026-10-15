@@ -1,3 +1,4 @@
+import { RunwayHttpClient } from "../runway-http";
 import { pickOutputRatio } from "@/domain/aspect";
 import type { ProviderDiagnostic } from "@/domain/provider-diagnostic";
 import { isMp4 } from "./mp4";
@@ -24,10 +25,9 @@ export interface RunwayOptions {
 /** HTTP isolado, sem SDK/retry. URLs temporárias nunca entram no job ou manifest. */
 export class RunwayVideoProvider implements VideoProvider {
   readonly descriptor;
-  #key: string;
+  private readonly http: RunwayHttpClient;
   private readonly transport: typeof fetch;
   private readonly jobs = new Map<string, { seconds: number; output?: string; usage?: Usage }>();
-  private readonly diagnostics = new Map<string, ProviderDiagnostic>();
   private readonly pricing: ProviderPricing;
   private readonly uploadsDir: string;
   constructor(options: RunwayOptions) {
@@ -37,8 +37,8 @@ export class RunwayVideoProvider implements VideoProvider {
     if (options.pricing.provider !== RUNWAY_VIDEO.provider || options.pricing.model !== RUNWAY_VIDEO.model) {
       throw new ProviderError("O plano usa outro modelo de vídeo. Crie uma nova campanha com Runway e aprove a nova estimativa.");
     }
-    this.#key = options.apiKey;
     this.transport = options.transport ?? fetch;
+    this.http = new RunwayHttpClient(options.apiKey, this.transport);
     this.descriptor = { id: RUNWAY_VIDEO.provider, model: RUNWAY_VIDEO.model, isMock: false, pricing: options.pricing };
   }
   estimateCost(request: VideoGenerationRequest) {
@@ -89,7 +89,7 @@ export class RunwayVideoProvider implements VideoProvider {
       return { ...ref, state: "succeeded", billedUsage: usage };
     }
     if (task.status === "FAILED" || task.status === "CANCELLED") {
-      const diagnostic: ProviderDiagnostic = { ...this.diagnostics.get(ref.providerJobId)!, kind: "provider", billing: task.cost ? "confirmed" : "unconfirmed" };
+      const diagnostic: ProviderDiagnostic = { ...this.http.diagnostics.get(ref.providerJobId)!, kind: "provider", billing: task.cost ? "confirmed" : "unconfirmed" };
       return { ...ref, state: "failed", error: this.failure(diagnostic, ref.providerJobId).message,
         diagnostic, billedUsage: task.cost ? usage : undefined };
     }
@@ -129,84 +129,6 @@ export class RunwayVideoProvider implements VideoProvider {
     if (!job) throw new ProviderError("Runway: tarefa desconhecida", ref.providerJobId);
     return job;
   }
-  /** Seleciona somente campos diagnósticos; nunca inclui body, payload ou erro bruto. */
-  private clean(value: unknown, sensitive: string[] = []): string | undefined {
-    if (typeof value !== "string" && typeof value !== "number") return undefined;
-    let text = String(value);
-    // Redige antes de truncar, inclusive mensagens que ecoam chave, prompt ou imagem.
-    for (const secret of [this.#key, ...sensitive]) {
-      if (secret) {
-        for (const variant of [secret, encodeURIComponent(secret), JSON.stringify(secret).slice(1, -1)]) text = text.split(variant).join("[redigido]");
-      }
-    }
-    text = text.replace(/data:[^\s"'<>]+/gi, "[imagem redigida]")
-      .replace(/https?:\/\/[^\s"'<>]+/gi, "[URL redigida]")
-      .replace(/(?:authorization|bearer|api[_ -]?key|promptImage|promptText|payload)[^\r\n]*/gi, "[campo redigido]")
-      .replace(/[\x00-\x1f\x7f]/g, " ");
-    return text.slice(0, 500) || undefined;
-  }
-  private failure(diagnostic: ProviderDiagnostic, id?: string): ProviderError {
-    const labels: Record<ProviderDiagnostic["kind"], string> = {
-      invalid_request: "requisição inválida", authentication: "autenticação/permissão",
-      quota: "crédito/quota/rate limit", provider: "erro do provider", http: "erro HTTP",
-      timeout: "timeout", connection: "erro de conexão", invalid_response: "resposta inválida",
-    };
-    const details = [diagnostic.httpStatus && `HTTP ${diagnostic.httpStatus}`,
-      diagnostic.requestId && `request-id ${diagnostic.requestId}`,
-      diagnostic.providerCode && `código ${diagnostic.providerCode}`,
-      diagnostic.providerStatus && `status ${diagnostic.providerStatus}`, diagnostic.providerMessage].filter(Boolean).join("; ");
-    return new ProviderError(`Runway: ${labels[diagnostic.kind]}${details ? ` (${details})` : ""}. ${diagnostic.billing === "rejected" ? "Criação rejeitada pelo HTTP; sem tarefa confirmada." : diagnostic.billing === "confirmed" ? "Consumo informado pelo provider." : "Possível cobrança não confirmada."} Sem retry automático.`, id, undefined, diagnostic);
-  }
-  private async api(path: string, init: RequestInit = {}, id?: string): Promise<unknown> {
-    const creating = init.method === "POST";
-    const sensitive: string[] = [];
-    if (typeof init.body === "string") {
-      const payload = JSON.parse(init.body) as Record<string, unknown>;
-      for (const value of Object.values(payload)) if (typeof value === "string" && (value === payload.promptText || value === payload.promptImage)) { sensitive.push(value); if (value.startsWith("data:")) sensitive.push(value.split(",")[1] ?? ""); }
-    }
-    let response: Response | undefined;
-    let diagnostic: ProviderDiagnostic = { kind: "connection", billing: "unconfirmed" };
-    try {
-      response = await this.transport(`https://api.dev.runwayml.com/v1${path}`, {
-        ...init, redirect: "error", signal: AbortSignal.timeout(60_000),
-        headers: { Authorization: `Bearer ${this.#key}`, "X-Runway-Version": "2024-11-06", "Content-Type": "application/json" },
-      });
-      const status = response.status;
-      // 4xx explícito na criação rejeita o pedido. 408/5xx podem vir após aceitação.
-      const rejected = creating && status >= 400 && status < 500 && status !== 408;
-      diagnostic = {
-        kind: status === 400 || status === 422 ? "invalid_request" : status === 401 || status === 403 ? "authentication" :
-          status === 402 || status === 429 ? "quota" : status >= 500 ? "provider" : "http",
-        httpStatus: status,
-        requestId: this.clean(response.headers.get("request-id") ?? response.headers.get("x-request-id"), sensitive)?.slice(0, 200),
-        billing: rejected ? "rejected" : "unconfirmed",
-      };
-      let body: unknown;
-      try { body = await response.json(); }
-      catch (error) {
-        if (!response.ok) throw this.failure(diagnostic, id);
-        if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) throw error;
-        throw this.failure({ ...diagnostic, kind: error instanceof SyntaxError ? "invalid_response" : "connection" }, id);
-      }
-      const obj = body && typeof body === "object" ? body as Record<string, unknown> : {};
-      const nested = obj.error && typeof obj.error === "object" ? obj.error as Record<string, unknown> : {};
-      diagnostic = { ...diagnostic,
-        providerCode: this.clean(obj.code ?? nested.code ?? obj.failureCode, sensitive),
-        providerStatus: this.clean(obj.status ?? nested.status, sensitive),
-        providerMessage: this.clean(obj.message ?? nested.message ?? (typeof obj.error === "string" ? obj.error : obj.failure), sensitive),
-      };
-      if (typeof obj.id === "string" && obj.id.length > 0) diagnostic.billing = "unconfirmed";
-      if (!response.ok) throw this.failure(diagnostic, id);
-      // Validação dentro do escopo da resposta mantém HTTP e request-id em erros de schema.
-      const valid = creating ? z.object({ id: z.string().min(1).max(256) }).safeParse(body).success :
-        TaskSchema.safeParse(body).success && obj.id === id;
-      if (!valid) throw this.failure({ ...diagnostic, kind: "invalid_response" }, id);
-      if (!creating && id) this.diagnostics.set(id, diagnostic);
-      return body;
-    } catch (error) {
-      if (error instanceof ProviderError) throw error;
-      const timeout = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
-      throw this.failure({ ...diagnostic, kind: timeout ? "timeout" : "connection" }, id);
-    }
-  }
+  private api(path: string, init: RequestInit = {}, id?: string) { return this.http.api(path, init, id); }
+  private failure(diagnostic: ProviderDiagnostic, id?: string) { return this.http.failure(diagnostic, id); }
 }

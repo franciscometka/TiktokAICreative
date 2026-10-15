@@ -1,3 +1,4 @@
+import { presenterSceneViews, type PresenterSceneView } from "./presenter-view";
 import { claudeModelName } from "@/config/llm-models";
 import type { ActualCostSummary } from "@/costs/ledger";
 import type { ProductAnalysis } from "@/domain/campaign";
@@ -109,6 +110,7 @@ export interface JobActivity {
 }
 
 export interface CreativeView {
+  presenters?: PresenterSceneView[];
   number: number;
   id: string;
   jobId: string | undefined;
@@ -295,6 +297,7 @@ function creativeView(
     durationSeconds: creative.duration,
     generatedSeconds: review?.final.generatedSeconds ?? job?.estimate?.generatedVideoSeconds ?? 0,
     scenes: sceneViews(creative),
+    presenters: presenterSceneViews(campaign, creative, job),
     adjustment: presetAdjustment(review, campaign.settings.label, campaign.plannerId),
     warnings: review?.final.warnings.map((w) => w.message) ?? [],
     estimate: job?.estimate ? presentEstimate(job.estimate) : undefined,

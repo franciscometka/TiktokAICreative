@@ -81,7 +81,8 @@ export function buildNarrationView(input: {
 
   const info = current?.narration;
   const canRegenerate =
-    job !== undefined && job.approval !== undefined && !input.active && (job.status === "completed" || job.status === "audio_review");
+    job !== undefined && job.approval !== undefined && !input.active &&
+    !job.scenes.some(s => activeAttempt(s.attempts)?.presenter) && (job.status === "completed" || job.status === "audio_review");
 
   return {
     speaker: { id: speaker.id, name: speaker.name, description: speaker.description },

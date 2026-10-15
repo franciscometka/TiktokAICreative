@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AvatarPresetSchema, type AvatarPreset } from "@/domain/presenter";
 import { PRESET_ORDER, type PresetQuality } from "@/config/quality-presets";
 import { DEFAULT_SPEAKER_PROFILE_ID, isKnownSpeakerProfile } from "@/config/voices";
 import { CREATIVE_STYLES, type CreativeStyle } from "@/domain/creative";
@@ -42,6 +43,7 @@ export interface CampaignFormInput {
   quality: string;
   /** Perfil de voz da narração (config/voices.ts). Ausente = padrão. */
   speakerProfileId?: string;
+  presenterPresetId?: string;
   budget: { maxCostPerCreativeBrl: string; maxCostPerCampaignBrl: string; allowOverBudget: boolean };
 }
 
@@ -63,6 +65,7 @@ export interface ParsedCampaignForm {
   styles: CreativeStyle[];
   quality: PresetQuality;
   speakerProfileId: string;
+  presenterPresetId?: AvatarPreset;
   budget: { maxCostPerCreativeBrl: number; maxCostPerCampaignBrl: number; allowOverBudget: boolean };
 }
 
@@ -135,6 +138,7 @@ const FormSchema = z
     quality: z.string().refine((q): q is PresetQuality => (PRESET_ORDER as readonly string[]).includes(q), {
       message: "Escolha um nível de qualidade.",
     }),
+    presenterPresetId: z.preprocess(v => v === "" ? undefined : v, AvatarPresetSchema.optional()),
     speakerProfileId: z
       .string()
       .optional()
@@ -191,6 +195,7 @@ export function parseCampaignForm(input: unknown): Result<ParsedCampaignForm, Fi
     styles,
     quality: f.quality as PresetQuality,
     speakerProfileId: f.speakerProfileId || DEFAULT_SPEAKER_PROFILE_ID,
+    presenterPresetId: f.presenterPresetId,
     budget: {
       // Os dois foram validados como obrigatórios acima.
       maxCostPerCreativeBrl: f.budget.maxCostPerCreativeBrl ?? 0,
@@ -221,6 +226,7 @@ export function toCampaignRequest(form: ParsedCampaignForm, images: readonly Pro
     quality: form.quality,
     budget: form.budget,
     speakerProfileId: form.speakerProfileId,
+    presenterPresetId: form.presenterPresetId,
   };
 }
 
@@ -244,6 +250,7 @@ export function formInputFromRequest(request: CampaignRequest): CampaignFormInpu
     styles: request.styleSelection === "auto" ? [] : request.styles,
     quality: request.quality === "custom" ? "economy" : request.quality,
     speakerProfileId: request.speakerProfileId ?? DEFAULT_SPEAKER_PROFILE_ID,
+    presenterPresetId: request.presenterPresetId,
     budget: {
       maxCostPerCreativeBrl: toInput(request.budget.maxCostPerCreativeBrl),
       maxCostPerCampaignBrl: toInput(request.budget.maxCostPerCampaignBrl),
