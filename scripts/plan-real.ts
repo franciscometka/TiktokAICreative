@@ -1,3 +1,4 @@
+import { assertRealCallsEnabled } from "../src/config/execution-policy";
 /**
  * VALIDAÇÃO MANUAL com o Claude REAL — faz no máximo UM planejamento (pode ter até
  * LLM_MAX_VALIDATION_ATTEMPTS chamadas se a primeira resposta for inválida).
@@ -46,6 +47,7 @@ function arg(name: string): string | undefined {
 }
 
 async function main() {
+  if (process.argv.includes("--confirm")) assertRealCallsEnabled();
   if (existsSync(".env.local")) process.loadEnvFile(".env.local");
 
   const quality = (arg("quality") ?? "economy") as PresetQuality;

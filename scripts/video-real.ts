@@ -1,3 +1,4 @@
+import { assertRealCallsEnabled } from "../src/config/execution-policy";
 import { pickOutputRatio } from "../src/domain/aspect";
 import { buildMotionPrompt } from "../src/ai/video-prompt";
 /** Validação manual: sem --confirm só lê a imagem e mostra custo. Com --confirm: UM POST pago via pipeline. */
@@ -16,6 +17,7 @@ import { LocalUploadStore } from "../src/storage/upload-store";
 import { durationReport } from "../src/domain/media-integrity";
 
 async function main() {
+  if (process.argv.includes("--confirm")) assertRealCallsEnabled();
   const { values } = parseArgs({ options: { image: { type: "string" }, confirm: { type: "boolean", default: false } }, strict: true });
   if (existsSync(".env.local")) process.loadEnvFile(".env.local");
   if (!values.image) throw new Error('Informe --image com o caminho de uma foto JPG/PNG/WebP.');

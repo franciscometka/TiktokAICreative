@@ -165,8 +165,15 @@ export function RenderPanel({ creative, rendererIsReal }: { creative: CreativeVi
 
       {!rendererIsReal && creative.result && (
         <Notice tone="green" title="Concluído em modo de teste">
-          RENDERER=mock: o fluxo foi validado, mas nenhum MP4 foi gerado. Use RENDERER=remotion para gerar o vídeo.
+          Simulação concluída; nenhum MP4 foi gerado. As gerações reais continuam bloqueadas.
         </Notice>
+      )}
+
+      {creative.offline && creative.jobStatus === "completed" && creative.canRerender && (
+        <div className="space-y-2">
+          <p className="text-xs text-zinc-500">{creative.workflow?.find(s => s.id === "render")?.detail}</p>
+          {confirming ? confirmBox("Simular nova versão do render?", "Reutiliza a narração e as cenas salvas, preservando o histórico. Sem geração real ou cobrança.", "Confirmar nova versão simulada") : <button type="button" className={buttonClasses("secondary", "sm")} onClick={() => setConfirming(true)}>Simular nova versão do render</button>}
+        </div>
       )}
 
       {error && (

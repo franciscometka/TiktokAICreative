@@ -1,3 +1,4 @@
+import { jobWorkflow, type WorkflowStep } from "./job-workflow";
 import { presenterSceneViews, type PresenterSceneView } from "./presenter-view";
 import { claudeModelName } from "@/config/llm-models";
 import type { ActualCostSummary } from "@/costs/ledger";
@@ -110,6 +111,8 @@ export interface JobActivity {
 }
 
 export interface CreativeView {
+  workflow?: WorkflowStep[];
+  offline?: boolean;
   presenters?: PresenterSceneView[];
   number: number;
   id: string;
@@ -151,6 +154,10 @@ export interface CreativeView {
 }
 
 export interface CampaignView {
+  projectName?: string;
+  videoConcept?: string;
+  offlineReadOnly?: boolean;
+  offline?: boolean;
   id: string;
   createdAt: string;
   updatedAt: string;
@@ -298,6 +305,8 @@ function creativeView(
     generatedSeconds: review?.final.generatedSeconds ?? job?.estimate?.generatedVideoSeconds ?? 0,
     scenes: sceneViews(creative),
     presenters: presenterSceneViews(campaign, creative, job),
+    workflow: jobWorkflow(campaign, creative, job, active),
+    offline: campaign.executionMode === "offline",
     adjustment: presetAdjustment(review, campaign.settings.label, campaign.plannerId),
     warnings: review?.final.warnings.map((w) => w.message) ?? [],
     estimate: job?.estimate ? presentEstimate(job.estimate) : undefined,
@@ -393,6 +402,7 @@ export function buildCampaignView({
 
   return {
     id: campaign.id,
+    projectName: request.projectName, videoConcept: request.videoConcept, offline: campaign.executionMode === "offline",
     createdAt: campaign.createdAt,
     updatedAt: campaign.updatedAt,
     state,

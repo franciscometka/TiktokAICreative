@@ -169,6 +169,6 @@ describe("mp3DurationSeconds", () => {
 describe("npm test é offline", () => {
   it("o transporte padrão (fetch) para a ElevenLabs é bloqueado na suíte", async () => {
     const p = new ElevenLabsAudioProvider({ pricing: flash, apiKey: KEY, voices: ELEVENLABS_VOICES, timeoutMs: 1000 });
-    await expect(p.generateAudio(REQUEST)).rejects.toThrow(/conexão/);
+    await expect(p.generateAudio(REQUEST)).rejects.toThrow(/reais\/pagas bloqueadas/);
   });
 });

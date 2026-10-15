@@ -1,3 +1,5 @@
+> **Modo atual: offline.** Crie projetos em `/create` e acompanhe em `/jobs`. Todas as chamadas reais/pagas estão bloqueadas no servidor, inclusive com `--confirm`. [Guia do fluxo offline](docs/OFFLINE-WORKFLOW.md).
+
 # TikTok AI Creative Factory
 
 Transforma informações de um produto em criativos verticais de venda (MP4 1080x1920) para TikTok Shop, com **estimativa de custo e aprovação humana antes de qualquer geração paga**.

@@ -70,9 +70,7 @@ export function CreativeCostCard({
                 />
               </dl>
               <p className="mt-2 text-xs text-zinc-500">
-                Custo real
-                {estimate.incurred.sharedAmongCreatives > 1 && `, rateado entre ${estimate.incurred.sharedAmongCreatives} criativos`}. Não
-                volta se você cancelar.
+                {estimate.incurred.simulated ? "Valor simulado; nenhum dinheiro foi gasto." : `Custo real${estimate.incurred.sharedAmongCreatives > 1 ? `, rateado entre ${estimate.incurred.sharedAmongCreatives} criativos` : ""}. Não volta se você cancelar.`}
               </p>
             </div>
             <div className="rounded-md border border-zinc-200 p-4">

@@ -11,6 +11,10 @@ export interface CampaignPlanPromptInput {
   styles: readonly CreativeStyle[];
   creativeCount: number;
   presenterPresetId?: string;
+  projectName?: string;
+  videoConcept?: string;
+  scriptMode?: "manual" | "generate";
+  script?: string;
   settings: QualitySettings;
 }
 

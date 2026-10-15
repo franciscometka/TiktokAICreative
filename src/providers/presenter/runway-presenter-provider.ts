@@ -15,7 +15,7 @@ export class RunwayPresenterProvider implements PresenterProvider {
   constructor(options: { pricing: ProviderPricing; apiKey: string; transport?: typeof fetch }) {
     if (options.pricing.model !== RUNWAY_PRESENTER.model || options.pricing.provider !== "runway") throw new ProviderError("Preço/modelo de presenter incompatível; aprove nova estimativa.");
     this.transport = options.transport ?? fetch;
-    this.http = new RunwayHttpClient(options.apiKey, this.transport);
+    this.http = new RunwayHttpClient(options.apiKey, options.transport);
     this.descriptor = { ...RUNWAY_PRESENTER, id: "runway", isMock: false, pricing: options.pricing };
   }
   estimateCost(seconds: number) {

@@ -8,7 +8,6 @@ import { randomId } from "@/lib/ids";
 import { campaignRequest, createHarness } from "./fixtures";
 import { fakeElevenLabs } from "./elevenlabs-fake";
 import { wav } from "./presenter-fake";
-import { makeMp4 } from "./mp4-fixture";
 import { FilePipelineStore } from "@/storage/file-pipeline-store";
 import { FileCostLedger } from "@/storage/file-cost-ledger";
 import { InMemoryLlmCallLog } from "@/storage/llm-call-log";
@@ -39,25 +38,16 @@ describe("presenter:real offline", () => {
     expect(out).toContain("Dry-run"); expect(out).toContain("gwm1_avatars"); expect(out).toContain("human-resource"); expect(out).toContain("narration.mp3"); expect(out).toContain("intervalo");
     expect(await readdir(join(f.root, "data", "jobs"))).toEqual(before);
   }, 35_000);
-  it("--confirm faz um só POST e zero TTS; origem e aprovação preservadas", async () => {
-    const f = await setup(); const preview = await f.h.service.previewPresenterValidation(f.jobId, "influencer");
-    const counter = join(f.root, "posts.txt"); const hook = join(f.root, "fake-network.mjs");
-    const mp4 = Buffer.from(makeMp4(preview.durationSeconds)).toString("hex");
-    await writeFile(hook, `import { appendFileSync } from 'node:fs'; globalThis.fetch = async (input, init) => {
-      const url = String(input);
-      if (url.endsWith('/avatar_videos')) { appendFileSync(process.env.COUNTER, 'POST'); const b=JSON.parse(init.body); if(b.speech.type !== 'audio' || b.speech.text) throw new Error('Wrong speech'); return Response.json({id:'cli_avatar'}, {headers:{'request-id':'req-cli'}}); }
-      if (url.includes('/tasks/')) return Response.json({id:'cli_avatar', status:'SUCCEEDED', cost:{credits:1}, output:['https://cdn.runwayml.com/avatar.mp4']});
-      if (url === 'https://cdn.runwayml.com/avatar.mp4') return new Response(Buffer.from('${mp4}','hex'));
-      throw new Error('Unexpected request'); };`);
-    const sourceBefore = await readFile(join(f.root, "data", "jobs", `${f.jobId}.json`), "utf8");
-    const out = execFileSync(process.execPath, ["--import", pathToFileURL(hook).href, "--import", "tsx", "scripts/presenter-real.ts", "--job", f.jobId, "--avatar", "influencer", "--confirm"], { encoding: "utf8", env: { ...f.env, RUNWAYML_API_SECRET: "fake-key", COUNTER: counter }, timeout: 30000 });
-    expect(out).toContain("providerJobId cli_avatar"); expect(out).toContain("requestId req-cli");
-    expect((await readFile(counter, "utf8")).trim()).toBe("POST");
-    expect(await readFile(join(f.root, "data", "jobs", `${f.jobId}.json`), "utf8")).toBe(sourceBefore);
-    const costs = (await new FileCostLedger(join(f.root, "data")).list()).filter(e => e.model === "gwm1_avatars");
-    expect(costs).toHaveLength(1); expect(costs[0]!.costUsd).toBeCloseTo(0.01, 6);
-    expect(await readdir(join(f.root, "data", "jobs"))).toHaveLength(2);
-  }, 35_000);
+  it("--confirm não cria campanha nem chama avatar enquanto o bloqueio está ativo", async () => {
+    const f = await setup();
+    const before = await readFile(join(f.root, "data", "jobs", `${f.jobId}.json`), "utf8");
+    let errorText = "";
+    try { execFileSync(process.execPath, ["--import", "tsx", "scripts/presenter-real.ts", "--job", f.jobId, "--avatar", "influencer", "--confirm"], { stdio: "pipe", encoding: "utf8", env: { ...f.env, RUNWAYML_API_SECRET: "fake-key" }, timeout: 30000 }); }
+    catch (error) { errorText = String((error as { stderr?: string }).stderr ?? ""); }
+    expect(errorText).toContain("reais/pagas bloqueadas");
+    expect(await readFile(join(f.root, "data", "jobs", `${f.jobId}.json`), "utf8")).toBe(before);
+    expect(await readdir(join(f.root, "data", "jobs"))).toHaveLength(1);
+  }, 35000);
   it("flags inválidas não autorizam geração", () => {
     expect(() => execFileSync(process.execPath, ["--import", "tsx", "scripts/presenter-real.ts", "--confirmed"], { stdio: "pipe", timeout: 30000 })).toThrow();
   }, 35_000);

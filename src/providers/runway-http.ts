@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { assertRealCallsEnabled } from "@/config/execution-policy";
 import type { ProviderDiagnostic } from "@/domain/provider-diagnostic";
 import { ProviderError } from "./types";
 export const TaskSchema = z.object({
@@ -11,9 +12,13 @@ export class RunwayHttpClient {
   #key: string;
   lastDiagnostic?: ProviderDiagnostic;
   readonly diagnostics = new Map<string, ProviderDiagnostic>();
-  constructor(apiKey: string, private readonly transport: typeof fetch = fetch) {
+  private readonly transport: typeof fetch;
+  private readonly injectedTransport: boolean;
+  constructor(apiKey: string, transport?: typeof fetch) {
     if (!apiKey) throw new ProviderError("RUNWAYML_API_SECRET não configurada");
     this.#key = apiKey;
+    this.transport = transport ?? fetch;
+    this.injectedTransport = transport !== undefined;
   }
   /** Seleciona somente campos diagnósticos; nunca inclui body, payload ou erro bruto. */
   clean(value: unknown, sensitive: string[] = []): string | undefined {
@@ -44,6 +49,7 @@ export class RunwayHttpClient {
     return new ProviderError(`Runway: ${labels[diagnostic.kind]}${details ? ` (${details})` : ""}. ${diagnostic.billing === "rejected" ? "Criação rejeitada pelo HTTP; sem tarefa confirmada." : diagnostic.billing === "confirmed" ? "Consumo informado pelo provider." : "Possível cobrança não confirmada."} Sem retry automático.`, id, undefined, diagnostic);
   }
   async api(path: string, init: RequestInit = {}, id?: string): Promise<unknown> {
+    if (!this.injectedTransport) assertRealCallsEnabled();
     const creating = init.method === "POST";
     const sensitive: string[] = [];
     if (typeof init.body === "string") {

@@ -25,7 +25,7 @@ import { QualitySelector } from "./quality-selector";
 
 const DRAFT_KEY = "creative-factory:create-draft:v1";
 
-const PRODUCT_FIELDS = ["productId", "name", "url", "description", "features", "benefits", "price", "audience", "notes", "imageIds"];
+const PRODUCT_FIELDS = ["projectName", "productId", "name", "url", "description", "features", "benefits", "price", "audience", "notes", "imageIds"];
 
 interface Draft {
   form: CampaignFormInput;
@@ -296,6 +296,9 @@ export function CampaignWizard({
                 placeholder="Ex.: estudantes que levam água para o dia"
               />
             </Field>
+            <div className="md:col-span-2"><Field id="projectName" label="Nome do projeto (opcional)" error={errors.projectName}>
+              <input id="projectName" className={inputClasses(!!errors.projectName)} maxLength={120} value={form.projectName ?? ""} onChange={e => update("projectName", e.target.value)} placeholder="Ex.: Garrafa · apresentação de lançamento" />
+            </Field></div>
             <div className="md:col-span-2">
               <Field id="notes" label="Observações" error={errors.notes} hint="Cores, variações, materiais já existentes, restrições.">
                 <textarea
@@ -323,6 +326,20 @@ export function CampaignWizard({
         </Panel>
       ) : (
         <div className="space-y-6">
+          <Panel className="space-y-4 p-5 sm:p-6">
+            <h2 className="text-lg font-semibold tracking-tight">Conceito e roteiro</h2>
+            <Field id="videoConcept" label="Conceito do vídeo" error={errors.videoConcept} hint="Como apresentar o produto, para quem e qual mensagem destacar.">
+              <textarea id="videoConcept" rows={3} maxLength={2000} className={inputClasses(!!errors.videoConcept)} value={form.videoConcept ?? ""} onChange={e => update("videoConcept", e.target.value)} placeholder="Ex.: Apresentador explica os detalhes e intercala fotos do produto." />
+            </Field>
+            <Field id="scriptMode" label="Roteiro">
+              <select id="scriptMode" className={inputClasses()} value={form.scriptMode ?? "generate"} onChange={e => update("scriptMode", e.target.value as "manual" | "generate")}>
+                <option value="generate">Sugerir roteiro localmente, sem IA externa</option><option value="manual">Usar meu roteiro</option>
+              </select>
+            </Field>
+            {form.scriptMode === "manual" ? <Field id="script" label="Texto da narração" error={errors.script} hint="Até 400 palavras. Você revisa o texto e as cenas antes de aprovar a simulação.">
+              <textarea id="script" rows={7} maxLength={3000} className={inputClasses(!!errors.script)} value={form.script ?? ""} onChange={e => update("script", e.target.value)} />
+            </Field> : <p className="text-sm text-zinc-600">O sistema monta uma sugestão usando apenas os dados do produto. O texto será mostrado na revisão, sem chamada ao Claude.</p>}
+          </Panel>
           <Panel className="p-5 sm:p-6">
             <h2 className="text-lg font-semibold tracking-tight">Estratégia</h2>
             <p className="mt-1 text-sm text-zinc-600">
@@ -434,7 +451,7 @@ export function CampaignWizard({
                 <option value="">Sem apresentador</option>
                 {RUNWAY_AVATAR_PRESETS.map(id => <option key={id} value={id}>{id}</option>)}
               </select>
-              <p className="mt-2 text-xs text-zinc-500">O avatar fala com a voz ElevenLabs escolhida. Exige narração real com alinhamento; geração do avatar é cobrada separadamente e aparece na estimativa.</p>
+              <p className="mt-2 text-xs text-zinc-500">O avatar e a voz escolhidos serão simulados neste job, sem chamada à Runway ou ElevenLabs. Você poderá acompanhar cada etapa e seu custo de referência.</p>
             </Field>
             {errors.presenterPresetId && <p role="alert">{errors.presenterPresetId}</p>}
             {errors.speakerProfileId && <p className="mt-1.5 text-xs font-medium text-red-600">{errors.speakerProfileId}</p>}

@@ -1,11 +1,10 @@
 import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
-import { readFile, writeFile, readdir } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { runwayFixture } from "./runway-fake";
-import { makeMp4 } from "./mp4-fixture";
 it("dry-run com foto real local não exige chave, não faz chamadas nem cria campanha", async () => {
   const fake = await runwayFixture();
   const output = execFileSync(process.execPath, ["--import", "tsx", "scripts/video-real.ts", "--image", fake.image], {
@@ -27,41 +26,22 @@ describe("argumentos rejeitados antes de autorização", () => {
   });
 });
 
-it("--confirm com transporte totalmente falso executa uma geração via aprovação e ledger", async () => {
+it.each(["video", "tts", "plan", "presenter"])("%s: --confirm permanece bloqueado mesmo com chaves e ambiente", async script => {
   const fake = await runwayFixture();
-  const hook = join(fake.root, "fake-transport.mjs");
-  const counter = join(fake.root, "posts.txt");
-  await writeFile(hook, `
-    import { appendFileSync } from 'node:fs';
-    globalThis.fetch = async (input, init) => {
-      const url = String(input);
-      if (url === 'https://api.dev.runwayml.com/v1/image_to_video') {
-        appendFileSync(process.env.VIDEO_TEST_COUNTER, 'POST\\n');
-        return Response.json({ id: 'manual_task' });
-      }
-      if (url === 'https://api.dev.runwayml.com/v1/tasks/manual_task') return Response.json({ id: 'manual_task', status: 'SUCCEEDED', cost: { credits: 25 }, output: ['https://cdn.runwayml.com/manual.mp4'] });
-      if (url === 'https://cdn.runwayml.com/manual.mp4') return new Response(Buffer.from('${Buffer.from(makeMp4(5)).toString("hex")}', 'hex'));
-      throw new Error('Rede proibida: ' + url);
-    };
-  `);
-  const dataDir = relative(process.cwd(), join(fake.root, "manual-data"));
-  const videosDir = relative(process.cwd(), join(fake.root, "manual-videos"));
-  const output = execFileSync(process.execPath, ["--import", pathToFileURL(hook).href, "--import", "tsx", "scripts/video-real.ts", "--image", fake.image, "--confirm"], {
-    encoding: "utf8", timeout: 30_000, env: { ...process.env, RUNWAYML_API_SECRET: "fake-test-key", VIDEO_TEST_COUNTER: counter,
-      DATA_DIR: dataDir, VIDEOS_DIR: videosDir, UPLOADS_DIR: relative(process.cwd(), join(fake.root, "manual-uploads")),
-      LLM_PROVIDER: "mock", VIDEO_PROVIDER: "mock", AUDIO_PROVIDER: "mock", MAX_COST_PER_CREATIVE_BRL: "20", MAX_COST_PER_CAMPAIGN_BRL: "100" },
-  });
-  expect(output).toContain("Clipe salvo e custo registrado no ledger");
-  expect(output).toContain("solicitado: 5.00s");
-  expect(output).toContain("provider: indisponível");
-  expect(output).toContain("arquivo real: 5.00s");
-  expect((await readFile(counter, "utf8")).trim()).toBe("POST");
-  const entries = (await readFile(join(dataDir, "ledger.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
-  const videoCosts = entries.filter((entry) => entry.category === "video");
-  expect(videoCosts).toMatchObject([{ simulated: false, costUsd: 0.25 }]);
-  expect(await readdir(join(dataDir, "jobs"))).toHaveLength(1);
-});
-
+  const forbidden = join(fake.root, "forbidden.mjs");
+  const counter = join(fake.root, "network.txt");
+  await writeFile(forbidden, `import { writeFileSync } from 'node:fs'; globalThis.fetch = async () => { writeFileSync(process.env.NETWORK_COUNTER, 'called'); throw new Error('unexpected network'); };`);
+  let errorText = "";
+  try {
+    execFileSync(process.execPath, ["--import", pathToFileURL(forbidden).href, "--import", "tsx", `scripts/${script}-real.ts`, "--confirm"], {
+      encoding: "utf8", stdio: "pipe", timeout: 30000, env: { ...process.env, NETWORK_COUNTER: counter, RUNWAYML_API_SECRET: "fake-key", ELEVENLABS_API_KEY: "fake-key", ANTHROPIC_API_KEY: "fake-key", REAL_CALLS_ENABLED: "true", DATA_DIR: join(fake.root, "blocked-data") },
+    });
+  } catch (error) { errorText = String((error as { stderr?: string }).stderr ?? ""); }
+  expect(errorText).toContain("reais/pagas bloqueadas");
+  expect(errorText).not.toContain("fake-key");
+  expect(existsSync(counter)).toBe(false);
+  expect(existsSync(join(fake.root, "blocked-data"))).toBe(false);
+}, 35000);
 
 it("CLI imprime diagnóstico sanitizado de rejeição com transporte offline", async () => {
   const fake = await runwayFixture();
@@ -77,9 +57,9 @@ it("CLI imprime diagnóstico sanitizado de rejeição com transporte offline", a
   } catch (error) {
     stderr = String((error as { stderr?: string }).stderr ?? "");
   }
-  expect(stderr).toContain("HTTP 429");
-  expect(stderr).toContain("req-cli");
-  expect(stderr).toContain("quota_exceeded");
+  expect(stderr).toContain("reais/pagas bloqueadas");
+  expect(stderr).not.toContain("req-cli");
+  expect(stderr).not.toContain("quota_exceeded");
   expect(stderr).not.toContain("fake-test-key");
   expect(stderr).not.toContain("Possível cobrança");
 });

@@ -19,8 +19,15 @@ export interface PresenterFlowDeps {
   store: PipelineStore; ledger: CostLedger; audioAssets: AudioAssetStore; videoAssets: VideoAssetStore;
   slicer: AudioSlicer; pollOptions: PollOptions; clock: Clock; ids: IdGenerator;
 }
-export async function presenterPreview(deps: Pick<PresenterFlowDeps, "audioAssets">, campaign: Campaign, plan: CreativePlan, job: GenerationJob, scene: ScenePlan) {
+export async function presenterPreview(deps: Pick<PresenterFlowDeps, "audioAssets">, campaign: Campaign, plan: CreativePlan, job: GenerationJob, scene: ScenePlan, simulated = false) {
   const narration = activeAttempt(job.audioAttempts);
+  if (simulated) {
+    if (!narration?.isMock) throw new Error("Simulação exige narração mock; áudio real não é convertido em simulação.");
+    const startSeconds = plan.scenes.slice(0, scene.order).reduce((sum, s) => sum + s.duration, 0);
+    const window = { startSeconds, endSeconds: startSeconds + scene.duration };
+    return { audioPath: narration.assetUri ?? "mock://audio", window, durationSeconds: scene.duration,
+      audio: { narrationAttemptId: narration.id, narrationVersion: narration.narration?.version ?? "mock-v1", ...window } };
+  }
   if (!narration || narration.isMock || !narration.assetUri || !narration.narration?.version || !narration.narration.timingUri) throw new Error("Presenter exige narração real existente com alignment (ElevenLabs); não gera outra voz.");
   const timing = await deps.audioAssets.readTiming(narration.narration.timingUri);
   if (!timing) throw new Error("Alignment real não encontrado; nenhuma chamada de presenter enviada.");
@@ -48,11 +55,11 @@ export async function generatePresenter(deps: PresenterFlowDeps, input: { campai
   let prepared: Awaited<ReturnType<typeof presenterPreview>> | undefined;
   let audio: Uint8Array | undefined;
   if (!resume) {
-    prepared = await presenterPreview(deps, campaign, plan, job, scene);
+    prepared = await presenterPreview(deps, campaign, plan, job, scene, provider.descriptor.isMock);
     const estimate = provider.estimateCost(prepared.durationSeconds);
-    audio = await deps.slicer(prepared.audioPath, prepared.window);
+    audio = provider.descriptor.isMock ? new Uint8Array() : await deps.slicer(prepared.audioPath, prepared.window);
     await persistTask({ attemptId: deps.ids("attempt"), sceneId: scene.id, avatarPresetId: campaign.request.presenterPresetId!,
-      state: "submitting", requestedDurationSeconds: prepared.durationSeconds, audio: prepared.audio,
+      state: "submitting", isMock: provider.descriptor.isMock, requestedDurationSeconds: prepared.durationSeconds, audio: prepared.audio,
       estimatedCostUsd: estimate.costUsd, estimateId: job.approval!.estimateId, createdAt: deps.clock() });
   } else if (!task!.providerJobId) {
     throw new PresenterPendingError("Envio de presenter interrompido sem ID confirmado; possível cobrança. Consulte a Runway. Nenhum novo POST será feito.");
@@ -84,6 +91,9 @@ export async function generatePresenter(deps: PresenterFlowDeps, input: { campai
     await waitForCompletion(r => provider.getStatus({ ...ref, ...r }), ref, deps.pollOptions);
     const result = await provider.downloadResult(ref);
     await recordCost(result.billedUsage); costRecorded = true;
+    if (result.isMock) {
+      attempt = { ...base(), status: "succeeded", active: true, assetUri: result.uri, durationSeconds: result.durationSeconds };
+    } else {
     if (!result.data) throw new Error("Presenter não retornou dados de vídeo.");
     const stored = await deps.videoAssets.save({ campaignId: campaign.id, sceneId: scene.id, data: result.data, metadata: {
       attemptId: current().attemptId, providerJobId: ref.providerJobId, requestId: ref.requestId, model: provider.descriptor.model,
@@ -94,6 +104,7 @@ export async function generatePresenter(deps: PresenterFlowDeps, input: { campai
     await deps.videoAssets.writeIntegrity?.(stored.uri, { ...media, checkedAt: deps.clock() });
     if (media.status !== "valid") throw new InvalidMediaError(clipRejectionMessage(media, scene.order + 1), media, stored.uri);
     attempt = { ...base(), status: "succeeded", active: true, assetUri: stored.uri, durationSeconds: media.actualMediaDurationSeconds!, media };
+    }
   } catch (error) {
     if (error instanceof ProviderError && error.billedUsage && !costRecorded) await recordCost(error.billedUsage);
     const terminal = error instanceof ProviderError && ["FAILED", "CANCELLED"].includes(error.diagnostic?.providerStatus ?? "");

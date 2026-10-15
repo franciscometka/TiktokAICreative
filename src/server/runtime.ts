@@ -1,3 +1,5 @@
+import { offlineConfig } from "@/config/execution-policy";
+import { createOfflinePipelineService } from "@/pipeline/offline-service";
 import type { AppDeps } from "@/application/campaign-actions";
 import { loadAppConfig, type AppConfig } from "@/config/env";
 import { RUNWAY_VIDEO } from "@/config/video-models";
@@ -5,7 +7,6 @@ import { PRICING_TABLE } from "@/config/pricing";
 import { summarizePresets, type PresetSummary } from "@/costs/preset-summary";
 import { StaticPricingCatalog } from "@/costs/pricing-catalog";
 import type { CostBudget } from "@/domain/cost";
-import { createPipelineService } from "@/pipeline/create-pipeline-service";
 import { LocalUploadStore } from "@/storage/upload-store";
 
 /**
@@ -27,16 +28,17 @@ type GlobalWithRuntime = typeof globalThis & { [KEY]?: Runtime };
 export function getRuntime(): Runtime {
   const g = globalThis as GlobalWithRuntime;
   if (!g[KEY]) {
-    const config = loadAppConfig();
+    const config = offlineConfig(loadAppConfig());
     g[KEY] = {
       config,
       deps: {
-        service: createPipelineService(config),
+        service: createOfflinePipelineService(config),
         uploads: new LocalUploadStore(config.uploadsDir),
         rendersDir: config.rendersDir,
         audioDir: config.audioDir,
         videosDir: config.videosDir,
         audioProvider: config.audioProvider,
+        offlineOnly: true,
       },
     };
   }

@@ -53,6 +53,10 @@ export const StyleSelectionSchema = z.enum(["auto", "manual"]);
 export type StyleSelection = z.infer<typeof StyleSelectionSchema>;
 
 export const CampaignRequestSchema = z.object({
+  projectName: z.string().trim().max(120).optional(),
+  videoConcept: z.string().trim().max(2000).optional(),
+  scriptMode: z.enum(["manual", "generate"]).optional(),
+  script: z.string().trim().max(3000).optional(),
   product: ProductInputSchema,
   styles: z.array(CreativeStyleSchema).min(1),
   styleSelection: StyleSelectionSchema.optional(),
@@ -87,6 +91,7 @@ export const CampaignErrorCodeSchema = z.enum(CAMPAIGN_ERROR_CODES);
 export type CampaignErrorCode = z.infer<typeof CampaignErrorCodeSchema>;
 
 export const CampaignSchema = z.object({
+  executionMode: z.enum(["offline", "real"]).optional(),
   id: nonEmpty,
   status: CampaignStatusSchema,
   request: CampaignRequestSchema,
@@ -165,6 +170,7 @@ export const ApprovalSchema = z.object({
 export type Approval = z.infer<typeof ApprovalSchema>;
 
 export const GenerationJobSchema = z.object({
+  currentStage: z.enum(["narration", "scenes", "avatar", "render"]).optional(),
   presenterTasks: z.array(PresenterTaskSchema).optional(),
   videoTasks: z.array(z.object({ sceneId: z.string(), providerJobId: z.string(), provider: z.string(), model: z.string(), createdAt: z.string() })).optional(),
   id: nonEmpty,

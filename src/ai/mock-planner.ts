@@ -85,7 +85,7 @@ const mid = (r: { min: number; max: number }) => (r.min + r.max) / 2;
 export function buildMockDraft(request: PlanningRequest): CampaignPlanDraft {
   const { product, styles, creativeCount, settings } = request;
   const creatives = Array.from({ length: creativeCount }, (_, i) =>
-    buildCreative(product, styles[i % styles.length] ?? "ugc", settings),
+    applyBrief(buildCreative(product, styles[i % styles.length] ?? "ugc", settings), request),
   );
   const hooks: HookDraft[] = Array.from({ length: hookCountFor(creativeCount) }, (_, i) => {
     const style = styles[i % styles.length] ?? "ugc";
@@ -175,4 +175,28 @@ function buildCreative(
     scenes,
     callToAction: cta,
   };
+}
+
+function applyBrief(creative: CreativePlanDraft, request: PlanningRequest): CreativePlanDraft {
+  if (!request.videoConcept && !request.scriptMode && !request.projectName) return creative;
+  const p = request.product;
+  const generated = [
+    `Conheça ${p.name}.`, p.description,
+    p.features.length ? `Entre os detalhes estão ${p.features.slice(0, 2).join(" e ")}.` : `Veja os detalhes de ${p.name}.`,
+    p.benefits[0] ?? `Compare as características de ${p.name}.`,
+    "Confira as imagens e as informações do produto.", "Veja os detalhes antes de escolher.",
+  ].join(" ");
+  const script = request.scriptMode === "manual" ? request.script?.trim() : generated;
+  if (!script) throw new Error("Roteiro manual vazio.");
+  const words = script.split(/\s+/);
+  if (words.length > 400) throw new Error("Use até 400 palavras por roteiro.");
+  const size = Math.ceil(words.length / creative.scenes.length);
+  const scenes = creative.scenes.map((scene, i) => {
+    const narration = words.slice(i * size, (i + 1) * size).join(" ");
+    const duration = Math.max(0.5, Math.round((narration ? narration.split(/\s+/).length / 2.5 : 0.5) * 10) / 10);
+    return { ...scene, narration, duration, estimatedGenerationSeconds: scene.requiresGeneratedVideo ? Math.min(duration, scene.estimatedGenerationSeconds) : 0,
+      visualDescription: `${request.videoConcept || "Apresentação do produto"} — cena ${i + 1}` };
+  });
+  return { ...creative, concept: { ...creative.concept, title: request.projectName || creative.concept.title, description: request.videoConcept || creative.concept.description },
+    script, scenes, duration: Math.round(scenes.reduce((sum, scene) => sum + scene.duration, 0) * 10) / 10 };
 }

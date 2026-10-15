@@ -38,7 +38,7 @@ export class RunwayVideoProvider implements VideoProvider {
       throw new ProviderError("O plano usa outro modelo de vídeo. Crie uma nova campanha com Runway e aprove a nova estimativa.");
     }
     this.transport = options.transport ?? fetch;
-    this.http = new RunwayHttpClient(options.apiKey, this.transport);
+    this.http = new RunwayHttpClient(options.apiKey, options.transport);
     this.descriptor = { id: RUNWAY_VIDEO.provider, model: RUNWAY_VIDEO.model, isMock: false, pricing: options.pricing };
   }
   estimateCost(request: VideoGenerationRequest) {

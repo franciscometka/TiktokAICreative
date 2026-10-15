@@ -19,6 +19,7 @@ export default async function CreatePage({ searchParams }: { searchParams: Promi
   const { service } = getRuntime().deps;
 
   let initial: CampaignFormInput = {
+    projectName: "", videoConcept: "", scriptMode: "generate", script: "",
     productId: newProductId(),
     name: "",
     url: "",
@@ -63,11 +64,11 @@ export default async function CreatePage({ searchParams }: { searchParams: Promi
       <div className="mb-8">
         <p className="text-xs font-semibold tracking-wider text-zinc-500 uppercase">Nova campanha</p>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900">
-          {fromName ? `Planejar de novo: ${fromName}` : "Criar campanha"}
+          {fromName ? `Planejar de novo: ${fromName}` : "Criar projeto e job"}
         </h1>
         <p className="mt-1.5 max-w-2xl text-sm text-zinc-600">
-          Descreva o produto, escolha a estratégia e o nível de qualidade. Você revisa o plano e o custo antes de qualquer
-          geração de vídeo.
+          Informe produto, imagens, conceito, roteiro e avatar. Você revisa as cenas e o custo de referência antes de iniciar a
+          simulação offline.
         </p>
       </div>
       <CampaignWizard

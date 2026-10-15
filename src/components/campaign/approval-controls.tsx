@@ -148,7 +148,7 @@ export function ApprovalControls({
             {canApprove && (
               <button type="button" className={buttonClasses("primary", "lg")} onClick={() => approve(false)} disabled={pending}>
                 {pending && <Spinner />}
-                {pending ? "Processando…" : `Gerar por aproximadamente ${formatBrl(futureTotalBrl)}`}
+                {pending ? "Processando…" : mediaIsMock ? `Aprovar e simular · referência ${formatBrl(futureTotalBrl)}` : `Gerar por aproximadamente ${formatBrl(futureTotalBrl)}`}
               </button>
             )}
           </div>

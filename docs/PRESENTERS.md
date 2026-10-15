@@ -1,3 +1,5 @@
+> **Estado atual:** chamadas reais/pagas temporariamente bloqueadas, inclusive com `--confirm`. A interface executa somente mocks. Consulte [fluxo offline](OFFLINE-WORKFLOW.md). As instruções reais abaixo documentam a integração preservada para futura liberação.
+
 # Presenter real — Lote 5
 
 Implementado em 2026-10-15, sem chamadas reais/pagas. A validação de qualidade visual, disponibilidade do preset na conta e sincronização perceptiva em português depende da primeira execução autorizada.

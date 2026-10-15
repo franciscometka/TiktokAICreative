@@ -24,15 +24,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <span className="hidden sm:inline">Creative Factory</span>
             </Link>
             <nav className="flex items-center gap-1">
+              <Link href="/jobs" className={buttonClasses("ghost", "sm")}>Jobs</Link>
               <Link href="/campaigns" className={buttonClasses("ghost", "sm")}>
-                Campanhas
+                Projetos
               </Link>
               <Link href="/create" className={buttonClasses("primary", "sm")}>
-                Criar campanha
+                Novo projeto
               </Link>
             </nav>
           </div>
         </header>
+        <div className="border-b border-blue-200 bg-blue-50 px-4 py-2 text-center text-sm text-blue-950" role="status">Modo offline · chamadas reais e pagas bloqueadas, inclusive com confirmação. Valores são referências simuladas.</div>
         {children}
       </body>
     </html>

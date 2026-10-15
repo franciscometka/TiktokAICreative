@@ -94,6 +94,8 @@ import { transitionCampaign, transitionJob } from "./states";
 
 export interface PipelineDeps {
   planner: CreativePlanner;
+  offlineOnly?: boolean;
+  stageDelayMs?: number;
   presenterProviderFactory?: (pricing: ProviderPricing) => PresenterProvider;
   presenterAudioSlicer?: AudioSlicer;
   videoChoice?: PricingRef;
@@ -212,6 +214,7 @@ export class PipelineService {
     let campaign: Campaign = {
       id: ids("campaign"),
       status: "draft",
+      executionMode: this.deps.offlineOnly ? "offline" : undefined,
       request,
       settings,
       plannerId: this.deps.planner.id,
@@ -233,6 +236,7 @@ export class PipelineService {
     this.assertPlannerAvailable();
     return this.campaignLocks.run(campaignId, async () => {
       let campaign = await this.deps.store.getCampaign(campaignId);
+      this.assertExecutionMode(campaign);
       if (this.isPlanningActive(campaignId)) {
         throw new PlanningInProgressError("O planejamento desta campanha ainda está em andamento");
       }
@@ -398,6 +402,7 @@ export class PipelineService {
     return {
       product: request.product,
       presenterPresetId: request.presenterPresetId,
+      projectName: request.projectName, videoConcept: request.videoConcept, scriptMode: request.scriptMode, script: request.script,
       styles: request.styles,
       creativeCount: request.creativeCount,
       settings,
@@ -719,7 +724,7 @@ export class PipelineService {
 
       let additional = sceneEstimateBrl(job, sceneId);
       if (scene.visualSource === "presenter") {
-        const preview = await presenterPreview(this.deps, ctx.campaign, ctx.creative, job, scene);
+        const preview = await presenterPreview(this.deps, ctx.campaign, ctx.creative, job, scene, this.presenterProvider().descriptor.isMock);
         additional = this.presenterProvider().estimateCost(preview.durationSeconds).costUsd * (await this.deps.exchangeRates.getUsdBrl()).rate;
       }
       let check = await this.checkJobBudget({ ...ctx, job }, additional);
@@ -749,6 +754,7 @@ export class PipelineService {
       await this.deps.store.saveJob(job);
 
       let result;
+      job = await this.stage(job, scene.visualSource === "presenter" ? "avatar" : "scenes");
       try { result = scene.visualSource === "presenter"
         ? await this.generatePresenterScene({ ...ctx, job }, scene, true)
         : await this.generateSceneVideo({ ...ctx, job }, scene, video!);
@@ -776,7 +782,7 @@ export class PipelineService {
 
   async cancel(jobId: string): Promise<GenerationJob> {
     return this.withJobLock(jobId, async () => {
-      const job = await this.deps.store.getJob(jobId);
+      const { job } = await this.load(jobId);
       const next = transitionJob(job, "cancelled", this.deps.clock());
       await this.deps.store.saveJob(next);
       return next;
@@ -825,9 +831,10 @@ export class PipelineService {
     const audio = this.createAudioProvider(ctx);
     if (!audio.ok) return this.fail(job, audio.error);
 
-    if (hasPresenter && !activeAttempt(job.audioAttempts)) {
+    if ((hasPresenter || this.deps.offlineOnly) && !activeAttempt(job.audioAttempts)) {
       const paused = await this.pauseIfOverBudget({ ...ctx, job });
       if (paused) return paused;
+      job = await this.stage(job, "narration");
       const result = await this.generateNarration({ ...ctx, job }, audio.provider);
       job = result.job;
       if (result.attempt.status === "failed") return this.fail(job, result.attempt.error);
@@ -847,7 +854,7 @@ export class PipelineService {
       let additional = remainingEstimateBrl(job);
       if (scene.visualSource === "presenter" && !pendingPresenter) {
         try {
-          const preview = await presenterPreview(this.deps, ctx.campaign, ctx.creative, job, scene);
+          const preview = await presenterPreview(this.deps, ctx.campaign, ctx.creative, job, scene, this.presenterProvider().descriptor.isMock);
           const rate = (await this.deps.exchangeRates.getUsdBrl()).rate;
           additional = Math.max(0, additional - sceneEstimateBrl(job, scene.id)) + this.presenterProvider().estimateCost(preview.durationSeconds).costUsd * rate;
         } catch (error) { return this.fail(job, messageOf(error)); }
@@ -857,6 +864,7 @@ export class PipelineService {
       if (!pendingPresenter) assertAttemptsAvailable(state.attempts, this.deps.maxAttemptsPerScene);
 
       let result;
+      job = await this.stage(job, scene.visualSource === "presenter" ? "avatar" : "scenes");
       try { result = scene.visualSource === "presenter"
         ? await this.generatePresenterScene({ ...ctx, job }, scene)
         : await this.generateSceneVideo({ ...ctx, job }, scene, video!);
@@ -874,6 +882,7 @@ export class PipelineService {
       if (paused) return paused;
       assertAttemptsAvailable(job.audioAttempts, this.deps.maxAttemptsPerScene);
 
+      job = await this.stage(job, "narration");
       const result = await this.generateNarration({ ...ctx, job }, audio.provider);
       job = result.job;
       if (result.attempt.status === "failed") return this.fail(job, result.attempt.error);
@@ -1093,7 +1102,7 @@ export class PipelineService {
       fit,
       note,
     };
-    if (!result.data) return { uri: result.uri, durationSeconds: result.durationSeconds, narration };
+    if (!result.data) return { uri: result.uri, durationSeconds: result.durationSeconds, narration: result.isMock && ctx.campaign.executionMode === "offline" ? { ...narration, version: `mock-v${ctx.job.audioAttempts.length + 1}` } : narration };
 
     const stored = await this.deps.audioAssets.save({
       campaignId: ctx.campaign.id,
@@ -1292,6 +1301,7 @@ export class PipelineService {
       let manifest: RenderManifest;
       try {
         const timing = timingUri ? await this.deps.audioAssets.readTiming(timingUri) : undefined;
+        job = await this.stage(job, "render");
         manifest = buildRenderManifest({
           campaignId: ctx.campaign.id,
           plan: ctx.creative.scenes.some(s => s.visualSource === "presenter") && timing && narration?.durationSeconds ? alignedPresenterPlan(ctx.creative, timing, narration.durationSeconds) : ctx.creative,
@@ -1456,9 +1466,19 @@ export class PipelineService {
     });
   }
 
+  private assertExecutionMode(campaign: Campaign): void {
+    if (this.deps.offlineOnly && campaign.executionMode !== "offline") throw new UnexpectedStatusError("Projeto anterior em consulta. Crie uma cópia offline para continuar sem alterar dados reais.");
+  }
+  private async stage(job: GenerationJob, currentStage: NonNullable<GenerationJob["currentStage"]>): Promise<GenerationJob> {
+    const next = { ...job, currentStage, updatedAt: this.deps.clock() };
+    await this.deps.store.saveJob(next);
+    if (this.deps.stageDelayMs) await new Promise(resolve => setTimeout(resolve, this.deps.stageDelayMs));
+    return next;
+  }
   private async load(jobId: string): Promise<JobContext> {
     const job = await this.deps.store.getJob(jobId);
     const campaign = await this.deps.store.getCampaign(job.campaignId);
+    this.assertExecutionMode(campaign);
     const creative = campaign.plan?.creatives.find((c) => c.id === job.creativeId);
     if (!creative) throw new UnexpectedStatusError(`Criativo ${job.creativeId} não encontrado no plano`);
     return { job, campaign, creative, pricing: resolvePricing(campaign.settings, this.deps.pricing) };

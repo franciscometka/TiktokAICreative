@@ -27,6 +27,10 @@ export const FORM_LIMITS = {
 
 /** Dados crus do formulário, como o componente cliente envia. */
 export interface CampaignFormInput {
+  projectName?: string;
+  videoConcept?: string;
+  scriptMode?: "manual" | "generate";
+  script?: string;
   productId: string;
   name: string;
   url: string;
@@ -50,6 +54,10 @@ export interface CampaignFormInput {
 export type FieldErrors = Partial<Record<string, string>>;
 
 export interface ParsedCampaignForm {
+  projectName?: string;
+  videoConcept?: string;
+  scriptMode?: "manual" | "generate";
+  script?: string;
   productId: string;
   name: string;
   url: string | undefined;
@@ -114,6 +122,10 @@ const money = (label: string, required: boolean) =>
 
 const FormSchema = z
   .object({
+    projectName: z.string().trim().max(120).optional(),
+    videoConcept: z.string().trim().max(2000).optional(),
+    scriptMode: z.enum(["manual", "generate"]).optional(),
+    script: z.string().trim().max(3000).optional(),
     productId: z.string().regex(SAFE_PRODUCT_ID, "Identificador do produto inválido."),
     name: trimmed(FORM_LIMITS.name, "Nome").min(1, "Informe o nome do produto."),
     url: z
@@ -150,6 +162,8 @@ const FormSchema = z
     }),
   })
   .superRefine((form, ctx) => {
+    if (form.scriptMode === "manual" && !form.script?.trim()) ctx.addIssue({ code: "custom", path: ["script"], message: "Escreva o roteiro ou escolha a sugestão local." });
+    if (form.script && form.script.trim().split(/\s+/).length > 400) ctx.addIssue({ code: "custom", path: ["script"], message: "Use até 400 palavras por roteiro." });
     if (form.styleMode === "manual") {
       const valid = form.styles.filter((s) => (CREATIVE_STYLES as readonly string[]).includes(s));
       if (valid.length === 0 || valid.length !== form.styles.length) {
@@ -180,6 +194,7 @@ export function parseCampaignForm(input: unknown): Result<ParsedCampaignForm, Fi
   const styles: CreativeStyle[] =
     f.styleMode === "auto" ? [...CREATIVE_STYLES] : [...new Set(f.styles as CreativeStyle[])];
   return ok({
+    projectName: f.projectName, videoConcept: f.videoConcept, scriptMode: f.scriptMode, script: f.script,
     productId: f.productId,
     name: f.name,
     url: f.url,
@@ -208,6 +223,7 @@ export function parseCampaignForm(input: unknown): Result<ParsedCampaignForm, Fi
 /** Monta o pedido do domínio. `images` vem do UploadStore (nunca de caminhos enviados pelo browser). */
 export function toCampaignRequest(form: ParsedCampaignForm, images: readonly ProductImage[]): CampaignRequest {
   return {
+    projectName: form.projectName, videoConcept: form.videoConcept, scriptMode: form.scriptMode, script: form.script,
     product: {
       id: form.productId,
       name: form.name,
@@ -235,6 +251,7 @@ export function formInputFromRequest(request: CampaignRequest): CampaignFormInpu
   const p = request.product;
   const toInput = (n: number) => n.toFixed(2).replace(".", ",");
   return {
+    projectName: request.projectName, videoConcept: request.videoConcept, scriptMode: request.scriptMode, script: request.script,
     productId: p.id,
     name: p.name,
     url: p.url ?? "",

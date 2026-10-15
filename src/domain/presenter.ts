@@ -10,6 +10,7 @@ export const PresenterAudioSchema = z.object({
 export type PresenterAudio = z.infer<typeof PresenterAudioSchema>;
 /** Durable intent BEFORE POST; a submitting intent without id is never resubmitted. */
 export const PresenterTaskSchema = z.object({
+  isMock: z.boolean().optional(),
   attemptId: z.string(), sceneId: z.string(), avatarPresetId: AvatarPresetSchema,
   state: z.enum(["submitting", "pending", "succeeded", "failed"]),
   providerJobId: z.string().optional(), requestId: z.string().optional(),

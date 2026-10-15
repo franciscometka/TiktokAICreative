@@ -1,3 +1,4 @@
+import { assertRealCallsEnabled } from "../src/config/execution-policy";
 /**
  * VALIDAÇÃO MANUAL com a ElevenLabs REAL — no máximo UMA chamada curta (~150 caracteres).
  *
@@ -40,6 +41,7 @@ function arg(name: string): string | undefined {
 }
 
 async function main() {
+  if (process.argv.includes("--confirm")) assertRealCallsEnabled();
   if (existsSync(".env.local")) process.loadEnvFile(".env.local");
   const quality = (arg("quality") ?? "economy") as PresetQuality;
   if (!(quality in QUALITY_PRESETS)) throw new Error(`Qualidade inválida: ${quality}`);

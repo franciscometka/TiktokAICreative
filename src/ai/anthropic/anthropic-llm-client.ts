@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { assertRealCallsEnabled } from "@/config/execution-policy";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { TokenUsage } from "@/domain/llm";
 import { LlmError, type LlmClient, type LlmRequest, type LlmResponse, type LlmStopReason } from "../llm-client";
@@ -18,6 +19,7 @@ export interface AnthropicTransport {
 export function sdkTransport(client: Anthropic): AnthropicTransport {
   return {
     async send(params) {
+      assertRealCallsEnabled();
       const stream = client.messages.stream(params);
       const message = await stream.finalMessage();
       return { message, requestId: stream.request_id ?? null };

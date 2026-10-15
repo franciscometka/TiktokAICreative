@@ -1,3 +1,4 @@
+import { WorkflowPanel } from "@/components/campaign/workflow-panel";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { getCampaignView } from "@/application/campaign-actions";
@@ -72,7 +73,7 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
 
       <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight break-words text-zinc-900">{view.product.name}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight break-words text-zinc-900">{view.projectName || view.product.name}</h1>
           <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-zinc-600">
             <span>{view.strategy.qualityLabel}</span>
             <span className="text-zinc-300">·</span>
@@ -99,10 +100,16 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
         <Stepper steps={stepsFor(stepStates(view), planned ? [undefined, undefined, undefined, "#analise", "#custo"] : [])} />
       </div>
 
+      {view.videoConcept ? <p className="mt-4 max-w-3xl text-sm leading-relaxed text-zinc-600">{view.videoConcept}</p> : null}
+      {view.offlineReadOnly ? <div className="mt-6"><Notice title="Projeto anterior em consulta">
+        As chamadas reais estão bloqueadas. Os dados e custos originais foram preservados.
+        <Link href={`/create?from=${view.id}`} className={`${buttonClasses("secondary", "sm")} mt-3`}>Criar cópia offline para continuar</Link>
+      </Notice></div> : null}
+      {planned ? <section className="mt-6 space-y-4" aria-label="Jobs do projeto">{view.creatives.map(creative => <WorkflowPanel key={creative.id} creative={creative} />)}</section> : null}
       {view.planning.simulated && (
         <div className="mt-6">
           <Notice title="Planejamento simulado">
-            Esta campanha foi planejada com LLM_PROVIDER=mock: textos marcados com [MOCK], sem chamada ao Claude e sem custo real.
+            Planejamento e roteiro sugeridos localmente para testar o fluxo. Nenhum serviço de IA foi chamado; revise o conteúdo antes de uma futura geração real.
           </Notice>
         </div>
       )}
@@ -127,7 +134,7 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
             error={view.error}
             detail={view.error.detail}
             simulated={view.planning.simulated}
-            planningAvailable={publicConfig.planningAvailable}
+            planningAvailable={publicConfig.planningAvailable && !view.offlineReadOnly}
           />
         </div>
       )}

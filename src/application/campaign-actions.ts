@@ -28,6 +28,7 @@ import { toUserError, type UserError } from "./user-errors";
 
 export interface AppDeps {
   service: PipelineService;
+  offlineOnly?: boolean;
   uploads: LocalUploadStore;
   /** Pasta dos renders (RENDERS_DIR), para servir os MP4 por ID. */
   rendersDir: string;
@@ -116,6 +117,14 @@ export async function getCampaignView(deps: AppDeps, campaignId: string): Promis
       jobActivity,
       audioProvider: deps.audioProvider,
     });
+    if (deps.offlineOnly && campaign.executionMode !== "offline") {
+      view.offlineReadOnly = true;
+      for (const creative of view.creatives) {
+        creative.canApprove = false; creative.canCancel = false; creative.canRerender = false; creative.budgetDecision = undefined;
+        creative.narration.canRegenerate = false; creative.narration.canAccept = false;
+        for (const presenter of creative.presenters ?? []) presenter.canRegenerate = false;
+      }
+    }
     return { ok: true, value: view };
   } catch (error) {
     return fail(error);

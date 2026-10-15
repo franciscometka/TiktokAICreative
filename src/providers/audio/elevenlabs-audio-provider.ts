@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { assertRealCallsEnabled } from "@/config/execution-policy";
 import { z } from "zod";
 import {
   ELEVENLABS_LANGUAGE_CODES,
@@ -83,6 +84,7 @@ export class ElevenLabsAudioProvider implements AudioProvider {
   }
 
   async generateAudio(request: AudioGenerationRequest): Promise<ProviderJobRef> {
+    if (!this.options.transport) assertRealCallsEnabled();
     const text = request.text.trim();
     // Validações locais ANTES de qualquer chamada (nada é cobrado).
     if (!text) throw new ProviderError("Narração vazia");

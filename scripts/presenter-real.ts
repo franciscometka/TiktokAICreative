@@ -1,3 +1,4 @@
+import { assertRealCallsEnabled } from "../src/config/execution-policy";
 import { existsSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { AvatarPresetSchema } from "../src/domain/presenter";
@@ -5,6 +6,7 @@ import { loadAppConfig } from "../src/config/env";
 import { createPipelineService } from "../src/pipeline/create-pipeline-service";
 import { durationReport } from "../src/domain/media-integrity";
 async function main() {
+  if (process.argv.includes("--confirm")) assertRealCallsEnabled();
   const { values } = parseArgs({ options: { job: { type: "string" }, scene: { type: "string" }, avatar: { type: "string", default: "influencer" }, confirm: { type: "boolean", default: false }, resume: { type: "boolean", default: false } }, strict: true });
   if (existsSync(".env.local")) process.loadEnvFile(".env.local");
   if (!values.job) throw new Error("Informe --job com o ID do job que possui narration.mp3 e alignment reais.");
