@@ -17,7 +17,7 @@ describe("Runway sem internet", () => {
     expect(result).toMatchObject({ durationSeconds: 5, isMock: false, billedUsage: { seconds: 5 } });
     expect(result.data).toEqual(MP4);
     expect(calls.filter((c) => c.init?.method === "POST")).toHaveLength(1);
-    expect(JSON.parse(String(calls[0]!.init?.body))).toMatchObject({ model: RUNWAY_VIDEO.model, ratio: "720:1280", duration: 5 });
+    expect(JSON.parse(String(calls[0]!.init?.body))).toMatchObject({ model: RUNWAY_VIDEO.model, ratio: "960:960", duration: 5 });
     expect(calls[2]!.init?.headers).toBeUndefined();
     expect(costForUsage(pricing, result.billedUsage).costUsd).toBe(0.25);
   });

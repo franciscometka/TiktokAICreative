@@ -5,7 +5,7 @@ import { ACTIVE_PROMPTS, PROMPTS } from "./registry";
 
 describe("campaign-plan@1.0.1", () => {
   it("é a versão ativa; a 1.0.0 continua registrada para reprodutibilidade", () => {
-    expect(ACTIVE_PROMPTS.campaignPlan.version).toBe("1.0.1");
+    expect(ACTIVE_PROMPTS.campaignPlan.version).toBe("1.2.0");
     expect(PROMPTS.campaignPlan["1.0.0"].version).toBe("1.0.0");
     expect(PROMPTS.campaignPlan["1.0.0"].status).toBe("deprecated");
   });

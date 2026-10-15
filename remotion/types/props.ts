@@ -11,6 +11,7 @@ export const COMPOSITION_VERSION = "tiktok-creative@1.2.0";
 export type SceneKind = "generated_video" | "product_image" | "text_card";
 export type SceneVisualSource =
   | "generated_video"
+  | "product_hero" | "product_demo" | "lifestyle" | "presenter" | "product_ugc"
   | "product_image"
   | "text_card"
   | "screenshot"
@@ -38,7 +39,7 @@ export interface SceneProps {
   transition: SceneTransition;
   onScreenText: string;
   image: ImageProps | null;
-  video?: { src: string };
+  video?: { src: string; fit?: "contain" };
   /** Presente quando a cena é um vídeo IA ainda simulado. */
   placeholder: { label: string; description: string | null } | null;
 }

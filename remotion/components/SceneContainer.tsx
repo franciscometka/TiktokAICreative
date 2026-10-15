@@ -12,7 +12,7 @@ export function SceneContainer({ scene }: { scene: SceneProps }) {
 
   let content;
   if (scene.video) {
-    content = <OffthreadVideo src={scene.video.src} muted style={{ width: "100%", height: "100%", objectFit: "cover" }} />;
+    content = <OffthreadVideo src={scene.video.src} muted style={{ width: "100%", height: "100%", objectFit: scene.video.fit ?? "contain" }} />;
   } else if (scene.kind === "generated_video") {
     content = (
       <GeneratedVideoPlaceholder

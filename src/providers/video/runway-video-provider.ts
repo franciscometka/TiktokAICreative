@@ -1,8 +1,9 @@
+import { pickOutputRatio } from "@/domain/aspect";
 import type { ProviderDiagnostic } from "@/domain/provider-diagnostic";
 import { isMp4 } from "./mp4";
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
-import { RUNWAY_VIDEO, runwayDuration } from "@/config/video-models";
+import { RUNWAY_VIDEO, RUNWAY_RATIOS, runwayDuration } from "@/config/video-models";
 import { RUNWAY_CREDITS_PER_SECOND } from "@/config/pricing";
 import { costForUsage, type Usage } from "@/costs/calculate";
 import type { ProviderPricing } from "@/domain/cost";
@@ -45,6 +46,7 @@ export class RunwayVideoProvider implements VideoProvider {
     return { kind: "estimate" as const, ...cost, pricing: this.pricing };
   }
   async validateRequest(request: VideoGenerationRequest): Promise<string> {
+    if (request.visualSource === "presenter" || request.visualSource === "product_ugc") throw new ProviderError("Tipo de cena ainda não suportado nesta integração Runway; revise o plano.");
     runwayDuration(request.durationSeconds);
     if (!request.prompt.trim() || request.prompt.length > 1000) throw new ProviderError("Runway: prompt deve ter de 1 a 1000 caracteres.");
     const uri = request.referenceImageUris[0];
@@ -56,11 +58,18 @@ export class RunwayVideoProvider implements VideoProvider {
     if (Buffer.byteLength(data) > 5 * 1024 * 1024) throw new ProviderError("Runway: imagem codificada passa de 5 MB; reduza a foto.");
     return data;
   }
+  async outputRatio(request: VideoGenerationRequest): Promise<string> {
+    const uri = request.referenceImageUris[0];
+    if (!uri) throw new ProviderError("Runway exige uma foto do produto.");
+    const image = await new AssetResolver([this.uploadsDir]).resolve(uri);
+    if (image.kind !== "file" || image.media !== "image") throw new ProviderError("Runway exige imagem local válida.");
+    return pickOutputRatio(RUNWAY_RATIOS, image.size.width / image.size.height, "full_product").ratio;
+  }
   async generateScene(request: VideoGenerationRequest): Promise<ProviderJobRef> {
     const promptImage = await this.validateRequest(request);
     const seconds = runwayDuration(request.durationSeconds);
     const body = await this.api("/image_to_video", { method: "POST", body: JSON.stringify({
-      model: RUNWAY_VIDEO.model, promptImage, promptText: request.prompt, duration: seconds, ratio: "720:1280",
+      model: RUNWAY_VIDEO.model, promptImage, promptText: request.prompt, duration: seconds, ratio: await this.outputRatio(request),
     }) });
     const parsed = z.object({ id: z.string().min(1).max(256) }).safeParse(body);
     if (!parsed.success) throw new ProviderError("Runway: resposta de criação inválida; possível cobrança. Não houve nova tentativa.");

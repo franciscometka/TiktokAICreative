@@ -42,10 +42,11 @@ export type Transition = z.infer<typeof TransitionSchema>;
 
 /**
  * De onde vem o visual da cena (estratégia híbrida de custo).
- * Só "generated_video" consome geração paga; o resto é composto no Remotion.
+ * Os tipos em GENERATED_VISUAL_SOURCES consomem geração; o resto é composto no Remotion.
  */
+export const GENERATED_VISUAL_SOURCES = ["generated_video", "product_hero", "product_demo", "lifestyle", "presenter", "product_ugc"] as const;
 export const VISUAL_SOURCES = [
-  "generated_video",
+  ...GENERATED_VISUAL_SOURCES,
   "product_image",
   "text_card",
   "screenshot",
@@ -54,6 +55,19 @@ export const VISUAL_SOURCES = [
 ] as const;
 export const VisualSourceSchema = z.enum(VISUAL_SOURCES);
 export type VisualSource = z.infer<typeof VisualSourceSchema>;
+
+export type GeneratedVisualSource = (typeof GENERATED_VISUAL_SOURCES)[number];
+export function isGeneratedSource(source: VisualSource): source is GeneratedVisualSource {
+  return (GENERATED_VISUAL_SOURCES as readonly string[]).includes(source);
+}
+export const VideoDirectionSchema = z.object({
+  framing: z.enum(["full_product", "product_detail", "in_context", "person_medium"]),
+  camera: z.enum(["locked", "lateral_slide", "slow_dolly_in", "slow_dolly_out", "orbit_arc", "handheld", "pan", "tilt"]),
+  subjectAction: z.string().max(300), ambientMotion: z.string().max(300),
+  pacing: z.enum(["calm", "steady", "energetic"]),
+});
+export type VideoDirection = z.infer<typeof VideoDirectionSchema>;
+export type CameraMove = VideoDirection["camera"];
 
 /** Movimento aplicado a visuais estáticos para não parecer slideshow. */
 export const MOTIONS = ["none", "ken_burns", "pan", "zoom_in", "crop"] as const;
@@ -86,6 +100,7 @@ const sceneShape = z.object({
   visualDescription: nonEmpty,
   /** Prompt para o provider de vídeo. Vazio quando a cena não usa vídeo gerado. */
   generationPrompt: z.string(),
+  videoDirection: VideoDirectionSchema.optional(),
   shotType: ShotTypeSchema,
   transition: TransitionSchema.optional(),
   visualSource: VisualSourceSchema,
@@ -97,11 +112,11 @@ const sceneShape = z.object({
 type SceneLike = z.infer<typeof sceneShape>;
 
 function checkSceneRules(scene: SceneLike, ctx: z.RefinementCtx): void {
-  if (scene.requiresGeneratedVideo !== (scene.visualSource === "generated_video")) {
+  if (scene.requiresGeneratedVideo !== isGeneratedSource(scene.visualSource)) {
     ctx.addIssue({
       code: "custom",
       path: ["visualSource"],
-      message: 'requiresGeneratedVideo deve ser true se e somente se visualSource = "generated_video"',
+      message: 'requiresGeneratedVideo deve ser true se e somente se visualSource for um tipo gerado',
     });
   }
   if (scene.requiresGeneratedVideo) {

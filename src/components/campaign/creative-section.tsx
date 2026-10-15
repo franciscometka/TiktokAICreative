@@ -7,6 +7,7 @@ import { jobStatusTone } from "./status";
 
 const SOURCE_TONE: Record<VisualSource, Tone> = {
   generated_video: "blue",
+  product_hero: "blue", product_demo: "blue", lifestyle: "blue", presenter: "blue", product_ugc: "blue",
   product_image: "green",
   text_card: "neutral",
   simple_background: "neutral",
@@ -16,6 +17,7 @@ const SOURCE_TONE: Record<VisualSource, Tone> = {
 
 const SOURCE_BAR: Record<VisualSource, string> = {
   generated_video: "bg-blue-500",
+  product_hero: "bg-blue-500", product_demo: "bg-blue-500", lifestyle: "bg-blue-500", presenter: "bg-blue-500", product_ugc: "bg-blue-500",
   product_image: "bg-emerald-500",
   text_card: "bg-zinc-400",
   simple_background: "bg-zinc-300",

@@ -51,7 +51,7 @@ describe("Runway integrado ao pipeline sem internet", () => {
     const resolved = new Map([[uri, await new AssetResolver([assets.rootDir]).resolve(uri)]]);
     const manifest = { ...job.manifest!, assets: job.manifest!.assets.map((a) => a.kind === "generated_video" ? { ...a, uri } : { ...a, uri: null }) };
     const built = buildCompositionProps({ manifest, assets: resolved, urlFor: () => "http://localhost/clip" });
-    expect(built.props.scenes[0]!.video?.src).toBe("http://localhost/clip");
+    expect(built.props.scenes[0]!.video).toEqual({ src: "http://localhost/clip", fit: "contain" });
     expect(built.warnings.some((w) => w.code === "generated_video_placeholder")).toBe(false);
     expect(JSON.stringify(job)).not.toContain("secret-test-key");
     await h.service.regenerateScene(jobId, job.scenes[0]!.sceneId);

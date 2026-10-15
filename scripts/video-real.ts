@@ -1,10 +1,12 @@
+import { pickOutputRatio } from "../src/domain/aspect";
+import { buildMotionPrompt } from "../src/ai/video-prompt";
 /** Validação manual: sem --confirm só lê a imagem e mostra custo. Com --confirm: UM POST pago via pipeline. */
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import { MockCreativePlanner } from "../src/ai/mock-planner";
 import { loadAppConfig, readRunwayApiKey } from "../src/config/env";
-import { RUNWAY_VIDEO } from "../src/config/video-models";
+import { RUNWAY_VIDEO, RUNWAY_RATIOS } from "../src/config/video-models";
 import { RUNWAY_CREDITS_PER_SECOND, RUNWAY_CREDIT_USD } from "../src/config/pricing";
 import { detectImageType } from "../src/domain/upload";
 import { randomId } from "../src/lib/ids";
@@ -21,10 +23,13 @@ async function main() {
   const contentType = detectImageType(bytes);
   if (!contentType || !imageDimensions(bytes, contentType)) throw new Error("A foto não é uma imagem válida.");
   if (Buffer.byteLength(`data:${contentType};base64,${bytes.toString("base64")}`) > 5 * 1024 * 1024) throw new Error("Reduza a foto: limite de 5 MB codificada.");
+  const size = imageDimensions(bytes, contentType)!;
+  const ratio = pickOutputRatio(RUNWAY_RATIOS, size.width / size.height, "full_product").ratio;
+  console.log(`Proporção: ${ratio} · prompt: ${buildMotionPrompt("product_hero", undefined)}`);
   const seconds = 5;
   const credits = seconds * RUNWAY_CREDITS_PER_SECOND;
   const config = loadAppConfig();
-  console.log(`Runway Gen-4 Turbo · ${seconds}s · 720:1280 · ${credits} créditos · estimativa US$${(credits * RUNWAY_CREDIT_USD).toFixed(2)} (≈ R$${(credits * RUNWAY_CREDIT_USD * config.exchangeRate.rate).toFixed(2)})`);
+  console.log(`Runway Gen-4 Turbo · ${seconds}s · ${ratio} · ${credits} créditos · estimativa US$${(credits * RUNWAY_CREDIT_USD).toFixed(2)} (≈ R$${(credits * RUNWAY_CREDIT_USD * config.exchangeRate.rate).toFixed(2)})`);
   console.log("Uma cena; planejamento, áudio e renderer mock. Nenhuma chamada a Claude ou ElevenLabs.");
   if (!values.confirm) { console.log("Dry-run: nenhuma chamada, nenhum arquivo gravado. Use --confirm somente para autorizar UMA geração paga."); return; }
   if (!readRunwayApiKey()) throw new Error("RUNWAYML_API_SECRET não configurada.");
@@ -39,8 +44,8 @@ async function main() {
         for (const creative of result.plan.creatives) {
           creative.scenes = creative.scenes.map((scene, index) => ({ ...scene,
             requiresGeneratedVideo: index === 0, estimatedGenerationSeconds: index === 0 ? Math.min(scene.duration, seconds) : 0,
-            visualSource: index === 0 ? "generated_video" : "product_image",
-            generationPrompt: index === 0 ? "Slow camera push in on the product. Preserve its shape, color and label. Natural studio lighting. No text or new objects." : "",
+            visualSource: index === 0 ? "product_hero" : "product_image",
+            generationPrompt: index === 0 ? buildMotionPrompt("product_hero", undefined) : "",
           }));
         }
         return result;

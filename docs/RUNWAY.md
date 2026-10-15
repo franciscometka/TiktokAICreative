@@ -33,3 +33,19 @@ Primeiro MP4 real (campanha `campaign_f738c092-e087-4158-ac3e-79dbae1a6c4e`, cen
 Conclusão: o ARQUIVO tem ~5s; a impressão de ~1s veio da reprodução (movimento muito sutil depois do 1º segundo e/ou player que não lê o `moov` no fim), não de truncamento.
 
 Agora cada clipe salvo é medido: `requestedDurationSeconds`, `providerReportedDurationSeconds` (Runway: indisponível) e `actualMediaDurationSeconds` ficam em `attempt.media` e em `integrity.json`. Fora da tolerância (max 0,25s; 5%): clipe rejeitado, custo mantido, sem retry, fora do render, erro claro. `video:real` imprime `solicitado / provider / arquivo real`.
+
+
+## Porte de qualidade visual sobre c730d57
+
+O porte usa os arquivos remanescentes da sessão anterior como referência sem importar a arquitetura de avatares/receitas. Os objetos Git ab6a67c e 3edc5be não estavam disponíveis localmente; não houve cherry-pick. Cópia dos arquivos não rastreados originais: C:/Users/franc/Documents/Codex/2026-10-14/referenced-chatgpt-conversation-this-is-an-4/work/previous-session.
+
+- Gen-4 Turbo mantém o contrato e o custo atuais. Escolhe a proporção aceita que minimiza o corte da primeira foto; 9:16 só é preferida se a perda for até 8%. Foto quadrada usa 960:960. Isso reduz crop, mas proporções intermediárias ainda podem perder bordas; não há outpainting.
+- Remotion usa contain em todos os clipes reais: o quadro do vídeo fica inteiro, com espaço nas áreas restantes. A duração da cena continua seguindo o plano; contain preserva o enquadramento, não aumenta o tempo da cena.
+- Fonte única de tipos em creative.ts: product_hero, product_demo, lifestyle, presenter, product_ugc e generated_video legado. Hero usa deslocamento lateral leve; demo usa câmera fixa e ação; lifestyle usa handheld suave. Direction opcional controla câmera/ação/ambiente/ritmo. Planos antigos recebem defaults, substituindo inclusive prompts antigos de aproximação.
+- campaign-plan@1.2.0 adapta 1.0.1 e preserva regras de honestidade. Ainda sem validação com Claude real. Presenter/product_ugc são reservados e rejeitados pelo provider antes do POST; não se promete lip sync/avatar nesta arquitetura.
+- Apenas a primeira foto vai ao image-to-video. Não foi introduzido envio múltiplo, Product Ad nem seleção automática de receitas em economy/high (ou premium).
+- Preservados requestedDurationSeconds, providerReportedDurationSeconds e actualMediaDurationSeconds, inspeção do arquivo salvo, tolerância, custo em falhas, ausência de retry e bloqueio de clipes inválidos no render.
+
+Próximo teste local, sem custo: `npm run video:real -- --image "CAMINHO_ABSOLUTO_DA_FOTO_QUADRADA"` (sem --confirm). Conferir 960:960, prompt lateral e 25 créditos para 5s. O comando apenas imprime a prévia; não cria campanha nem faz chamadas. Repetir com foto vertical se necessário. Avaliação visual real depende de teste pago posterior expressamente autorizado.
+
+Validação do porte: npm run check aprovado (42 arquivos, 492 testes offline); npm run build aprovado após recriar cache gerado do Turbopack. Dry-run com foto local confirmado: 960:960, câmera lateral, 5s/25 créditos, nenhuma chamada. Teste da CLI usa limite de 35s, compatível com o subprocesso de até 30s; houve timeout de 5s quando check e build rodaram juntos.

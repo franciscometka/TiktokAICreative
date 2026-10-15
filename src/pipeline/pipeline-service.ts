@@ -1,3 +1,5 @@
+import { scenePromptFor } from "@/ai/video-prompt";
+import type { GeneratedVisualSource } from "@/domain/creative";
 import {
   PlanningError,
   PlanningUnavailableError,
@@ -846,7 +848,7 @@ export class PipelineService {
   }
 
   private videoRequest(ctx: JobContext, scene: ScenePlan) {
-    return { sceneId: scene.id, prompt: scene.generationPrompt, durationSeconds: scene.estimatedGenerationSeconds,
+    return { sceneId: scene.id, visualSource: scene.visualSource, prompt: scenePromptFor(scene, scene.visualSource as GeneratedVisualSource), durationSeconds: scene.estimatedGenerationSeconds,
       aspectRatio: "9:16" as const, referenceImageUris: ctx.campaign.request.product.images.map((i) => i.uri) };
   }
 

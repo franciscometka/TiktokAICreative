@@ -1,7 +1,9 @@
+import type { VisualSource } from "@/domain/creative";
 import type { CostQuote, MediaResult, ProviderDescriptor, ProviderJobRef, ProviderJobStatus } from "../types";
 
 export interface VideoGenerationRequest {
   sceneId: string;
+  visualSource?: VisualSource;
   prompt: string;
   durationSeconds: number;
   aspectRatio: "9:16";

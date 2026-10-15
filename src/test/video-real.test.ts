@@ -12,12 +12,15 @@ it("dry-run com foto real local não exige chave, não faz chamadas nem cria cam
     encoding: "utf8", env: { ...process.env, RUNWAYML_API_SECRET: "", LLM_PROVIDER: "mock", VIDEO_PROVIDER: "mock", AUDIO_PROVIDER: "mock", DATA_DIR: join(fake.root, "no-data"), VIDEOS_DIR: join(fake.root, "no-videos") }, timeout: 30_000,
   });
   expect(output).toContain("Dry-run");
+  expect(output).toContain("960:960");
+  expect(output).toContain("slides slowly sideways");
+  expect(output).not.toContain("push in");
   expect(output).toContain("25 créditos");
   expect(output).toContain("US$0.25");
   expect(output).not.toContain("Campanha ");
   expect(existsSync(join(fake.root, "no-data"))).toBe(false);
   expect(existsSync(join(fake.root, "no-videos"))).toBe(false);
-});
+}, 35_000);
 describe("argumentos rejeitados antes de autorização", () => {
   it("flag desconhecida nunca é interpretada como confirmação", () => {
     expect(() => execFileSync(process.execPath, ["--import", "tsx", "scripts/video-real.ts", "--confirmed"], { stdio: "pipe", timeout: 30_000 })).toThrow();

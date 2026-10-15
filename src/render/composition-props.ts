@@ -86,7 +86,7 @@ export function buildCompositionProps({ manifest, assets, urlFor, debug = false 
     if (asset.kind === "generated_video") {
       const resolved = asset.uri ? assets.get(asset.uri) : undefined;
       if (resolved?.kind === "file" && resolved.media === "video") return {
-        ...base, kind: "generated_video", image: null, placeholder: null, video: { src: urlFor(resolved.uri) },
+        ...base, kind: "generated_video", image: null, placeholder: null, video: { src: urlFor(resolved.uri), fit: "contain" },
       };
       warnings.push({
         sceneId: asset.sceneId,

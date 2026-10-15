@@ -24,6 +24,7 @@ export const STYLE_HINTS: Record<CreativeStyle, string> = {
 
 export const VISUAL_SOURCE_NAMES: Record<VisualSource, string> = {
   generated_video: "Vídeo IA",
+  product_hero: "Produto em destaque", product_demo: "Produto em uso", lifestyle: "Contexto de uso", presenter: "Apresentador", product_ugc: "Pessoa com produto",
   product_image: "Imagem do produto",
   text_card: "Texto na tela",
   screenshot: "Captura de tela",
