@@ -1,3 +1,4 @@
+import { ProviderDiagnosticSchema } from "./provider-diagnostic";
 import { z } from "zod";
 import { NarrationInfoSchema } from "./audio";
 import { CampaignPlanSchema } from "./campaign";
@@ -127,6 +128,7 @@ export const MediaAttemptSchema = z.object({
   durationSeconds: z.number().nonnegative().optional(),
   isMock: z.boolean(),
   error: z.string().optional(),
+  diagnostic: ProviderDiagnosticSchema.optional(),
   /** Só em tentativas de áudio (Lote 4+): voz, request id, versão, timing e AudioFit. */
   narration: NarrationInfoSchema.optional(),
   createdAt: nonEmpty,

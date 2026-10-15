@@ -54,7 +54,7 @@ async function main() {
   const approval = await service.approve(jobId, { estimateId: estimated.estimate!.id });
   if (approval.kind !== "APPROVED") throw new Error("Orçamento excedido: nenhuma chamada paga. Revise o limite antes de uma nova validação.");
   const outcome = await service.generate(jobId);
-  if (outcome.kind !== "COMPLETED") throw new Error(`Validação terminou em ${outcome.kind}; consulte o job persistido. Não houve retry automático.`);
+  if (outcome.kind !== "COMPLETED") throw new Error(`Validação terminou em ${outcome.kind}: ${outcome.job.error ?? "consulte o job persistido"}. Não houve retry automático.`);
   console.log("Clipe salvo e custo registrado no ledger. Consulte a campanha; o renderer mock não cria MP4 final.");
 }
 main().catch((error: unknown) => { console.error(error instanceof Error ? error.message : "Validação não concluída."); process.exitCode = 1; });

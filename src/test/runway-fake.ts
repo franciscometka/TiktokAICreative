@@ -6,7 +6,7 @@ import { RUNWAY_VIDEO } from "@/config/video-models";
 import { RunwayVideoProvider } from "@/providers/video/runway-video-provider";
 const pricing = PRICING_TABLE.find((p) => p.provider === RUNWAY_VIDEO.provider)!;
 export const MP4 = Buffer.from("000000186674797069736f6d00000200", "hex");
-export async function runwayFixture(options: { failure?: boolean; downloadFailure?: boolean; statusInvalid?: boolean; pending?: boolean; outputUrl?: string; httpError?: boolean } = {}) {
+export async function runwayFixture(options: { failure?: boolean; downloadFailure?: boolean; statusInvalid?: boolean; pending?: boolean; outputUrl?: string; httpError?: boolean; response?: () => Response; transportError?: Error } = {}) {
   const root = await mkdtemp(join(tmpdir(), "runway-"));
   await mkdir(join(root, "uploads"));
   const image = join(root, "uploads", "photo.png");
@@ -14,6 +14,8 @@ export async function runwayFixture(options: { failure?: boolean; downloadFailur
   const calls: { url: string; init?: RequestInit }[] = [];
   const transport: typeof fetch = async (input, init) => {
     const url = String(input); calls.push({ url, init });
+    if (options.transportError) throw options.transportError;
+    if (options.response) return options.response();
     if (options.httpError) throw new Error("secret-test-key");
     if (url.endsWith("/image_to_video")) return Response.json({ id: "task_1" });
     if (url.includes("/tasks/")) return Response.json(options.statusInvalid ? {} : { id: "task_1", status: options.pending ? "RUNNING" : options.failure ? "FAILED" : "SUCCEEDED", cost: { credits: options.failure ? 0 : 25 }, output: [options.outputUrl ?? "https://cdn.runwayml.com/clip.mp4"] });

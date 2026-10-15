@@ -22,7 +22,7 @@ export async function waitForCompletion(
     const status = await getStatus(ref);
     if (status.state === "succeeded") return status;
     if (status.state === "failed") {
-      throw new ProviderError(status.error ?? "Geração falhou", ref.providerJobId, status.billedUsage);
+      throw new ProviderError(status.error ?? "Geração falhou", ref.providerJobId, status.billedUsage, status.diagnostic);
     }
     if (poll < options.maxPolls) await sleep(options.intervalMs);
   }

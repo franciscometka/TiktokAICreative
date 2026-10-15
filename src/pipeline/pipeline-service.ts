@@ -1084,6 +1084,7 @@ export class PipelineService {
         status: "failed",
         active: false,
         error: error.message,
+        diagnostic: error.diagnostic,
       };
     }
 

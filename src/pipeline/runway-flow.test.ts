@@ -95,3 +95,29 @@ describe("Runway integrado ao pipeline sem internet", () => {
   });
 
 });
+
+
+it("diagnóstico HTTP sobrevive à gravação e releitura do job", async () => {
+  const { h, fake, jobId } = await setup({ response: () => Response.json({ message: "Not authorized", code: "unauthorized" }, { status: 401, headers: { "request-id": "req-persisted" } }) });
+  await approve(h, jobId);
+  expect((await h.service.generate(jobId)).kind).toBe("FAILED");
+  const store = new FilePipelineStore(join(fake.root, "data"));
+  const job = await store.getJob(jobId);
+  expect(job.scenes[0]!.attempts[0]).toMatchObject({ providerJobId: null, diagnostic: { kind: "authentication", httpStatus: 401, requestId: "req-persisted", billing: "rejected" } });
+  expect(await h.ledger.list({ jobId })).toHaveLength(0);
+  expect(fake.calls).toHaveLength(1);
+});
+
+
+it("falha da tarefa preserva mensagem, request-id, consumo e diagnóstico no polling", async () => {
+  let calls = 0;
+  const { h, jobId } = await setup({ response: () => ++calls === 1 ? Response.json({ id: "failed-task" }) : Response.json({ id: "failed-task", status: "FAILED", failureCode: "INPUT_REJECTED", failure: "Image rejected secret-test-key", cost: { credits: 0 } }, { headers: { "x-request-id": "req-poll" } }) });
+  await approve(h, jobId);
+  expect((await h.service.generate(jobId)).kind).toBe("FAILED");
+  const job = await h.store.getJob(jobId);
+  expect(job.scenes[0]!.attempts[0]).toMatchObject({ providerJobId: "failed-task", diagnostic: { httpStatus: 200, requestId: "req-poll", providerCode: "INPUT_REJECTED", providerStatus: "FAILED", billing: "confirmed" } });
+  expect(job.error).toContain("Image rejected [redigido]");
+  expect(job.error).not.toContain("Possível cobrança");
+  expect((await h.ledger.list({ jobId })).filter((e) => e.category === "video")).toMatchObject([{ costUsd: 0 }]);
+  expect(calls).toBe(2);
+});

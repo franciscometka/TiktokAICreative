@@ -54,3 +54,25 @@ it("--confirm com transporte totalmente falso executa uma geração via aprovaç
   expect(videoCosts).toMatchObject([{ simulated: false, costUsd: 0.25 }]);
   expect(await readdir(join(dataDir, "jobs"))).toHaveLength(1);
 });
+
+
+it("CLI imprime diagnóstico sanitizado de rejeição com transporte offline", async () => {
+  const fake = await runwayFixture();
+  const hook = join(fake.root, "rejected-transport.mjs");
+  await writeFile(hook, `globalThis.fetch = async () => Response.json({code:'quota_exceeded',message:'Insufficient credits fake-test-key'}, {status:429,headers:{'x-request-id':'req-cli'}});`);
+  let stderr = "";
+  try {
+    execFileSync(process.execPath, ["--import", pathToFileURL(hook).href, "--import", "tsx", "scripts/video-real.ts", "--image", fake.image, "--confirm"], {
+      encoding: "utf8", stdio: "pipe", timeout: 30_000,
+      env: { ...process.env, RUNWAYML_API_SECRET: "fake-test-key", DATA_DIR: join(fake.root, "rejected-data"), UPLOADS_DIR: relative(process.cwd(), join(fake.root, "rejected-uploads")) },
+    });
+    throw new Error("CLI deveria falhar");
+  } catch (error) {
+    stderr = String((error as { stderr?: string }).stderr ?? "");
+  }
+  expect(stderr).toContain("HTTP 429");
+  expect(stderr).toContain("req-cli");
+  expect(stderr).toContain("quota_exceeded");
+  expect(stderr).not.toContain("fake-test-key");
+  expect(stderr).not.toContain("Possível cobrança");
+});

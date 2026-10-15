@@ -1,3 +1,4 @@
+import type { ProviderDiagnostic } from "@/domain/provider-diagnostic";
 import type { ProviderPricing } from "@/domain/cost";
 import type { Usage } from "@/costs/calculate";
 
@@ -20,6 +21,7 @@ export interface ProviderJobStatus {
   providerJobId: string;
   state: ProviderJobState;
   error?: string;
+  diagnostic?: ProviderDiagnostic;
   /** Consumo faturado mesmo em falha (alguns providers cobram tentativas falhas). */
   billedUsage?: Usage;
 }
@@ -48,6 +50,7 @@ export class ProviderError extends Error {
     message: string,
     readonly providerJobId?: string,
     readonly billedUsage?: Usage,
+    readonly diagnostic?: ProviderDiagnostic,
   ) {
     super(message);
   }
