@@ -1,6 +1,7 @@
 import { createAnthropicLlmClient } from "@/ai/create-llm-client";
 import { createUgcProviderFactories } from "@/providers/ugc";
 import { LocalUgcAssetStore } from "@/storage/ugc-asset-store";
+import { googleUgcRuntime } from "@/providers/ugc/google-runtime";
 import { LlmError } from "@/ai/llm-client";
 import { LlmCreativePlanner } from "@/ai/llm-planner";
 import { UnavailablePlanner } from "@/ai/unavailable-planner";
@@ -82,7 +83,7 @@ export function createPipelineService(
     }),
     audioAssets: new LocalAudioAssetStore(config.audioDir),
     ugcAssets: new LocalUgcAssetStore(config.ugcDir),
-    ugcProviders: createUgcProviderFactories({ mockAudioStrategy: config.ugcMockAudioStrategy }),
+    ugcProviders: createUgcProviderFactories({ mockAudioStrategy: config.ugcMockAudioStrategy, google: googleUgcRuntime(config, env) }),
     renderer: createRenderer(config.renderer.id, {
       rendersDir: config.rendersDir,
       allowedAssetRoots: [config.uploadsDir, config.audioDir, config.videosDir, config.ugcDir],

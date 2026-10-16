@@ -10,7 +10,7 @@ import { findUgcSpeechViolations, speechFitsDuration } from "@/ai/ugc-script";
 import { createUgcProviderFactories, type UgcProviderFactories } from "@/providers/ugc";
 import type { UgcReferenceProvider, UgcVideoProvider } from "@/providers/ugc/ugc-providers";
 import type { UgcAssetStore } from "@/storage/ugc-asset-store";
-import { generateUgcReference, generateUgcScene, initialUgcState, UgcPendingError, type UgcFlowDeps } from "./ugc-flow";
+import { generateUgcReference, generateUgcScene, initialUgcState, UgcCostChangedError, UgcPendingError, type UgcFlowDeps } from "./ugc-flow";
 import { generatePresenter, presenterPreview, PresenterPendingError, type PresenterFlowDeps } from "./presenter-flow";
 import type { PresenterProvider } from "@/providers/presenter/presenter-provider";
 import { readFile } from "node:fs/promises";
@@ -237,6 +237,10 @@ export class PipelineService {
     if (!ctx.pricing.ugcVideo) throw new Error("Preset sem preço de vídeo AI UGC.");
     return this.ugcFactories().video(ctx.pricing.ugcVideo, ctx.job.stageModes?.ugc_video ?? "mock");
   }
+  private async runUgcScene(ctx: JobContext, job: GenerationJob, scene: ScenePlan, mode: ExecutionMode, approvedBrl: number) {
+    const rate = (await this.deps.exchangeRates.getUsdBrl()).rate;
+    return generateUgcScene(this.ugcDeps(), { campaign: ctx.campaign, plan: ctx.creative, job, scene, provider: this.ugcVideoProvider(ctx), exchangeRate: rate, ...(mode === "real" ? { maxCostUsd: approvedBrl / rate } : {}) });
+  }
   private ugcDeps(): UgcFlowDeps { return { ...this.deps, slicer: this.deps.presenterAudioSlicer ?? slicePresenterAudio }; }
   /** AI UGC com fala nativa do vídeo: não há narração TTS separada (D79). */
   private nativeUgcSpeech(job: GenerationJob): boolean { return job.ugc?.audioStrategy === "native_speech"; }
@@ -334,8 +338,8 @@ export class PipelineService {
             awaitingReview = true;
             blocked ??= "Aprove a referência: esta será a pessoa apresentando seu produto.";
           }
-          if (current && (current.state === "submitting" || current.state === "pending")) {
-            if (current.providerJobId) unit = `reference:resume:${current.providerJobId}`;
+          if (current && (current.state === "submitting" || current.state === "pending" || current.state === "uncertain")) {
+            if (current.providerJobId && current.state !== "uncertain") unit = `reference:resume:${current.providerJobId}`;
             else blocked ??= "Envio anterior da referência incerto e sem operation ID. Sem reenvio automático; confira o provider antes de continuar.";
           }
           const identityAttempts = state.references.filter(reference => reference.identityId === state.identity.id && reference.identityRevision === state.identity.revision).length;
@@ -370,7 +374,7 @@ export class PipelineService {
         } else if (stage === "ugc_video") {
           if (!approvedReference(job.ugc)) blocked ??= "Nenhuma cena UGC é gerada antes de uma referência aprovada.";
           if (job.ugc?.audioStrategy === "external_lipsync" && !narration) blocked ??= "Execute a narração primeiro (lip sync).";
-          if (pendingUgc?.state === "submitting" && !pendingUgc.providerOperationId) blocked ??= "Envio UGC anterior incerto: sem operation ID, não haverá reenvio automático.";
+          if ((pendingUgc?.state === "submitting" || pendingUgc?.state === "uncertain") && !pendingUgc.providerOperationId) blocked ??= "Envio UGC anterior incerto: sem operation ID, não haverá reenvio automático.";
           if (pendingUgc?.providerOperationId) unit = `${scene.id}:resume:${pendingUgc.providerOperationId}`;
           const ugcVideo = this.ugcVideoProvider(ctx); model = ugcVideo.descriptor.model;
           estimatedBrl = ugcVideo.estimateCost(scene.estimatedGenerationSeconds).costUsd * (await this.deps.exchangeRates.getUsdBrl()).rate;
@@ -637,7 +641,9 @@ export class PipelineService {
           if (stage === "ugc_reference") {
             const provider = this.ugcReferenceProvider(ctx);
             job = await this.stage(job, "ugc_reference"); ctx = { ...ctx, job };
-            const result = await generateUgcReference(this.ugcDeps(), { campaign: ctx.campaign, plan: ctx.creative, job, provider, exchangeRate: (await this.deps.exchangeRates.getUsdBrl()).rate });
+            const rate = (await this.deps.exchangeRates.getUsdBrl()).rate;
+            // REAL: o custo é recalculado no fluxo antes do envio e não pode passar do aprovado nesta cotação.
+            const result = await generateUgcReference(this.ugcDeps(), { campaign: ctx.campaign, plan: ctx.creative, job, provider, exchangeRate: rate, ...(mode === "real" ? { maxCostUsd: quote.estimatedBrl / rate } : {}) });
             job = result.job;
             if (result.reference.state === "failed") { job = { ...job, stageIntents: job.stageIntents?.map(i => i.stage === stage ? { ...i, state: "settled" as const } : i) }; return this.fail(job, result.reference.error ?? "Falha ao gerar a referência UGC"); }
           } else if (stage === "narration") {
@@ -654,7 +660,7 @@ export class PipelineService {
               if (!pending) assertAttemptsAvailable(state.attempts, this.deps.maxAttemptsPerScene);
               job = await this.stage(job, this.sceneStage(scene)); ctx = { ...ctx, job };
               const result = stage === "avatar" ? await this.generatePresenterScene(ctx, scene, !pending && state.attempts.length > 0)
-                : stage === "ugc_video" ? await generateUgcScene(this.ugcDeps(), { campaign: ctx.campaign, plan: ctx.creative, job, scene, provider: this.ugcVideoProvider(ctx), exchangeRate: (await this.deps.exchangeRates.getUsdBrl()).rate })
+                : stage === "ugc_video" ? await this.runUgcScene(ctx, job, scene, mode, quote.estimatedBrl)
                 : await this.generateSceneVideo(ctx, scene, this.videoProvider(ctx));
               job = result.job; if (result.attempt.status === "failed") { job = { ...job, stageIntents: job.stageIntents?.map(i => i.stage === stage ? { ...i, state: "settled" as const } : i) }; return this.fail(job, result.attempt.error); }
               if (mode === "real") break; // Uma cena paga por clique, nunca a próxima automaticamente.
@@ -670,6 +676,11 @@ export class PipelineService {
     } catch (error) {
       const job = await this.getJob(jobId);
       if (error instanceof PresenterPendingError || error instanceof UgcPendingError) return { kind: "WAITING_STAGE", job };
+      if (error instanceof UgcCostChangedError) {
+        // Nada foi enviado: encerra a intenção da etapa e pausa pedindo nova aprovação.
+        await this.withJobLock(jobId, async () => { const current = await this.getJob(jobId); await this.deps.store.saveJob({ ...current, stageIntents: current.stageIntents?.map(i => i.stage === stage ? { ...i, state: "settled" as const } : i) }); });
+        return this.pauseAuthorizedJob(jobId, error.message);
+      }
       return this.fail(job, messageOf(error));
     } finally { this.hybridInvocations.delete(jobId); }
   }

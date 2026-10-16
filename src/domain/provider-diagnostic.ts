@@ -8,5 +8,11 @@ export const ProviderDiagnosticSchema = z.object({
   providerStatus: z.string().max(500).optional(),
   providerMessage: z.string().max(500).optional(),
   billing: z.enum(["rejected", "unconfirmed", "confirmed"]),
+  /**
+   * Fase da operação no provider (Lote 5.4): none = rejeitada antes de existir operação;
+   * created = operação/resposta confirmada e falhou depois (pode haver cobrança);
+   * unknown = timeout/rede após envio (incerto; nunca reenviar automaticamente).
+   */
+  operation: z.enum(["none", "created", "unknown"]).optional(),
 });
 export type ProviderDiagnostic = z.infer<typeof ProviderDiagnosticSchema>;

@@ -23,13 +23,15 @@ function header(seconds: number, size: number, timescaleAt: number): Uint8Array 
   return payload;
 }
 
-export function makeMp4(seconds: number, options: { movieSeconds?: number; videoTrack?: boolean; mdatBytes?: number } = {}): Uint8Array {
+export function makeMp4(seconds: number, options: { movieSeconds?: number; videoTrack?: boolean; mdatBytes?: number; audioTrack?: boolean } = {}): Uint8Array {
   const ftyp = box("ftyp", new TextEncoder().encode("isom\0\0\x02\0isomavc1"));
   const mdat = box("mdat", new Uint8Array(options.mdatBytes ?? 64));
   const mvhd = box("mvhd", header(options.movieSeconds ?? seconds, 100, 12));
   const hdlr = box("hdlr", new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, ...new TextEncoder().encode(options.videoTrack === false ? "soun" : "vide"), ...new Uint8Array(13)]));
   const mdhd = box("mdhd", header(seconds, 24, 12));
-  const moov = box("moov", mvhd, box("trak", box("mdia", mdhd, hdlr)));
+  const soun = box("hdlr", new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, ...new TextEncoder().encode("soun"), ...new Uint8Array(13)]));
+  const audio = options.audioTrack ? [box("trak", box("mdia", box("mdhd", header(seconds, 24, 12)), soun))] : [];
+  const moov = box("moov", mvhd, box("trak", box("mdia", mdhd, hdlr)), ...audio);
   const out = new Uint8Array(ftyp.length + mdat.length + moov.length);
   out.set(ftyp, 0);
   out.set(mdat, ftyp.length);

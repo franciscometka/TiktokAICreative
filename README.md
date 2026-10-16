@@ -4,7 +4,7 @@
 
 Transforma informações de um produto em criativos verticais de venda (MP4 1080x1920) para TikTok Shop, com **estimativa de custo e aprovação humana antes de qualquer geração paga**.
 
-> **Status: Lote 5.3.** Novo modo **AI UGC** (pessoa sintética segurando o produto real, aprovação da referência antes das cenas, fala natural, MOCK completo — ver [docs/AI-UGC.md](docs/AI-UGC.md)). Criação guiada (`/create`), storyboard editável, uma aprovação por job, narração ElevenLabs, cenas e presenter Runway opcionais e render local com Remotion. O fluxo inteiro funciona em MOCK sem API externa e deixa explícito que não produz MP4. Veja [docs/TASKS.md](docs/TASKS.md).
+> **Status: Lote 5.4.** Modo **AI UGC** (pessoa sintética segurando o produto real, aprovação da referência antes das cenas, fala natural). Transporte REAL Google (Gemini + Veo 3.1) implementado e desligado por padrão; ainda sem validação paga — ver [docs/AI-UGC.md](docs/AI-UGC.md). Criação guiada (`/create`), storyboard editável, uma aprovação por job, narração ElevenLabs, cenas e presenter Runway opcionais e render local com Remotion. O fluxo inteiro funciona em MOCK sem API externa e deixa explícito que não produz MP4. Veja [docs/TASKS.md](docs/TASKS.md).
 
 ## Requisitos
 - Node.js 22+ (testado com 24)

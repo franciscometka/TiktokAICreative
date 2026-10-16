@@ -46,7 +46,8 @@ export function UgcReferencePanel({ jobId, ugc, running }: { jobId: string | und
         <div className="space-y-5 p-6">
           <div>
             <p className="text-xs font-semibold tracking-[0.18em] text-emerald-700 uppercase">AI UGC · referência</p>
-            <h2 className="mt-1 text-2xl font-semibold tracking-tight">{ugc.headline}</h2>
+            <h2 className="mt-1 text-2xl font-semibold tracking-tight">{ugc.progressLabel && !reference?.previewUrl ? ugc.progressLabel : ugc.headline}</h2>
+            {ugc.progressLabel && reference?.previewUrl && <p className="mt-1 text-sm text-zinc-500" aria-live="polite">{ugc.progressLabel}</p>}
             <p className="mt-2 text-sm text-zinc-600">Nenhuma cena UGC é gerada antes da sua aprovação. Todas as cenas usam esta mesma pessoa, roupa, ambiente e produto.</p>
           </div>
           <dl className="grid gap-3 text-sm sm:grid-cols-2">

@@ -241,7 +241,7 @@ Pré-requisito já atendido: ledger persistido em `ledger.jsonl`.
 ## AI UGC (Lote 5.3 / D79–D85)
 - Domínio: `domain/ugc.ts` (identidade, referência versionada, estado do job, consistência por cena, perfil de biblioteca futura). `GenerationJob.ugc`, `MediaAttempt.ugc`, `CampaignRequest.creativeMode/ugc`.
 - Config: `config/ugc.ts` (identidade, ambiente, produto-âncora e planos), `config/ugc-models.ts` (Nano Banana/Veo, capacidades, durações e preset → modelo/resolução) e `config/pricing.ts` (fonte/data oficial).
-- Providers: `providers/ugc/` — `UgcReferenceProvider`/`UgcVideoProvider`, mocks, builders puros e adapters futuros `UgcReferenceProviderGoogle`/`UgcVideoProviderVeo` sobre transportes injetados. A factory de runtime REAL continua deliberadamente desligada.
+- Providers: `providers/ugc/` — `UgcReferenceProvider`/`UgcVideoProvider`, mocks, builders puros e adapters `UgcReferenceProviderGoogle`/`UgcVideoProviderVeo` sobre transportes Google reais (`google-http.ts`, `google-transports.ts`, Lote 5.4). A factory só cria REAL com `config/ugc-readiness.ts` completo (opt-in `UGC_REAL_ALLOWED`); scripts `scripts/ugc-*-real.ts` com intenções em `DATA_DIR/ugc-validation`.
 - Roteiro: `ai/ugc-script.ts` (regras de fala), `ai/mock-ugc-planner.ts`, prompt `campaign-plan@1.5.0`.
 - Fluxo: `pipeline/ugc-flow.ts` (`generateUgcReference`, `generateUgcScene`), integrado em `PipelineService` (`quoteStage`/`performHybridStage`, `approveUgcReference`, `regenerateUgcReference`, `updateUgcIdentity`, `resumeAfterUgcDecision`). Ordem `ugc_reference → narration → ugc_video → avatar → scenes → render`.
 - Storage: `storage/ugc-asset-store.ts` (`UGC_DIR`, vN atômico), rota `api/ugc/[campaignId]/[creativeId]/[version]`.

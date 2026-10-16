@@ -19,7 +19,9 @@
     "render:check": "tsx scripts/render-check.ts",
     "tts:real": "tsx scripts/tts-real.ts",
     "video:real": "tsx scripts/video-real.ts",
-    "presenter:real": "tsx scripts/presenter-real.ts"
+    "presenter:real": "tsx scripts/presenter-real.ts",
+    "ugc:reference:real": "tsx scripts/ugc-reference-real.ts",
+    "ugc:video:real": "tsx scripts/ugc-video-real.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",

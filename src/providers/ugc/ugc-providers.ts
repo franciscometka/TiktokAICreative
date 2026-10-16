@@ -26,6 +26,10 @@ export interface UgcImageResult {
   height: number;
   billedUsage: MediaResult["billedUsage"];
   isMock: boolean;
+  /** Request id do provider, quando informado (auditoria). */
+  requestId?: string;
+  /** Metadados não sensíveis (tokens de uso, versão do modelo). */
+  metadata?: Record<string, string | number>;
 }
 
 /** UGCReferenceProvider: gera a imagem pessoa + produto. */

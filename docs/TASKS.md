@@ -233,8 +233,20 @@ Guia: [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md).
 ### Falta para a primeira geração UGC real
 - [x] Escolher modelos oficiais candidatos (Gemini image generation/Nano Banana + Veo 3.1; nunca Flow web)
 - [x] Preços oficiais Veo e referência 1K com fonte/data em `config/pricing.ts`
-- [ ] Implementar transportes HTTP reais de referência e vídeo sobre os contratos já preparados
-- [ ] Política de geração de pessoas (pessoa sintética, sem semelhança com reais) e consentimento para biblioteca
-- [ ] Resolver de asset para enviar a imagem de referência aprovada ao provider
-- [ ] Habilitar capabilities REAL de `ugc_reference`/`ugc_video` com credencial configurada
-- [ ] Script de validação manual com `--confirm` (UMA referência + UMA cena curta)
+- [x] Implementar transportes HTTP reais de referência e vídeo sobre os contratos já preparados (Lote 5.4)
+- [x] Política de pessoas nesta fase: só pessoa sintética adulta, sem celebridade/pessoa real; biblioteca e consentimento seguem desligados
+- [x] Resolver de asset para enviar a foto do produto e a referência aprovada ao provider (`localImageLoader`)
+- [x] Capabilities REAL de `ugc_reference`/`ugc_video` atrás do preflight Google (chave + provider + modelos + opt-in)
+- [x] Scripts de validação manual com `--confirm` (`ugc:reference:real`, `ugc:video:real`)
+- [ ] Executar o Teste A real (1 referência) e revisar visualmente — aguardando instrução
+- [ ] Executar o Teste B real (1 cena Veo Fast 8s 720p 9:16 com áudio nativo) só após aprovar o Teste A
+- [ ] Confirmar no 1º uso real: formato REST de `durationSeconds`/`inlineData` do Veo, redirect do download e usage/cobrança efetivos
+
+## Lote 5.4 — Transporte REAL Google para AI UGC ✅ (sem chamada paga)
+- [x] Config server-side `GOOGLE_AI_API_KEY`, `UGC_PROVIDER`, `UGC_REAL_ALLOWED`, `UGC_REFERENCE_MODEL`, `UGC_VIDEO_MODEL`; readiness/preflight sem segredo
+- [x] `GoogleAiHttpClient` (chave privada, sem retry, timeout, redação) + `GoogleUgcError` tipado A/B/C
+- [x] Gemini `generateContent` (texto + foto inline → imagem 9:16 1K) com request id, usage e custo
+- [x] Veo `predictLongRunning` → operation ID → polling GET → download HTTPS allowlist (redirect sem chave)
+- [x] Intenção durável com hash dos inputs e teto aprovado; estado `uncertain` sem reenvio; custo recalculado antes do submit
+- [x] Duração real (requested/provider/actual), trilha de áudio nativo obrigatória, custo preservado em asset inválido
+- [x] Testes offline: transportes, pipeline e scripts (exatamente um POST por `--confirm`)

@@ -14,5 +14,5 @@ export function assertRealCallsEnabled(paid = true): void {
 }
 export function offlineConfig(config: AppConfig): AppConfig {
   return { ...config, llmProvider: "mock", videoProvider: "mock", audioProvider: "mock", storage: "file",
-    mockPlannerDelayMs: config.mockPlannerDelayMs || 500, renderer: { ...config.renderer, id: "mock" } };
+    mockPlannerDelayMs: config.mockPlannerDelayMs || 500, renderer: { ...config.renderer, id: "mock" }, ugc: { ...config.ugc, realAllowed: false } };
 }

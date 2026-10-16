@@ -31,6 +31,8 @@ export interface UgcReferenceView {
 
 export interface UgcView {
   headline: string;
+  /** Status curto do que está rodando agora (null = nada em andamento). */
+  progressLabel: string | null;
   person: { genderLabel: string; appearance: string; wardrobe: string; environment: UgcEnvironment; environmentLabel: string; visualStyle: string };
   product: { name: string; previewUrl: string | null; preserve: string[] };
   audioStrategy: "native_speech" | "external_lipsync";
@@ -88,6 +90,9 @@ export function buildUgcView(input: {
   const identity = state.identity;
   return {
     headline: "Esta será a pessoa apresentando seu produto",
+    progressLabel: !input.active ? null
+      : job.currentStage === "ugc_video" ? "Gerando cena UGC..."
+      : job.currentStage === "ugc_reference" || current?.state === "submitting" || current?.state === "pending" ? "Gerando apresentador com seu produto..." : null,
     person: {
       genderLabel: identity.gender === "woman" ? "Mulher" : "Homem",
       appearance: identity.appearance,
@@ -104,7 +109,7 @@ export function buildUgcView(input: {
     history: state.references.map(toView).reverse(),
     awaitingApproval,
     canApprove: awaitingApproval && !input.active,
-    canRegenerate: !input.active && !ugcScenesExist && !!current && current.state !== "submitting" && current.state !== "pending",
+    canRegenerate: !input.active && !ugcScenesExist && !!current && current.state !== "submitting" && current.state !== "pending" && current.state !== "uncertain",
     canChangeIdentity: !input.active && !ugcScenesExist,
     environments: UGC_ENVIRONMENTS.map((id) => ({ id, label: UGC_ENVIRONMENT_LABELS[id].label })),
     attemptsUsed: state.references.length,

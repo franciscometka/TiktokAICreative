@@ -1,6 +1,6 @@
 # AI UGC
 
-Modo "AI UGC" (Lote 5.3): foto real do produto → pessoa sintética segurando/apresentando o produto → storyboard → vídeo falado → cenas complementares → render. Hoje tudo é MOCK; os contratos Google estão preparados sem transporte (D79–D85).
+Modo "AI UGC" (Lote 5.3): foto real do produto → pessoa sintética segurando/apresentando o produto → storyboard → vídeo falado → cenas complementares → render. MOCK por padrão; transporte REAL Google implementado no Lote 5.4 e DESLIGADO até opt-in explícito (D79–D87). Nenhuma chamada real foi executada.
 
 ## Fluxo na interface
 1. `/create` → Tipo de vídeo **AI UGC**; envie ao menos uma foto do produto.
@@ -10,14 +10,23 @@ Modo "AI UGC" (Lote 5.3): foto real do produto → pessoa sintética segurando/a
 5. "Esta será a pessoa apresentando seu produto": Aprovar, Gerar outra, Trocar apresentador/ambiente ou Editar conceito.
 6. Após aprovar, o job continua no mesmo teto: cenas UGC → B-roll/imagens → render.
 
-## Arquitetura Google preparada (REAL desligado)
+## Arquitetura Google (REAL opt-in, Lote 5.4)
 
 - Referência: `UgcReferenceProviderGoogle` + `gemini-3.1-flash-image` (Nano Banana 2), edição text+image→image 1K/9:16. A imagem original entra como dado, com instrução explícita para preservar formato, cores, logo, embalagem e proporções.
 - Vídeo: `UgcVideoProviderVeo`, candidatos `veo-3.1-lite-generate-preview`, `veo-3.1-fast-generate-preview` e `veo-3.1-generate-preview`.
 - Econômico = Lite 720p; Equilibrado = Fast 720p; Premium = Fast 1080p, com Standard 1080p disponível na configuração pura.
 - Veo: 4/6/8s; 1080p e uso de `referenceImages` pedem 8s. Lite usa a referência UGC já composta como `image`; Fast/Standard podem acrescentar produto original e outras referências, até três.
 - `seed` é aceito no contrato quando suportado, mas fica registrado como não determinístico.
-- Builders, polling, timeout, download e adapters existem sem transporte de produção. A factory REAL continua lançando indisponibilidade; não existe chave Google nem botão habilitado.
+- Transporte: `providers/ugc/google-http.ts` (HTTP sanitizado, erros A/B/C) e `google-transports.ts` (Gemini `generateContent`, Veo `predictLongRunning` + polling + download). A factory só cria providers REAL com o preflight Google completo.
+- Habilitar (só servidor, `.env.local`): `GOOGLE_AI_API_KEY`, `UGC_PROVIDER=google`, `UGC_REAL_ALLOWED=true`. A chave sozinha não habilita. Na UI: "Gerando apresentador com seu produto..." → "Esta será a pessoa apresentando seu produto" (Aprovar / Gerar outra) → "Gerando cena UGC...".
+
+## Protocolo da primeira validação real (NÃO executado)
+
+1. Teste A — dry-run: `npm run ugc:reference:real -- --image "C:/fotos/produto.jpg"` (sem rede; mostra modelo, custo US$0,067, entradas e readiness).
+2. Teste A — real: o mesmo comando com `--confirm`: exatamente UMA referência; imprime a intenção `ugcref_…`.
+3. Revisão visual do PNG salvo; se correto: `npm run ugc:reference:real -- --approve <id>`.
+4. Teste B — dry-run e depois `npm run ugc:video:real -- --reference <id> --confirm`: UMA cena Veo Fast, 8s, 720p, 9:16, áudio nativo (US$0,80). Polling expirado: `--resume <id> --confirm`, sem novo POST.
+5. Não gerar anúncio inteiro nesta fase.
 
 ## Pricing
 
@@ -37,4 +46,4 @@ Fonte: https://ai.google.dev/gemini-api/docs/pricing, consultada em 2026-10-16. 
 
 ## Falta para o real
 
-Implementar e auditar os transportes HTTP oficiais, resolver URI local para bytes/inlineData, adicionar credencial Google somente no servidor, confirmar política de pessoas/uso comercial, mapear usage/cobrança e CDN reais, criar preflight/capability opt-in e validar manualmente UMA referência + UMA cena curta com nova autorização. Ver [TASKS.md](TASKS.md).
+Executar o protocolo acima com instrução explícita, confirmar no primeiro uso o formato REST efetivo do Veo (`durationSeconds`, `inlineData`), o redirect de download e o usage/cobrança reais, e revisar política de pessoas/uso comercial. Ver [TASKS.md](TASKS.md).

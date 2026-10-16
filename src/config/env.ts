@@ -2,6 +2,7 @@ import { z } from "zod";
 import { DEFAULT_VIDEOS_DIR } from "./video-models";
 import type { CostBudget, ExchangeRate } from "@/domain/cost";
 import { DEFAULT_EXCHANGE_RATE } from "./pricing";
+import { GEMINI_UGC_REFERENCE_MODEL, VEO_3_1_MODELS } from "./ugc-models";
 
 /** Defaults de orçamento quando as variáveis de ambiente não estão definidas. */
 export const DEFAULT_BUDGET: CostBudget = {
@@ -36,6 +37,7 @@ export const DEFAULT_LLM_POLICY = {
 export const LLM_PROVIDER_IDS = ["mock", "anthropic"] as const;
 export const VIDEO_PROVIDER_IDS = ["mock", "runway"] as const;
 export const AUDIO_PROVIDER_IDS = ["mock", "elevenlabs"] as const;
+export const UGC_PROVIDER_IDS = ["mock", "google"] as const;
 
 const emptyToUndefined = (value: unknown) =>
   typeof value === "string" && value.trim() === "" ? undefined : value;
@@ -66,6 +68,11 @@ const EnvSchema = z.object({
   UGC_DIR: z.preprocess(emptyToUndefined, z.string().default("outputs/ugc")),
   /** Estratégia de áudio do UGCVideoProvider MOCK (o real declara a sua). */
   UGC_MOCK_AUDIO_STRATEGY: z.preprocess(emptyToUndefined, z.enum(["native_speech", "external_lipsync"]).default("native_speech")),
+  /** AI UGC REAL (Lote 5.4): provider, opt-in explícito e modelos. A chave fica fora do schema. */
+  UGC_PROVIDER: z.preprocess(emptyToUndefined, z.enum(UGC_PROVIDER_IDS).default("mock")),
+  UGC_REAL_ALLOWED: z.preprocess(emptyToUndefined, z.enum(["true", "false"]).default("false")),
+  UGC_REFERENCE_MODEL: z.preprocess(emptyToUndefined, z.enum([GEMINI_UGC_REFERENCE_MODEL]).default(GEMINI_UGC_REFERENCE_MODEL)),
+  UGC_VIDEO_MODEL: z.preprocess(emptyToUndefined, z.enum([VEO_3_1_MODELS.fast, VEO_3_1_MODELS.lite, VEO_3_1_MODELS.standard]).default(VEO_3_1_MODELS.fast)),
   AUDIO_DIR: z.preprocess(emptyToUndefined, z.string().default(DEFAULT_AUDIO_DIR)),
   TTS_TIMEOUT_MS: z.preprocess(emptyToUndefined, z.coerce.number().int().min(5_000).max(300_000).default(DEFAULT_TTS_TIMEOUT_MS)),
   RENDERER: z.preprocess(emptyToUndefined, z.enum(RENDERER_IDS).default("mock")),
@@ -103,6 +110,8 @@ export interface AppConfig {
   videosDir: string;
   ugcDir: string;
   ugcMockAudioStrategy: "native_speech" | "external_lipsync";
+  /** AI UGC REAL: só habilita com provider google + UGC_REAL_ALLOWED=true + chave no servidor. */
+  ugc: { provider: (typeof UGC_PROVIDER_IDS)[number]; realAllowed: boolean; referenceModel: string; videoModel: string };
   /** Timeout de UMA chamada de TTS (sem retry automático). */
   ttsTimeoutMs: number;
   renderer: {
@@ -149,6 +158,7 @@ export function loadAppConfig(
     videosDir: e.VIDEOS_DIR,
     ugcDir: e.UGC_DIR,
     ugcMockAudioStrategy: e.UGC_MOCK_AUDIO_STRATEGY,
+    ugc: { provider: e.UGC_PROVIDER, realAllowed: e.UGC_REAL_ALLOWED === "true", referenceModel: e.UGC_REFERENCE_MODEL, videoModel: e.UGC_VIDEO_MODEL },
     ttsTimeoutMs: e.TTS_TIMEOUT_MS,
     renderer: {
       id: e.RENDERER,
@@ -176,6 +186,8 @@ const CONFIG_HINTS: Record<string, string> = {
   VIDEO_PROVIDER: 'Use "mock" ou "runway" (não use RUNWAYML).',
   AUDIO_PROVIDER: 'Use "mock" ou "elevenlabs".',
   RENDERER: 'Use "mock" ou "remotion".',
+  UGC_PROVIDER: 'Use "mock" ou "google".',
+  UGC_REAL_ALLOWED: 'Use "true" ou "false" (padrão false).',
 };
 
 /**
@@ -242,4 +254,9 @@ export function readRemotionLicenseKey(env: Record<string, string | undefined> =
 /** Segredo lido só no servidor; nunca entra em AppConfig. */
 export function readRunwayApiKey(env: Record<string, string | undefined> = process.env): string | undefined {
   return env.RUNWAYML_API_SECRET?.trim() || undefined;
+}
+
+/** Chave da Gemini API (Google AI). Só servidor; nunca entra em AppConfig, logs, erros ou UI. */
+export function readGoogleAiApiKey(env: Record<string, string | undefined> = process.env): string | undefined {
+  return env.GOOGLE_AI_API_KEY?.trim() || undefined;
 }

@@ -110,8 +110,11 @@ export type UgcProductAnchor = z.infer<typeof UgcProductAnchorSchema>;
 export const UgcReferenceSchema = z.object({
   id: nonEmpty,
   version: z.string().regex(/^v[1-9]\d{0,3}$/),
-  /** submitting = intenção persistida ANTES do envio; sem ID nunca é reenviada. */
-  state: z.enum(["submitting", "pending", "succeeded", "failed"]),
+  /**
+   * submitting = intenção persistida ANTES do envio; sem ID nunca é reenviada.
+   * uncertain = envio pode ter sido aceito/cobrado sem resposta: bloqueia reenvio até decisão humana.
+   */
+  state: z.enum(["submitting", "pending", "uncertain", "succeeded", "failed"]),
   review: z.enum(["pending", "approved", "rejected"]),
   identityId: nonEmpty,
   identityRevision: z.int().positive(),
@@ -119,6 +122,12 @@ export const UgcReferenceSchema = z.object({
   model: nonEmpty,
   isMock: z.boolean(),
   providerJobId: z.string().optional(),
+  requestId: z.string().max(200).optional(),
+  /** Intenção durável (Lote 5.4): hash dos inputs e teto aprovado para ESTA chamada. */
+  inputHash: z.string().optional(),
+  maxApprovedCostUsd: z.number().nonnegative().optional(),
+  /** Metadados não sensíveis do provider (tokens de uso, MIME, dimensões). */
+  metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
   /** URI relativa (real) ou mock://. Nunca URL temporária do provider. */
   imageUri: z.string().optional(),
   prompt: nonEmpty,
@@ -165,8 +174,18 @@ export type UgcSceneConsistency = z.infer<typeof UgcSceneConsistencySchema>;
 export const UgcVideoOperationSchema = z.object({
   attemptId: nonEmpty,
   sceneId: nonEmpty,
-  state: z.enum(["submitting", "pending", "settled"]),
+  /** uncertain = POST talvez aceito sem operation ID: nunca reenviado automaticamente. */
+  state: z.enum(["submitting", "pending", "uncertain", "settled"]),
   providerOperationId: z.string().optional(),
+  jobId: z.string().optional(),
+  stage: z.literal("ugc_video").optional(),
+  inputHash: z.string().optional(),
+  maxApprovedCostUsd: z.number().nonnegative().optional(),
+  requestId: z.string().max(200).optional(),
+  outcome: z.enum(["succeeded", "failed", "invalid_media"]).optional(),
+  error: z.string().optional(),
+  diagnostic: ProviderDiagnosticSchema.optional(),
+  updatedAt: z.string().optional(),
   provider: nonEmpty,
   model: nonEmpty,
   referenceId: nonEmpty,

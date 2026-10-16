@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { buildUgcReferencePrompt, UGC_ROLE_ACTIONS } from "@/ai/ugc-script";
 import { productAnchor, resolveUgcIdentity } from "@/config/ugc";
 import { buildActualCost, type Usage } from "@/costs/calculate";
@@ -39,6 +40,30 @@ export class UgcReferenceRequiredError extends Error {
 export class UgcPendingError extends Error {
   override name = "UgcPendingError";
 }
+/** O custo recalculado antes do envio passou do aprovado: pausa e pede nova aprovação, sem rede. */
+export class UgcCostChangedError extends Error {
+  override name = "UgcCostChangedError";
+}
+
+/** Hash estável dos inputs da chamada paga (auditoria da intenção; nunca contém segredo). */
+export function ugcInputHash(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 32);
+}
+
+function assertWithinApproved(costUsd: number, maxCostUsd: number | undefined): void {
+  if (maxCostUsd !== undefined && costUsd > maxCostUsd + 1e-9) {
+    throw new UgcCostChangedError(`Custo recalculado US${costUsd.toFixed(4)} acima do aprovado US${maxCostUsd.toFixed(4)}. Revise e aprove novamente; nada foi enviado.`);
+  }
+}
+
+/** Classificação A/B/C do erro do provider (D86). */
+function errorPhase(error: unknown, isMock: boolean): "rejected" | "failed" | "uncertain" {
+  if (!(error instanceof ProviderError) || isMock) return "failed";
+  if (error.billedUsage) return "failed";
+  if (error.diagnostic?.billing === "rejected" || error.diagnostic?.operation === "none") return "rejected";
+  if (error.diagnostic?.operation === "created") return "failed";
+  return "uncertain";
+}
 
 export interface UgcFlowDeps {
   store: PipelineStore;
@@ -69,7 +94,7 @@ function upsertReference(state: UgcJobState, reference: UgcReference): UgcJobSta
 /** Gera UMA referência pessoa + produto. Nunca re-tenta; envio sem ID confirmado nunca é reenviado. */
 export async function generateUgcReference(
   deps: UgcFlowDeps,
-  input: { campaign: Campaign; plan: CreativePlan; job: GenerationJob; provider: UgcReferenceProvider; exchangeRate: number },
+  input: { campaign: Campaign; plan: CreativePlan; job: GenerationJob; provider: UgcReferenceProvider; exchangeRate: number; maxCostUsd?: number },
 ): Promise<{ job: GenerationJob; reference: UgcReference }> {
   let { job } = input;
   const { campaign, plan, provider } = input;
@@ -78,8 +103,11 @@ export async function generateUgcReference(
   if (!state) throw new Error("Job sem estado AI UGC: o produto precisa de ao menos uma imagem.");
   const uncertain = state.references.findLast((r) =>
     r.identityId === state.identity.id && r.identityRevision === state.identity.revision
-    && (r.state === "submitting" || r.state === "pending"));
-  if (uncertain && !uncertain.providerJobId) throw new UgcPendingError("Envio anterior da referência sem ID confirmado; possível cobrança. Nenhum novo envio será feito.");
+    && (r.state === "submitting" || r.state === "pending" || r.state === "uncertain"));
+  if (uncertain && (!uncertain.providerJobId || uncertain.state === "uncertain")) throw new UgcPendingError("Envio anterior da referência sem ID confirmado; possível cobrança. Nenhum novo envio será feito.");
+  const prompt = buildUgcReferencePrompt(state.identity, state.product);
+  const estimatedCostUsd = provider.estimateCost().costUsd;
+  if (!uncertain) assertWithinApproved(estimatedCostUsd, input.maxCostUsd);
 
   const persist = async (reference: UgcReference) => {
     job = { ...job, ugc: upsertReference(job.ugc!, reference), updatedAt: deps.clock() };
@@ -99,9 +127,11 @@ export async function generateUgcReference(
       provider: provider.descriptor.id,
       model: provider.descriptor.model,
       isMock: provider.descriptor.isMock,
-      prompt: buildUgcReferencePrompt(state.identity, state.product),
+      prompt,
       product: state.product,
-      estimatedCostUsd: provider.estimateCost().costUsd,
+      estimatedCostUsd,
+      inputHash: ugcInputHash({ stage: "ugc_reference", jobId: job.id, model: provider.descriptor.model, prompt, productImageId: state.product.imageId, identityId: state.identity.id, identityRevision: state.identity.revision }),
+      ...(input.maxCostUsd === undefined ? {} : { maxApprovedCostUsd: input.maxCostUsd }),
       createdAt: deps.clock(),
     }));
 
@@ -137,13 +167,14 @@ export async function generateUgcReference(
       imageUri = stored.uri;
       version = stored.version;
     }
-    reference = await persist({ ...reference, version, state: "succeeded", imageUri });
+    reference = await persist({ ...reference, version, state: "succeeded", imageUri, ...(result.requestId ? { requestId: result.requestId } : {}), ...(result.metadata ? { metadata: result.metadata } : {}) });
   } catch (error) {
     if (error instanceof ProviderError && error.billedUsage) await recordCost(error.billedUsage);
-    const uncertainNow = error instanceof ProviderError && !error.billedUsage && error.diagnostic?.billing !== "rejected";
-    if (uncertainNow && !provider.descriptor.isMock) {
-      await persist({ ...reference, error: error.message, diagnostic: error.diagnostic });
-      throw new UgcPendingError(error.message);
+    if (errorPhase(error, provider.descriptor.isMock) === "uncertain") {
+      const message = error instanceof Error ? error.message : "Resultado incerto";
+      // Sem ID: incerto, bloqueia reenvio. Com ID: retomável por polling/download, nunca novo submit.
+      await persist({ ...reference, state: reference.providerJobId ? "pending" : "uncertain", error: message, diagnostic: (error as ProviderError).diagnostic });
+      throw new UgcPendingError(message);
     }
     reference = await persist({ ...reference, state: "failed", error: error instanceof Error ? error.message : "Falha ao gerar a referência", diagnostic: error instanceof ProviderError ? error.diagnostic : undefined });
   }
@@ -156,7 +187,7 @@ export async function generateUgcReference(
  */
 export async function generateUgcScene(
   deps: UgcFlowDeps,
-  input: { campaign: Campaign; plan: CreativePlan; job: GenerationJob; scene: ScenePlan; provider: UgcVideoProvider; exchangeRate: number },
+  input: { campaign: Campaign; plan: CreativePlan; job: GenerationJob; scene: ScenePlan; provider: UgcVideoProvider; exchangeRate: number; maxCostUsd?: number },
 ): Promise<{ job: GenerationJob; attempt: MediaAttempt }> {
   let { job } = input;
   const { campaign, plan, scene, provider } = input;
@@ -185,11 +216,17 @@ export async function generateUgcScene(
   };
   const previous = job.scenes.find((s) => s.sceneId === scene.id)?.attempts ?? [];
   const pendingOperation = job.ugcVideoOperations?.findLast(operation => operation.sceneId === scene.id && operation.state !== "settled");
-  if (pendingOperation?.state === "submitting" && !pendingOperation.providerOperationId) {
+  if (pendingOperation && !pendingOperation.providerOperationId && (pendingOperation.state === "submitting" || pendingOperation.state === "uncertain")) {
     throw new UgcPendingError("Envio anterior da cena UGC sem operation ID confirmado; possível cobrança. Nenhum novo envio será feito.");
   }
   const attemptId = pendingOperation?.attemptId ?? deps.ids("attempt");
   const quote = provider.estimateCost(request.durationSeconds);
+  if (!pendingOperation) assertWithinApproved(quote.costUsd, input.maxCostUsd);
+  const intent = {
+    jobId: job.id, stage: "ugc_video" as const,
+    inputHash: ugcInputHash({ stage: "ugc_video", jobId: job.id, model: provider.descriptor.model, sceneId: scene.id, referenceId: reference.id, referenceVersion: reference.version, identityRevision: state.identity.revision, speech: request.speech, action: request.action, seconds: quote.quantity }),
+    ...(input.maxCostUsd === undefined ? {} : { maxApprovedCostUsd: input.maxCostUsd }),
+  };
   const consistency = {
     role: scene.visualSource, referenceId: reference.id, referenceVersion: reference.version, identityId: state.identity.id,
     identityRevision: state.identity.revision, wardrobe: state.identity.wardrobe, environment: state.identity.environment,
@@ -225,7 +262,7 @@ export async function generateUgcScene(
     if (!ref) {
       if (!provider.descriptor.isMock) {
         await persistOperation({
-          attemptId, sceneId: scene.id, state: "submitting", provider: provider.descriptor.id, model: provider.descriptor.model,
+          ...intent, attemptId, sceneId: scene.id, state: "submitting", provider: provider.descriptor.id, model: provider.descriptor.model,
           referenceId: reference.id, referenceVersion: reference.version, requestedDurationSeconds: quote.quantity,
           estimatedCostUsd: quote.costUsd, createdAt: deps.clock(),
         });
@@ -234,7 +271,7 @@ export async function generateUgcScene(
       providerJobId = ref.providerJobId;
       if (!provider.descriptor.isMock) {
         await persistOperation({
-          attemptId, sceneId: scene.id, state: "pending", providerOperationId: ref.providerJobId,
+          ...intent, attemptId, sceneId: scene.id, state: "pending", providerOperationId: ref.providerJobId,
           provider: provider.descriptor.id, model: provider.descriptor.model, referenceId: reference.id,
           referenceVersion: reference.version, requestedDurationSeconds: quote.quantity,
           estimatedCostUsd: quote.costUsd, createdAt: pendingOperation?.createdAt ?? deps.clock(),
@@ -243,32 +280,42 @@ export async function generateUgcScene(
     }
     await waitForCompletion((r) => provider.getStatus(r), ref, deps.pollOptions);
     const result = await provider.downloadResult(ref);
-    await recordCost(result.billedUsage);
+    // Duração faturável: a do provider ou a persistida na intenção (retomada após reinício).
+    const billedSeconds = result.requestedDurationSeconds ?? pendingOperation?.requestedDurationSeconds ?? quote.quantity;
+    await recordCost(!provider.descriptor.isMock && result.billedUsage.seconds === undefined ? { ...result.billedUsage, seconds: billedSeconds } : result.billedUsage);
     if (!provider.descriptor.isMock) await persistOperation({
+      ...intent, outcome: "succeeded", updatedAt: deps.clock(),
       attemptId, sceneId: scene.id, state: "settled", providerOperationId: ref.providerJobId,
       provider: provider.descriptor.id, model: provider.descriptor.model, referenceId: reference.id,
       referenceVersion: reference.version, requestedDurationSeconds: quote.quantity,
       estimatedCostUsd: quote.costUsd, createdAt: pendingOperation?.createdAt ?? deps.clock(),
     });
-    if (result.hasAudio !== consistency.clipHasAudio) throw new Error("O clipe UGC não respeitou a estratégia de áudio declarada; não será usado para evitar áudio duplicado.");
+    // REAL: a trilha de áudio é conferida no MP4 salvo (auditável); mock: pela declaração.
+    if (result.isMock && result.hasAudio !== consistency.clipHasAudio) throw new Error("O clipe UGC não respeitou a estratégia de áudio declarada; não será usado para evitar áudio duplicado.");
     if (result.isMock) {
       attempt = { ...base, providerJobId, status: "succeeded", active: true, assetUri: result.uri, durationSeconds: result.durationSeconds, ugc: consistency };
     } else {
       if (!result.data || !deps.videoAssets) throw new Error("Vídeo UGC real sem dados ou armazenamento indisponível.");
-      const requested = result.requestedDurationSeconds ?? request.durationSeconds;
+      const requested = billedSeconds;
       const stored = await deps.videoAssets.save({ campaignId: campaign.id, sceneId: scene.id, data: result.data, metadata: { attemptId, providerJobId, provider: provider.descriptor.id, model: provider.descriptor.model, ugc: consistency, requestedDurationSeconds: requested } });
       const media = checkClipDuration({ requestedSeconds: requested, providerReportedSeconds: result.providerReportedDurationSeconds, actualSeconds: stored.inspection.durationSeconds, fileComplete: stored.inspection.complete });
       if (media.status !== "valid") throw new InvalidMediaError(clipRejectionMessage(media, scene.order + 1), media, stored.uri);
+      if (consistency.clipHasAudio && !stored.inspection.hasAudioTrack) throw new InvalidMediaError(`Cena ${scene.order + 1}: o MP4 não tem trilha de áudio nativo; não será usado.`, media, stored.uri);
       attempt = { ...base, providerJobId, status: "succeeded", active: true, assetUri: stored.uri, durationSeconds: media.actualMediaDurationSeconds ?? requested, media, ugc: consistency };
     }
   } catch (error) {
     if (error instanceof ProviderError && error.billedUsage) await recordCost(error.billedUsage);
-    if (!provider.descriptor.isMock && error instanceof ProviderError && !error.billedUsage && error.diagnostic?.billing !== "rejected") {
-      throw new UgcPendingError(`${error.message} A operação ${providerJobId ?? "sem ID"} não será reenviada automaticamente.`);
+    const operation = job.ugcVideoOperations?.find(item => item.attemptId === attemptId);
+    const message = error instanceof Error ? error.message : "Falha na cena UGC; sem retry automático.";
+    const diagnostic = error instanceof ProviderError ? error.diagnostic : undefined;
+    if (errorPhase(error, provider.descriptor.isMock) === "uncertain") {
+      // C) incerto: com operation ID segue retomável (polling/download); sem ID, bloqueia reenvio.
+      if (operation) await persistOperation({ ...operation, state: providerJobId ? "pending" : "uncertain", ...(providerJobId ? { providerOperationId: providerJobId } : {}), error: message, diagnostic, updatedAt: deps.clock() });
+      throw new UgcPendingError(`${message} A operação ${providerJobId ?? "sem ID"} não será reenviada automaticamente.`);
     }
-    if (!provider.descriptor.isMock && providerJobId) {
-      const operation = job.ugcVideoOperations?.find(item => item.attemptId === attemptId);
-      if (operation) await persistOperation({ ...operation, state: "settled", providerOperationId: providerJobId });
+    // A) rejeitada antes da operação ou B) falhou depois: desfecho final, nunca reenviado sozinho.
+    if (!provider.descriptor.isMock && operation) {
+      await persistOperation({ ...operation, state: "settled", ...(providerJobId ? { providerOperationId: providerJobId } : {}), outcome: error instanceof InvalidMediaError ? "invalid_media" : "failed", error: message, diagnostic, updatedAt: deps.clock() });
     }
     attempt = {
       ...base, providerJobId: error instanceof ProviderError ? (error.providerJobId ?? providerJobId) : providerJobId, status: "failed", active: false,
