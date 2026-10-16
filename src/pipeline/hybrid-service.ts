@@ -22,6 +22,9 @@ export function hybridCapabilities(config: AppConfig, env: Record<string, string
     narration: available(config.audioProvider === "elevenlabs" && !!readElevenLabsApiKey(env), "elevenlabs", "Configure AUDIO_PROVIDER=elevenlabs e ELEVENLABS_API_KEY no servidor."),
     scenes: available(config.videoProvider === "runway" && !!readRunwayApiKey(env), "runway", "Configure VIDEO_PROVIDER=runway e RUNWAYML_API_SECRET no servidor."),
     avatar: available(!!readRunwayApiKey(env), "runway", "Configure RUNWAYML_API_SECRET no servidor. Avatar real exige também narração real com alignment."),
+    // AI UGC real: contrato Google/Veo preparado, mas sem transporte nesta implementação.
+    ugc_reference: available(false, "google", "Provider AI UGC real ainda não configurado: contrato Google/Veo preparado, sem chamadas nesta versão."),
+    ugc_video: available(false, "google", "Provider AI UGC real ainda não configurado: contrato Google/Veo preparado, sem chamadas nesta versão."),
     render: available(config.renderer.id === "remotion" && browser.available, "remotion", config.renderer.id !== "remotion" ? "Configure RENDERER=remotion no servidor." : browser.detail),
   };
 }
@@ -30,7 +33,7 @@ export function createHybridPipelineService(config: AppConfig, overrides: Partia
   const ids = overrides.ids ?? randomId;
   const mockPlanner = new MockCreativePlanner(ids, config.mockPlannerDelayMs);
   const mockRenderer = new VersionedMockRenderer();
-  const renderer = createRenderer("remotion", { rendersDir: config.rendersDir, allowedAssetRoots: [config.uploadsDir, config.audioDir, config.videosDir], concurrency: config.renderer.concurrency, debug: config.renderer.debug, browserExecutable: config.renderer.browserExecutable, licenseKey: readRemotionLicenseKey(env) });
+  const renderer = createRenderer("remotion", { rendersDir: config.rendersDir, allowedAssetRoots: [config.uploadsDir, config.audioDir, config.videosDir, config.ugcDir], concurrency: config.renderer.concurrency, debug: config.renderer.debug, browserExecutable: config.renderer.browserExecutable, licenseKey: readRemotionLicenseKey(env) });
   const hybrid: NonNullable<PipelineDeps["hybrid"]> = {
     capabilities: hybridCapabilities(config, env),
     planner: mode => mode === "mock" ? mockPlanner : new LlmCreativePlanner(createAnthropicLlmClient({ llmPolicy: { ...config.llmPolicy, maxTransportRetries: 0 } }, env), ids, { maxValidationAttempts: 1 }),

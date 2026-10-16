@@ -47,7 +47,8 @@ export type ExchangeRate = z.infer<typeof ExchangeRateSchema>;
 export const MoneySchema = z.object({ usd: money, brl: money });
 export type Money = z.infer<typeof MoneySchema>;
 
-export const COST_CATEGORIES = ["llm", "video", "audio", "rendering"] as const;
+/** ugc_reference / ugc_scene / broll: AI UGC (Lote 5.3). "audio" = voz; "rendering" = render. */
+export const COST_CATEGORIES = ["llm", "video", "audio", "rendering", "ugc_reference", "ugc_scene", "broll"] as const;
 export const CostCategorySchema = z.enum(COST_CATEGORIES);
 export type CostCategory = z.infer<typeof CostCategorySchema>;
 
@@ -61,6 +62,8 @@ export const COST_OPERATIONS = [
   "video_generation",
   "audio_generation",
   "render",
+  "ugc_reference_generation",
+  "ugc_video_generation",
 ] as const;
 export const CostOperationSchema = z.enum(COST_OPERATIONS);
 export type CostOperation = z.infer<typeof CostOperationSchema>;
@@ -103,6 +106,10 @@ export const CostEstimateSchema = z.object({
   videoCost: MoneySchema,
   audioCost: MoneySchema,
   renderingCost: MoneySchema,
+  /** AI UGC (opcionais: estimativas antigas não têm). */
+  ugcReferenceCost: MoneySchema.optional(),
+  ugcSceneCost: MoneySchema.optional(),
+  brollCost: MoneySchema.optional(),
   /** Soma do custo futuro estimado (o que a aprovação autoriza gastar). */
   estimatedAdditionalUsd: money,
   estimatedAdditionalBrl: money,

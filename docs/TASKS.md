@@ -210,3 +210,28 @@ Guia: [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md).
 - [x] Providers, modelos, ledger, tentativas, versões, diagnóstico e durações em detalhes recolhidos
 - [x] Testes offline do fluxo automático com mocks e transportes falsos; nenhuma chamada paga
 - [ ] AI UGC/Veo real — próximo lote; domínio continua preparado
+
+
+## Lote 5.3 — AI UGC (MOCK completo) ✅
+- [x] Modo criativo "AI UGC" no fluxo simples: produto, imagens, preset, apresentador (auto/mulher/homem), ambiente (auto/escolhido)
+- [x] Etapa "Referência UGC" persistida e versionada (pessoa + produto 9:16, produto-âncora preservado)
+- [x] Aprovação visual com Aprovar / Gerar outra / Trocar apresentador / Trocar ambiente / Editar conceito
+- [x] Nenhuma cena UGC sem referência aprovada; pausa e retomada sob a mesma autorização do job
+- [x] `UgcReferenceProvider` e `UgcVideoProvider` separados do Presenter; mocks completos
+- [x] Cenas ugc_hook/ugc_demo/ugc_benefit/ugc_cta + product_broll; presets com mix diferente
+- [x] Identidade persistida por job + consistência por tentativa; schema de biblioteca futura
+- [x] Estratégias de áudio native_speech / external_lipsync, sem áudio duplicado
+- [x] Fala UGC natural validada (sem experiência inventada, cabe na duração); prompt 1.5.0
+- [x] Storyboard: quem aparece / o que segura / o que fala / o que faz
+- [x] Categorias de custo referência UGC, cena UGC, B-roll; preços placeholder
+- [x] Contrato Google/Veo preparado, sem transporte nem rede
+- [x] Testes offline: referência, aprovação, bloqueio, consistência, cenas, storyboard, presets, orçamento, retomada, regeneração, pipeline MOCK, separação Presenter × UGC, nenhuma chamada fora da autorização
+
+### Falta para a primeira geração UGC real
+- [ ] Escolher e verificar modelo/endpoint OFICIAL (Google Veo/Imagen via API; nunca Flow web) e termos de uso
+- [ ] Preços oficiais com fonte em `config/pricing.ts` (substituir `unassigned-ugc`)
+- [ ] Transporte real de referência e vídeo com intenção durável antes do POST, polling limitado e retomada por ID
+- [ ] Política de geração de pessoas (pessoa sintética, sem semelhança com reais) e consentimento para biblioteca
+- [ ] Resolver de asset para enviar a imagem de referência aprovada ao provider
+- [ ] Habilitar capabilities REAL de `ugc_reference`/`ugc_video` com credencial configurada
+- [ ] Script de validação manual com `--confirm` (UMA referência + UMA cena curta)

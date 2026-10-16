@@ -6,6 +6,7 @@ import type { IdGenerator } from "@/lib/ids";
 import { hydrateCampaignPlan } from "./hydrate";
 import type { CreativePlanner, PlanningRequest, PlanningResult, PlanningWorstCase } from "./planner";
 import { hookCountFor } from "./prompts/campaign-plan.v1";
+import { buildMockUgcCreative } from "./mock-ugc-planner";
 
 /**
  * Planner FALSO e determinístico. Não chama LLM. Textos marcados com [MOCK].
@@ -85,7 +86,9 @@ const mid = (r: { min: number; max: number }) => (r.min + r.max) / 2;
 export function buildMockDraft(request: PlanningRequest): CampaignPlanDraft {
   const { product, styles, creativeCount, settings } = request;
   const creatives = Array.from({ length: creativeCount }, (_, i) =>
-    applyBrief(buildCreative(product, styles[i % styles.length] ?? "ugc", settings), request),
+    request.creativeMode === "ai_ugc"
+      ? buildMockUgcCreative(product, settings, request.ugcAudioStrategy ?? "native_speech")
+      : applyBrief(buildCreative(product, styles[i % styles.length] ?? "ugc", settings), request),
   );
   const hooks: HookDraft[] = Array.from({ length: hookCountFor(creativeCount) }, (_, i) => {
     const style = styles[i % styles.length] ?? "ugc";

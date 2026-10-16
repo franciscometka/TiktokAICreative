@@ -3,7 +3,14 @@ import { MOCK_STAGE_MODES, type ExecutionStage, type ExecutionMode, type JobQuot
 import type { PreflightCheck } from "@/domain/readiness";
 import { withRealStageAuthorization } from "@/config/execution-policy";
 import { RUNWAY_VIDEO } from "@/config/video-models";
-import { SIMPLE_QUALITY_PRESETS } from "@/config/simple-presets";
+import { SIMPLE_QUALITY_PRESETS, SIMPLE_UGC_QUALITY_PRESETS } from "@/config/simple-presets";
+import { approvedReference, isUgcPersonSource, latestReference, UgcRequestSchema, type UgcCharacterIdentity, type UgcEnvironmentChoice, type UgcPresenterChoice } from "@/domain/ugc";
+import { resolveUgcIdentity } from "@/config/ugc";
+import { findUgcSpeechViolations, speechFitsDuration } from "@/ai/ugc-script";
+import { createUgcProviderFactories, type UgcProviderFactories } from "@/providers/ugc";
+import type { UgcReferenceProvider, UgcVideoProvider } from "@/providers/ugc/ugc-providers";
+import type { UgcAssetStore } from "@/storage/ugc-asset-store";
+import { generateUgcReference, generateUgcScene, initialUgcState, UgcPendingError, type UgcFlowDeps } from "./ugc-flow";
 import { generatePresenter, presenterPreview, PresenterPendingError, type PresenterFlowDeps } from "./presenter-flow";
 import type { PresenterProvider } from "@/providers/presenter/presenter-provider";
 import { readFile } from "node:fs/promises";
@@ -50,7 +57,7 @@ import type {
   ProviderPricing,
 } from "@/domain/cost";
 import type { NarrationInfo, NarrationTiming } from "@/domain/audio";
-import { ScenePlanSchema, type CreativePlan, type ScenePlan, type VisualSource } from "@/domain/creative";
+import { isGeneratedSource, ScenePlanSchema, type CreativePlan, type ScenePlan, type VisualSource } from "@/domain/creative";
 import { getSpeakerProfile } from "@/config/voices";
 import {
   CampaignRequestSchema,
@@ -114,6 +121,10 @@ export interface PipelineDeps {
   presenterAudioSlicer?: AudioSlicer;
   videoChoice?: PricingRef;
   videoAssets?: VideoAssetStore;
+  /** AI UGC (Lote 5.3): factories separadas do Presenter e do vídeo genérico. Padrão: mocks. */
+  ugcProviders?: UgcProviderFactories;
+  /** Referências pessoa + produto versionadas (UGC_DIR). */
+  ugcAssets?: UgcAssetStore;
   videoProviderFactory: VideoProviderFactory;
   audioProviderFactory: AudioProviderFactory;
   renderer: Renderer;
@@ -186,6 +197,9 @@ interface JobContext {
  *        → (budget_exceeded → resolveBudgetDecision) → rendering → completed
  *        → regenerateScene (opcional, com checagem de orçamento)
  */
+/** Ordem da autorização única: referência UGC → aprovação → narração → cenas UGC → avatar → cenas → render. */
+const JOB_STAGE_ORDER = ["ugc_reference", "narration", "ugc_video", "avatar", "scenes", "render"] as const;
+
 export class PipelineService {
   private readonly hybridInvocations = new Set<string>();
   private readonly campaignLocks = new KeyedMutex();
@@ -210,6 +224,22 @@ export class PipelineService {
     return this.deps.hybrid ? this.deps.hybrid.video(ctx.pricing.video, ctx.job.stageModes?.scenes ?? "mock") : this.deps.videoProviderFactory(ctx.pricing.video);
   }
   private matchesMode(attempt: MediaAttempt | undefined, mode: ExecutionMode): boolean { return !!attempt && (mode === "mock" || !attempt.isMock); }
+  /** Etapa de cada cena gerada: avatar (Presenter), ugc_video (AI UGC) ou scenes (produto/B-roll). */
+  private sceneStage(scene: Pick<ScenePlan, "visualSource">): "avatar" | "ugc_video" | "scenes" {
+    return scene.visualSource === "presenter" ? "avatar" : isUgcPersonSource(scene.visualSource) ? "ugc_video" : "scenes";
+  }
+  private ugcFactories(): UgcProviderFactories { return this.deps.ugcProviders ?? createUgcProviderFactories(); }
+  private ugcReferenceProvider(ctx: JobContext): UgcReferenceProvider {
+    if (!ctx.pricing.ugcReference) throw new Error("Preset sem preço de referência AI UGC.");
+    return this.ugcFactories().reference(ctx.pricing.ugcReference, ctx.job.stageModes?.ugc_reference ?? "mock");
+  }
+  private ugcVideoProvider(ctx: JobContext): UgcVideoProvider {
+    if (!ctx.pricing.ugcVideo) throw new Error("Preset sem preço de vídeo AI UGC.");
+    return this.ugcFactories().video(ctx.pricing.ugcVideo, ctx.job.stageModes?.ugc_video ?? "mock");
+  }
+  private ugcDeps(): UgcFlowDeps { return { ...this.deps, slicer: this.deps.presenterAudioSlicer ?? slicePresenterAudio }; }
+  /** AI UGC com fala nativa do vídeo: não há narração TTS separada (D79). */
+  private nativeUgcSpeech(job: GenerationJob): boolean { return job.ugc?.audioStrategy === "native_speech"; }
   /** Adoção local explícita dos jobs MOCK de ff176bb, sem recalcular plano/apagar assets. */
   private async adoptOfflineCampaign(campaign: Campaign): Promise<void> {
     if (campaign.executionMode !== "offline") return;
@@ -277,14 +307,17 @@ export class PipelineService {
     const ctx = await this.load(jobId); const { job, creative, campaign } = ctx;
     const mode = job.stageModes?.[stage] ?? "mock";
     const narration = activeAttempt(job.audioAttempts);
-    const scenes = creative.scenes.filter(s => (stage === "avatar" || stage === "scenes") && s.requiresGeneratedVideo && (stage === "avatar" ? s.visualSource === "presenter" : s.visualSource !== "presenter"));
+    const scenes = creative.scenes.filter(s => (stage === "avatar" || stage === "scenes" || stage === "ugc_video") && s.requiresGeneratedVideo && this.sceneStage(s) === stage);
     const scene = regenerate
       ? targetSceneId ? scenes.find(item => item.id === targetSceneId) : scenes[0]
       : scenes.find(s => !this.matchesMode(activeAttempt(job.scenes.find(g => g.sceneId === s.id)?.attempts ?? []), mode));
-    let unit = stage === "narration" ? "narration" : stage === "render" ? "render" : scene?.id ?? "done";
-    const done = !regenerate && (stage === "narration" ? this.matchesMode(narration, mode) : stage === "render" ? job.status === "completed" && !job.renderStale && job.renders.some(r => r.status === "completed" && (mode === "mock" || !r.isMock)) : !scene);
-    let model = stage === "narration" ? ctx.pricing.audio.model : stage === "render" ? ctx.pricing.rendering.model : stage === "avatar" ? RUNWAY_PRESENTER.model : ctx.pricing.video.model;
-    let provider = mode === "mock" ? "mock" : stage === "narration" ? ctx.pricing.audio.provider : stage === "render" ? "remotion" : "runway";
+    let unit = stage === "narration" ? "narration" : stage === "render" ? "render" : stage === "ugc_reference" ? "reference" : scene?.id ?? "done";
+    const nativeSkip = stage === "narration" && this.nativeUgcSpeech(job);
+    const referenceDone = stage === "ugc_reference" && (!job.ugc || !!approvedReference(job.ugc));
+    const done = !regenerate && (nativeSkip || referenceDone || stage !== "ugc_reference" && (stage === "narration" ? this.matchesMode(narration, mode) : stage === "render" ? job.status === "completed" && !job.renderStale && job.renders.some(r => r.status === "completed" && (mode === "mock" || !r.isMock)) : !scene));
+    let model = stage === "narration" ? ctx.pricing.audio.model : stage === "render" ? ctx.pricing.rendering.model : stage === "avatar" ? RUNWAY_PRESENTER.model : stage === "ugc_reference" ? ctx.pricing.ugcReference?.model ?? "—" : stage === "ugc_video" ? ctx.pricing.ugcVideo?.model ?? "—" : ctx.pricing.video.model;
+    let provider = mode === "mock" ? "mock" : stage === "narration" ? ctx.pricing.audio.provider : stage === "render" ? "remotion" : stage === "ugc_reference" || stage === "ugc_video" ? "google" : "runway";
+    let awaitingReview = false;
     let budgetDecision: BudgetExceededDecision | undefined;
     let estimatedBrl = 0; let blocked: string | undefined;
     if (!this.deps.hybrid || !["hybrid", "offline"].includes(campaign.executionMode ?? "")) blocked = "Projeto anterior: crie uma cópia híbrida para continuar.";
@@ -292,7 +325,23 @@ export class PipelineService {
     else if (!internal && this.isJobActive(jobId)) blocked = "Etapa em andamento";
     else if (job.status === "cancelled") blocked = "Job cancelado";
     try {
-      if (stage === "narration") {
+      if (stage === "ugc_reference") {
+        if (job.ugc && !referenceDone) {
+          const state = job.ugc;
+          const latest = latestReference(state);
+          const current = latest && latest.identityId === state.identity.id && latest.identityRevision === state.identity.revision ? latest : undefined;
+          if (current?.state === "succeeded" && current.review === "pending") {
+            awaitingReview = true;
+            blocked ??= "Aprove a referência: esta será a pessoa apresentando seu produto.";
+          }
+          if (current && (current.state === "submitting" || current.state === "pending")) blocked ??= "Envio anterior da referência incerto/pendente. Sem reenvio automático; confira o provider antes de continuar.";
+          if (!awaitingReview && state.references.length >= this.deps.maxAttemptsPerScene) blocked ??= "Limite de tentativas da referência UGC atingido";
+          const reference = this.ugcReferenceProvider(ctx); model = reference.descriptor.model;
+          estimatedBrl = reference.estimateCost().costUsd * (await this.deps.exchangeRates.getUsdBrl()).rate;
+        }
+      } else if (stage === "narration" && nativeSkip) {
+        // Fala nativa do vídeo AI UGC: nenhuma narração TTS a gerar.
+      } else if (stage === "narration") {
         const attempts = job.audioAttempts;
         if (!done && attempts.length >= this.deps.maxAttemptsPerScene) blocked ??= "Limite de tentativas da narração atingido";
         if (!done && job.presenterTasks?.some(t => !t.isMock && (t.state === "succeeded" || t.state === "pending" || t.state === "submitting"))) blocked ??= "A narração está vinculada ao avatar. Crie uma cópia para mudar a fala preservando a sincronização.";
@@ -313,6 +362,11 @@ export class PipelineService {
           }
           if (pending?.state === "submitting" && !pending.providerJobId) blocked ??= "Envio anterior incerto: sem reenvio automático; confira a tarefa no provider.";
           if (pending?.providerJobId) unit = `${scene.id}:resume:${pending.providerJobId}`;
+        } else if (stage === "ugc_video") {
+          if (!approvedReference(job.ugc)) blocked ??= "Nenhuma cena UGC é gerada antes de uma referência aprovada.";
+          if (job.ugc?.audioStrategy === "external_lipsync" && !narration) blocked ??= "Execute a narração primeiro (lip sync).";
+          const ugcVideo = this.ugcVideoProvider(ctx); model = ugcVideo.descriptor.model;
+          estimatedBrl = ugcVideo.estimateCost(scene.estimatedGenerationSeconds).costUsd * (await this.deps.exchangeRates.getUsdBrl()).rate;
         } else {
           const video = this.videoProvider(ctx); model = video.descriptor.model; provider = video.descriptor.id;
           estimatedBrl = video.estimateCost(this.videoRequest(ctx, scene)).costUsd * (await this.deps.exchangeRates.getUsdBrl()).rate;
@@ -323,7 +377,7 @@ export class PipelineService {
         }
       } else if (stage === "render") {
         if (!mediaComplete(job)) blocked ??= "Conclua narração e cenas primeiro.";
-        if (creative.scenes.some(s => s.requiresGeneratedVideo && !this.matchesMode(activeAttempt(job.scenes.find(g => g.sceneId === s.id)?.attempts ?? []), job.stageModes?.[s.visualSource === "presenter" ? "avatar" : "scenes"] ?? "mock")) || !this.matchesMode(narration, job.stageModes?.narration ?? "mock")) blocked ??= "Há etapas selecionadas em REAL ainda não executadas.";
+        if (creative.scenes.some(s => s.requiresGeneratedVideo && !this.matchesMode(activeAttempt(job.scenes.find(g => g.sceneId === s.id)?.attempts ?? []), job.stageModes?.[this.sceneStage(s)] ?? "mock")) || (!this.nativeUgcSpeech(job) && !this.matchesMode(narration, job.stageModes?.narration ?? "mock"))) blocked ??= "Há etapas selecionadas em REAL ainda não executadas.";
         if (narration?.narration?.fit?.action === "review" && !narration.narration.reviewAcceptedAt) blocked ??= "Revise e aceite a duração da narração antes do render.";
       }
     } catch (error) { blocked ??= messageOf(error); }
@@ -332,17 +386,18 @@ export class PipelineService {
     if (done) estimatedBrl = 0;
     if (mode === "mock") estimatedBrl = 0;
     if (!done && !blocked) { const budget = await this.checkJobBudget(ctx, estimatedBrl); if (budget.kind === "BUDGET_EXCEEDED") { budgetDecision = budget; blocked = `Orçamento insuficiente: total R$${budget.newEstimatedTotalBrl.toFixed(2)}; ajuste o orçamento em uma cópia ou use a decisão de orçamento existente.`; } }
-    const category = stage === "narration" ? "audio" : stage === "render" ? "rendering" : "video";
+    const categories: CostCategory[] = stage === "narration" ? ["audio"] : stage === "render" ? ["rendering"] : stage === "ugc_reference" ? ["ugc_reference"] : stage === "ugc_video" ? ["ugc_scene"] : ["video", "broll"];
     const sceneIds = new Set(scenes.map(s => s.id));
-    const entries = (await this.deps.ledger.list({ jobId })).filter(e => e.category === category && (category !== "video" || !!e.sceneId && sceneIds.has(e.sceneId)));
+    const perScene = stage === "scenes" || stage === "avatar" || stage === "ugc_video";
+    const entries = (await this.deps.ledger.list({ jobId })).filter(e => categories.includes(e.category) && (!perScene || !!e.sceneId && sceneIds.has(e.sceneId)));
     const capabilityOk = mode === "mock" || !!this.deps.hybrid?.capabilities[stage].available;
-    const attemptsUsed = stage === "narration" ? job.audioAttempts.length : scene ? job.scenes.find(s => s.sceneId === scene.id)?.attempts.length ?? 0 : 0;
+    const attemptsUsed = stage === "narration" ? job.audioAttempts.length : stage === "ugc_reference" ? job.ugc?.references.length ?? 0 : scene ? job.scenes.find(s => s.sceneId === scene.id)?.attempts.length ?? 0 : 0;
     const attemptsOk = done || attemptsUsed < this.deps.maxAttemptsPerScene;
     const hasRealNarration = !!narration && !narration.isMock && !!narration.assetUri && !!narration.narration?.timingUri;
-    const assetsOk = stage !== "scenes" || mode === "mock" || (!!scene && campaign.request.product.images.length > 0 && !blocked?.toLowerCase().includes("imagem"));
-    const durationLimit = stage === "avatar" ? 30 : 10;
+    const assetsOk = stage === "ugc_reference" ? !!job.ugc || !creative.scenes.some(s => isUgcPersonSource(s.visualSource)) : stage !== "scenes" || mode === "mock" || (!!scene && campaign.request.product.images.length > 0 && !blocked?.toLowerCase().includes("imagem"));
+    const durationLimit = stage === "avatar" ? 30 : stage === "ugc_video" ? 15 : 10;
     const durationOk = !scene || scene.estimatedGenerationSeconds > 0 && scene.estimatedGenerationSeconds <= durationLimit || stage === "render" || stage === "narration";
-    const dependenciesOk = stage === "avatar" ? !!campaign.request.presenterPresetId && (mode === "mock" ? !!narration : hasRealNarration) : stage === "render" ? mediaComplete(job) : true;
+    const dependenciesOk = stage === "ugc_video" ? !!approvedReference(job.ugc) && (job.ugc?.audioStrategy !== "external_lipsync" || !!narration) : stage === "avatar" ? !!campaign.request.presenterPresetId && (mode === "mock" ? !!narration : hasRealNarration) : stage === "render" ? mediaComplete(job) : true;
     const preflight: PreflightCheck[] = [
       { id: "provider", label: "Provider e configuração", ok: capabilityOk, detail: capabilityOk ? `${provider} · ${model} disponível para ${mode.toUpperCase()}.` : this.deps.hybrid?.capabilities[stage].reason ?? "Provider indisponível." },
       { id: "assets", label: "Assets exigidos", ok: assetsOk, detail: stage === "scenes" ? (assetsOk ? "Imagem local e pedido da cena passaram pela validação sem rede." : "A cena REAL exige uma imagem local válida do produto.") : "Nenhum asset de entrada adicional falta nesta etapa." },
@@ -352,16 +407,16 @@ export class PipelineService {
       { id: "budget", label: "Orçamento", ok: !budgetDecision, detail: budgetDecision ? `A execução excede o limite de R$ ${budgetDecision.budgetBrl.toFixed(2)} e exige decisão própria.` : `Estimativa R$ ${estimatedBrl.toFixed(2)}; será rechecada sob lock.` },
       { id: "approval", label: "Aprovação explícita", ok: true, detail: "A confirmação registra cotação, unidade, provider e modelo; autoriza somente uma criação." },
     ];
-    return { regenerate, budgetDecision, stage, mode, unit, token: this.fingerprint({ job, stage, mode, unit, estimatedBrl, model, provider, budgetDecision, regenerate }), provider, model, estimatedBrl, actualBrl: entries.filter(e => !e.simulated).reduce((a,e) => a+e.costBrl,0), simulatedBrl: entries.filter(e => e.simulated).reduce((a,e) => a+e.costBrl,0), ready: !blocked && !done, blocked, done, state: this.isJobActive(jobId) && job.currentStage === stage ? "Em andamento" : done ? "Concluído" : blocked ? "Bloqueado" : "Aguardando ação explícita", preflight };
+    return { awaitingReview, regenerate, budgetDecision, stage, mode, unit, token: this.fingerprint({ job, stage, mode, unit, estimatedBrl, model, provider, budgetDecision, regenerate }), provider, model, estimatedBrl, actualBrl: entries.filter(e => !e.simulated).reduce((a,e) => a+e.costBrl,0), simulatedBrl: entries.filter(e => e.simulated).reduce((a,e) => a+e.costBrl,0), ready: !blocked && !done, blocked, done, state: this.isJobActive(jobId) && job.currentStage === stage ? "Em andamento" : nativeSkip ? "Fala nativa do vídeo UGC" : done ? "Concluído" : awaitingReview ? "Aguardando aprovação visual" : blocked ? "Bloqueado" : "Aguardando ação explícita", preflight };
   }
 
   /** Cotação única do fluxo simples. Conservadora: qualquer etapa REAL reserva o futuro inteiro da estimativa. */
   async quoteJob(jobId: string): Promise<JobQuote> {
     const ctx = await this.load(jobId);
-    const stages = await Promise.all((['narration', 'avatar', 'scenes', 'render'] as const).map(stage => this.quoteStage(jobId, stage)));
+    const stages = await Promise.all(JOB_STAGE_ORDER.map(stage => this.quoteStage(jobId, stage)));
     const entries = (await this.deps.ledger.list({ jobId })).filter(entry => !entry.simulated);
     const actualBrl = roundBrl(entries.reduce((total, entry) => total + entry.costBrl, 0));
-    const hasRealStage = (['narration', 'avatar', 'scenes', 'render'] as const).some(stage => ctx.job.stageModes?.[stage] === 'real');
+    const hasRealStage = JOB_STAGE_ORDER.some(stage => ctx.job.stageModes?.[stage] === 'real');
     const stageEstimate = roundBrl(stages.reduce((total, quote) => total + quote.estimatedBrl, 0));
     // A estimativa histórica do job não incluía o custo específico do provider de
     // presenter. Reserve todas as cenas de avatar ainda não geradas para que o teto
@@ -387,7 +442,7 @@ export class PipelineService {
     else if (ctx.job.status === 'cancelled') blocked = 'O job foi cancelado.';
     else if (!ctx.job.estimate) blocked = 'A estimativa do job ainda não está pronta.';
     else {
-      const unavailable = (['narration', 'avatar', 'scenes', 'render'] as const).find(stage =>
+      const unavailable = JOB_STAGE_ORDER.find(stage =>
         ctx.job.stageModes?.[stage] === 'real' && !this.deps.hybrid?.capabilities[stage].available,
       );
       if (unavailable) blocked = this.deps.hybrid.capabilities[unavailable].reason;
@@ -446,14 +501,15 @@ export class PipelineService {
     return { job: prepared, completion: this.launchJob(jobId, () => this.runAuthorizedJob(jobId)) };
   }
 
-  private async pauseAuthorizedJob(jobId: string, reason: string): Promise<GenerationOutcome> {
+  private async pauseAuthorizedJob(jobId: string, reason: string, waitingFor?: GenerationJob["waitingForStage"]): Promise<GenerationOutcome> {
     const job = await this.withJobLock(jobId, async () => {
       const current = await this.getJob(jobId);
       const next = {
         ...current,
         jobAuthorization: current.jobAuthorization ? { ...current.jobAuthorization, status: 'paused' as const, pausedReason: reason } : undefined,
-        waitingForStage: current.currentStage,
-        error: reason,
+        waitingForStage: waitingFor ?? current.currentStage,
+        // Revisão visual não é erro: o motivo fica só na autorização.
+        error: waitingFor === "ugc_reference" ? undefined : reason,
         updatedAt: this.deps.clock(),
       };
       await this.deps.store.saveJob(next);
@@ -463,13 +519,15 @@ export class PipelineService {
   }
 
   private async runAuthorizedJob(jobId: string): Promise<GenerationOutcome> {
-    for (const stage of ['narration', 'avatar', 'scenes', 'render'] as const) {
+    for (const stage of JOB_STAGE_ORDER) {
       while (true) {
         const job = await this.getJob(jobId);
         const authorization = job.jobAuthorization;
         if (!authorization || authorization.status !== 'active') return this.pauseAuthorizedJob(jobId, 'A autorização do job não está ativa.');
         const quote = await this.quoteStage(jobId, stage, true);
         if (quote.done) break;
+        // AI UGC: referência pronta espera a decisão visual ("Esta será a pessoa…"). O teto continua valendo.
+        if (quote.awaitingReview) return this.pauseAuthorizedJob(jobId, quote.blocked ?? "Aprove a referência UGC.", "ugc_reference");
         if (quote.blocked) return this.pauseAuthorizedJob(jobId, quote.blocked);
         const actual = await this.getJobCostReport(jobId);
         const spentSinceApproval = Math.max(0, actual.actual.totalBrl - authorization.baselineActualBrl);
@@ -560,20 +618,28 @@ export class PipelineService {
             job = { ...job, stageIntents: [...(job.stageIntents ?? []).filter(i => i.stage !== stage || i.state !== "running"), { stage, unit: quote.unit, state: "running", createdAt: this.deps.clock() }] };
             await this.deps.store.saveJob(job); ctx = { ...ctx, job };
           }
-          if (stage === "narration") {
+          if (stage === "ugc_reference") {
+            const provider = this.ugcReferenceProvider(ctx);
+            job = await this.stage(job, "ugc_reference"); ctx = { ...ctx, job };
+            const result = await generateUgcReference(this.ugcDeps(), { campaign: ctx.campaign, plan: ctx.creative, job, provider, exchangeRate: (await this.deps.exchangeRates.getUsdBrl()).rate });
+            job = result.job;
+            if (result.reference.state === "failed") { job = { ...job, stageIntents: job.stageIntents?.map(i => i.stage === stage ? { ...i, state: "settled" as const } : i) }; return this.fail(job, result.reference.error ?? "Falha ao gerar a referência UGC"); }
+          } else if (stage === "narration") {
             assertAttemptsAvailable(job.audioAttempts, this.deps.maxAttemptsPerScene);
             const provider = this.createAudioProvider(ctx); if (!provider.ok) return this.fail(job, provider.error);
             job = await this.stage(job, "narration");
             const result = await this.generateNarration({ ...ctx, job }, provider.provider); job = result.job;
             if (result.attempt.status === "failed") { job = { ...job, stageIntents: job.stageIntents?.map(i => i.stage === stage ? { ...i, state: "settled" as const } : i) }; return this.fail(job, result.attempt.error); }
           } else {
-            for (const scene of ctx.creative.scenes.filter(s => s.requiresGeneratedVideo && (stage === "avatar" ? s.visualSource === "presenter" : s.visualSource !== "presenter") && (!targetSceneId || s.id === targetSceneId))) {
+            for (const scene of ctx.creative.scenes.filter(s => s.requiresGeneratedVideo && this.sceneStage(s) === stage && (!targetSceneId || s.id === targetSceneId))) {
               const state = job.scenes.find(s => s.sceneId === scene.id)!;
               if (!regenerate && this.matchesMode(activeAttempt(state.attempts), mode)) continue;
               const pending = job.presenterTasks?.some(t => t.sceneId === scene.id && (t.state === "pending" || t.state === "submitting")) || job.videoTasks?.some(t => t.sceneId === scene.id && t.state === "pending");
               if (!pending) assertAttemptsAvailable(state.attempts, this.deps.maxAttemptsPerScene);
-              job = await this.stage(job, stage === "avatar" ? "avatar" : "scenes"); ctx = { ...ctx, job };
-              const result = stage === "avatar" ? await this.generatePresenterScene(ctx, scene, !pending && state.attempts.length > 0) : await this.generateSceneVideo(ctx, scene, this.videoProvider(ctx));
+              job = await this.stage(job, this.sceneStage(scene)); ctx = { ...ctx, job };
+              const result = stage === "avatar" ? await this.generatePresenterScene(ctx, scene, !pending && state.attempts.length > 0)
+                : stage === "ugc_video" ? await generateUgcScene(this.ugcDeps(), { campaign: ctx.campaign, plan: ctx.creative, job, scene, provider: this.ugcVideoProvider(ctx), exchangeRate: (await this.deps.exchangeRates.getUsdBrl()).rate })
+                : await this.generateSceneVideo(ctx, scene, this.videoProvider(ctx));
               job = result.job; if (result.attempt.status === "failed") { job = { ...job, stageIntents: job.stageIntents?.map(i => i.stage === stage ? { ...i, state: "settled" as const } : i) }; return this.fail(job, result.attempt.error); }
               if (mode === "real") break; // Uma cena paga por clique, nunca a próxima automaticamente.
             }
@@ -587,12 +653,12 @@ export class PipelineService {
       });
     } catch (error) {
       const job = await this.getJob(jobId);
-      if (error instanceof PresenterPendingError) return { kind: "WAITING_STAGE", job };
+      if (error instanceof PresenterPendingError || error instanceof UgcPendingError) return { kind: "WAITING_STAGE", job };
       return this.fail(job, messageOf(error));
     } finally { this.hybridInvocations.delete(jobId); }
   }
   private async runHybridMocks(jobId: string): Promise<GenerationOutcome> {
-    for (const stage of ["narration", "scenes", "avatar", "render"] as const) {
+    for (const stage of JOB_STAGE_ORDER) {
       const job = await this.getJob(jobId);
       if (job.stageModes?.[stage] === "real" && !(await this.quoteStage(jobId, stage, true)).done) { const next = { ...job, waitingForStage: stage }; await this.deps.store.saveJob(next); return { kind: "WAITING_STAGE", job: next }; }
       const quote = await this.quoteStage(jobId, stage, true);
@@ -626,13 +692,23 @@ export class PipelineService {
    */
   async startPlanning(input: CampaignRequest): Promise<{ campaign: Campaign; completion: Promise<Campaign> }> {
     const { store, clock, ids } = this.deps;
-    const request = CampaignRequestSchema.parse(input);
-    const planningMode = request.stageModes?.planning ?? "mock";
+    const parsed = CampaignRequestSchema.parse(input);
+    const ugcMode = parsed.creativeMode === "ai_ugc";
+    if (ugcMode && parsed.quality === "custom") throw new Error("AI UGC usa os presets Econômico, Equilibrado ou Premium.");
+    if (ugcMode && parsed.product.images.length === 0) throw new Error("AI UGC precisa de ao menos uma foto real do produto para criar a referência pessoa + produto.");
+    const planningMode = parsed.stageModes?.planning ?? "mock";
     if (!this.deps.hybrid) this.assertPlannerAvailable();
-    if (this.deps.hybrid) for (const [stage, mode] of Object.entries(request.stageModes ?? {})) { if (mode === "real" && !this.deps.hybrid.capabilities[stage as ExecutionStage].available) throw new Error(this.deps.hybrid.capabilities[stage as ExecutionStage].reason); }
-    const resolved = request.simpleFlow && request.quality !== "custom"
-      ? SIMPLE_QUALITY_PRESETS[request.quality]
-      : resolveQualitySettings(request.quality, request.customSettings);
+    if (this.deps.hybrid) for (const [stage, mode] of Object.entries(parsed.stageModes ?? {})) { if (mode === "real" && !this.deps.hybrid.capabilities[stage as ExecutionStage].available) throw new Error(this.deps.hybrid.capabilities[stage as ExecutionStage].reason); }
+    const resolved = parsed.quality !== "custom" && (parsed.simpleFlow || ugcMode)
+      ? (ugcMode ? SIMPLE_UGC_QUALITY_PRESETS : SIMPLE_QUALITY_PRESETS)[parsed.quality]
+      : resolveQualitySettings(parsed.quality, parsed.customSettings);
+    // AI UGC: a estratégia de áudio é DECLARADA pelo UGCVideoProvider e fica fixa no projeto.
+    const request: CampaignRequest = ugcMode
+      ? {
+          ...parsed, presenterPresetId: undefined, presenterChoice: undefined,
+          ugc: { ...UgcRequestSchema.parse(parsed.ugc ?? {}), audioStrategy: this.ugcFactories().video(this.deps.pricing.requireOne(resolved.ugc!.video), parsed.stageModes?.ugc_video ?? "mock").audioStrategy },
+        }
+      : parsed;
     const settings = this.deps.videoChoice && request.quality !== "custom" ? { ...resolved, video: this.deps.videoChoice } : resolved;
     await this.assertPlanningFitsBudget(request, settings, 0);
 
@@ -723,20 +799,32 @@ export class PipelineService {
       const ctx = await this.load(jobId);
       if (!['planned', 'cost_estimated', 'awaiting_approval'].includes(ctx.job.status)) throw new Error('Edite o roteiro em uma nova versão depois que a geração começar.');
       if (ctx.job.audioAttempts.length > 0 || ctx.job.scenes.some(scene => scene.attempts.length > 0)) throw new Error('Este job já possui mídia. Crie outra versão para editar o storyboard sem invalidar assets.');
-      const generated = ['generated_video', 'product_hero', 'product_demo', 'lifestyle', 'presenter', 'product_ugc'].includes(input.visualSource);
+      const generated = isGeneratedSource(input.visualSource);
       if (input.visualSource === 'product_ugc') throw new Error('Product UGC ainda está preparado apenas na arquitetura e não pode ser selecionado neste lote.');
+      const ugcMode = ctx.campaign.request.creativeMode === 'ai_ugc';
+      const ugcSource = isUgcPersonSource(input.visualSource) || input.visualSource === 'product_broll';
+      if (!ugcMode && ugcSource) throw new Error('Cenas AI UGC só existem em projetos AI UGC.');
+      if (ugcMode && !ugcSource && !['product_image', 'text_card'].includes(input.visualSource)) throw new Error('No AI UGC use cenas UGC, B-roll, imagem do produto ou texto.');
+      if (ugcMode) {
+        const speech = input.narration.trim();
+        if (this.nativeUgcSpeech(ctx.job) && !isUgcPersonSource(input.visualSource) && speech) throw new Error('Com fala nativa do vídeo, só as cenas UGC têm fala; deixe a fala desta cena vazia.');
+        if (isUgcPersonSource(input.visualSource) && !speech) throw new Error('Cena UGC precisa de uma fala para a câmera.');
+        const violations = findUgcSpeechViolations(speech);
+        if (violations.length) throw new Error(`Fala não permitida: ${violations.join('; ')}.`);
+      }
       if (input.visualSource === 'presenter' && !ctx.campaign.request.presenterPresetId) throw new Error('Escolha um apresentador antes de transformar a cena em apresentação.');
       const scene = ctx.creative.scenes.find(item => item.id === input.sceneId);
       if (!scene) throw new Error('Cena não encontrada.');
+      if (ugcMode && !speechFitsDuration(input.narration, scene.duration)) throw new Error(`Fala longa demais para ${scene.duration}s de cena.`);
       const nextScene = ScenePlanSchema.parse({
         ...scene,
         narration: input.narration.trim(),
         visualDescription: input.visualDescription.trim(),
         visualSource: input.visualSource,
         requiresGeneratedVideo: generated,
-        estimatedGenerationSeconds: generated ? Math.min(scene.duration, Math.max(2, scene.estimatedGenerationSeconds || scene.duration)) : 0,
+        estimatedGenerationSeconds: generated ? (isUgcPersonSource(input.visualSource) ? scene.duration : Math.min(scene.duration, Math.max(2, scene.estimatedGenerationSeconds || scene.duration))) : 0,
         generationPrompt: generated ? (scene.generationPrompt.trim() || `Natural product video. ${input.visualDescription.trim()}`) : '',
-        motion: input.visualSource === 'presenter' ? 'none' : generated ? scene.motion : scene.motion === 'none' ? 'ken_burns' : scene.motion,
+        motion: input.visualSource === 'presenter' || isUgcPersonSource(input.visualSource) ? 'none' : generated ? scene.motion : scene.motion === 'none' ? 'ken_burns' : scene.motion,
       });
       const updatedCreative = {
         ...ctx.creative,
@@ -766,6 +854,97 @@ export class PipelineService {
       await this.deps.store.saveJob(job);
       return this.estimateJob(job.id);
     });
+  }
+
+  // ---------------------------------------------------------------- AI UGC: referência
+
+  /**
+   * "Esta será a pessoa apresentando seu produto": aprova a referência mais recente da identidade
+   * atual. Se o job estava pausado nessa decisão, continua sob a MESMA autorização (teto e ledger).
+   */
+  async approveUgcReference(jobId: string, referenceId: string): Promise<{ job: GenerationJob; resumed: boolean; completion?: Promise<GenerationOutcome> }> {
+    const job = await this.withJobLock(jobId, async () => {
+      this.assertJobIdle(jobId);
+      const current = await this.getJob(jobId);
+      const state = current.ugc;
+      if (!state) throw new Error("Este job não é AI UGC.");
+      const reference = state.references.find(r => r.id === referenceId);
+      if (!reference || reference.state !== "succeeded") throw new Error("Referência não encontrada ou não concluída.");
+      if (reference.identityId !== state.identity.id || reference.identityRevision !== state.identity.revision) throw new Error("A referência é de um apresentador/ambiente anterior; gere outra.");
+      if (latestReference(state)?.id !== reference.id) throw new Error("Aprove a referência mais recente.");
+      const now = this.deps.clock();
+      const next: GenerationJob = {
+        ...current,
+        ugc: { ...state, references: state.references.map(r => r.id === reference.id ? { ...r, review: "approved" as const, reviewedAt: now } : r.review === "approved" ? { ...r, review: "rejected" as const, reviewedAt: now } : r) },
+        updatedAt: now,
+      };
+      await this.deps.store.saveJob(next);
+      return next;
+    });
+    return this.resumeAfterUgcDecision(job);
+  }
+
+  /** "Gerar outra referência": rejeita a atual; a próxima é gerada dentro do teto (nova versão, novo custo). */
+  async regenerateUgcReference(jobId: string): Promise<{ job: GenerationJob; resumed: boolean; completion?: Promise<GenerationOutcome> }> {
+    const job = await this.withJobLock(jobId, async () => {
+      this.assertJobIdle(jobId);
+      const current = await this.getJob(jobId);
+      if (!current.ugc) throw new Error("Este job não é AI UGC.");
+      this.assertNoUgcScenes(current);
+      if (current.ugc.references.length >= this.deps.maxAttemptsPerScene) throw new Error("Limite de tentativas da referência UGC atingido.");
+      const next = { ...current, ugc: this.rejectOpenReferences(current.ugc), updatedAt: this.deps.clock() };
+      await this.deps.store.saveJob(next);
+      return next;
+    });
+    return this.resumeAfterUgcDecision(job);
+  }
+
+  /** "Trocar apresentador" / "Trocar ambiente": nova revisão da identidade; exige nova referência. */
+  async updateUgcIdentity(jobId: string, change: { presenter?: UgcPresenterChoice; environment?: UgcEnvironmentChoice }): Promise<{ job: GenerationJob; resumed: boolean; completion?: Promise<GenerationOutcome> }> {
+    const job = await this.withJobLock(jobId, async () => {
+      this.assertJobIdle(jobId);
+      const ctx = await this.load(jobId);
+      const state = ctx.job.ugc;
+      if (!state) throw new Error("Este job não é AI UGC.");
+      this.assertNoUgcScenes(ctx.job);
+      const base = UgcRequestSchema.parse(ctx.campaign.request.ugc ?? {});
+      const identity: UgcCharacterIdentity = resolveUgcIdentity({
+        id: state.identity.id,
+        revision: state.identity.revision + 1,
+        product: ctx.campaign.request.product,
+        request: {
+          ...base,
+          presenter: change.presenter ?? state.identity.gender,
+          environment: change.environment ?? state.identity.environment,
+          visualStyle: state.identity.visualStyle,
+        },
+      });
+      const next: GenerationJob = { ...ctx.job, ugc: { ...this.rejectOpenReferences(state), identity }, updatedAt: this.deps.clock() };
+      await this.deps.store.saveJob(next);
+      return next;
+    });
+    return this.resumeAfterUgcDecision(job);
+  }
+
+  private assertNoUgcScenes(job: GenerationJob): void {
+    if (job.scenes.some(s => s.attempts.some(a => a.ugc))) throw new Error("Já existem cenas UGC geradas com esta referência. Crie uma cópia do projeto para trocar a pessoa sem perder a consistência.");
+  }
+
+  private rejectOpenReferences(state: NonNullable<GenerationJob["ugc"]>): NonNullable<GenerationJob["ugc"]> {
+    const now = this.deps.clock();
+    return { ...state, references: state.references.map(r => r.review !== "rejected" && r.state === "succeeded" ? { ...r, review: "rejected" as const, reviewedAt: now } : r) };
+  }
+
+  /** Se o job estava pausado na revisão visual, retoma a sequência com a autorização existente. */
+  private async resumeAfterUgcDecision(job: GenerationJob): Promise<{ job: GenerationJob; resumed: boolean; completion?: Promise<GenerationOutcome> }> {
+    if (job.jobAuthorization?.status !== "paused" || job.waitingForStage !== "ugc_reference") return { job, resumed: false };
+    const resumed = await this.withJobLock(job.id, async () => {
+      const current = await this.getJob(job.id);
+      const next: GenerationJob = { ...current, jobAuthorization: current.jobAuthorization ? { ...current.jobAuthorization, status: "active", pausedReason: undefined } : undefined, waitingForStage: undefined, error: undefined, updatedAt: this.deps.clock() };
+      await this.deps.store.saveJob(next);
+      return next;
+    });
+    return { job: resumed, resumed: true, completion: this.launchJob(job.id, () => this.runAuthorizedJob(job.id)) };
   }
 
   private assertPlannerAvailable(): void {
@@ -862,7 +1041,8 @@ export class PipelineService {
         }),
       } : outcome.result.plan;
       const review = reviewCampaignPlan(selectedPlan, settings, pricing, rate);
-      const jobs = review.plan.creatives.map((creative) => ({ ...this.newJob(campaign.id, creative), ...(this.deps.hybrid ? { stageModes: started.request.stageModes ?? { ...MOCK_STAGE_MODES } } : {}) }));
+      const ugcState = started.request.creativeMode === "ai_ugc" ? () => initialUgcState(started, this.deps.ids, started.request.ugc?.audioStrategy ?? "native_speech") : undefined;
+      const jobs = review.plan.creatives.map((creative) => ({ ...this.newJob(campaign.id, creative), ...(this.deps.hybrid ? { stageModes: started.request.stageModes ?? { ...MOCK_STAGE_MODES } } : {}), ...(ugcState ? { ugc: ugcState() } : {}) }));
       for (const job of jobs) await store.saveJob(job);
       campaign = {
         ...transitionCampaign(campaign, "planned", clock()),
@@ -883,6 +1063,7 @@ export class PipelineService {
       product: request.product,
       presenterPresetId: request.presenterPresetId,
       projectName: request.projectName, videoConcept: request.videoConcept, scriptMode: request.scriptMode, script: request.script,
+      creativeMode: request.creativeMode, ugcAudioStrategy: request.ugc?.audioStrategy,
       styles: request.styles,
       creativeCount: request.creativeCount,
       settings,
@@ -902,6 +1083,7 @@ export class PipelineService {
     const rate = (await this.deps.exchangeRates.getUsdBrl()).rate;
     const estimate = estimateCreativeCost({
       reusedNarration: Boolean(activeAttempt(job.audioAttempts)?.narration?.reusedFromJobId),
+      nativeUgcSpeech: this.nativeUgcSpeech(job),
       id: this.deps.ids("estimate"),
       plan: creative,
       settings: campaign.settings,
@@ -1306,6 +1488,7 @@ export class PipelineService {
 
   private async runGeneration(ctx: JobContext): Promise<GenerationOutcome | { kind: "READY_TO_RENDER" }> {
     let job = ctx.job;
+    if (ctx.creative.scenes.some(s => isUgcPersonSource(s.visualSource))) return this.fail(job, "AI UGC usa o fluxo atual com autorização única: gere pelo projeto na interface.");
     const hasPresenter = ctx.creative.scenes.some(s => s.visualSource === "presenter");
     let video: VideoProvider | undefined;
     try {
@@ -1489,9 +1672,9 @@ export class PipelineService {
       kind: "video",
       sceneId: scene.id,
       provider: provider.descriptor,
-      category: "video",
+      category: scene.visualSource === "product_broll" ? "broll" : "video",
       operation: "video_generation",
-      description: `Vídeo IA — cena ${scene.order + 1}`,
+      description: scene.visualSource === "product_broll" ? `B-roll do produto — cena ${scene.order + 1}` : `Vídeo IA — cena ${scene.order + 1}`,
       run: async (attemptId) => {
         const durable = ctx.campaign.executionMode === "hybrid" && !provider.descriptor.isMock;
         const previous = durable ? ctx.job.videoTasks?.findLast(t => t.sceneId === scene.id && (t.state === "pending" || t.state === "submitting")) : undefined;
@@ -1814,9 +1997,11 @@ export class PipelineService {
       let job = ctx.job;
       assertStatus(job, "rendering");
       const sceneVideos = new Map<string, string>();
+      const clipAudioSceneIds = new Set<string>();
       for (const s of job.scenes) {
         const active = activeAttempt(s.attempts);
         if (active?.assetUri) sceneVideos.set(s.sceneId, active.assetUri);
+        if (active?.ugc?.clipHasAudio) clipAudioSceneIds.add(s.sceneId);
       }
       const narration = activeAttempt(job.audioAttempts);
       const timingUri = narration?.narration?.timingUri;
@@ -1829,6 +2014,7 @@ export class PipelineService {
           plan: ctx.creative.scenes.some(s => s.visualSource === "presenter") && timing && narration?.durationSeconds ? alignedPresenterPlan(ctx.creative, timing, narration.durationSeconds) : ctx.creative,
           product: ctx.campaign.request.product,
           sceneVideos,
+          clipAudioSceneIds,
           narration: narration?.assetUri
             ? {
                 uri: narration.assetUri,

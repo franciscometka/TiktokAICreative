@@ -17,6 +17,7 @@ export interface SceneStrategy {
 export function sceneStrategy(source: VisualSource, hasProductImage: boolean): SceneStrategy {
   switch (source) {
     case "product_hero": case "product_demo": case "lifestyle": case "presenter": case "product_ugc":
+    case "ugc_hook": case "ugc_demo": case "ugc_benefit": case "ugc_cta": case "product_broll":
     case "generated_video":
       return { kind: "generated_video" };
     case "product_image":

@@ -78,7 +78,7 @@ describe("summarizeActualCosts — regenerações", () => {
       cost({ id: "2", category: "audio", costBrl: 0.08 }),
     ];
     const s = summarizeActualCosts(entries);
-    expect(s.byCategoryBrl).toEqual({ llm: 0.42, video: 0, audio: 0.08, rendering: 0 });
+    expect(s.byCategoryBrl).toEqual({ llm: 0.42, video: 0, audio: 0.08, rendering: 0, ugc_reference: 0, ugc_scene: 0, broll: 0 });
     expect(s.totalBrl).toBe(0.5);
     expect(s.discardedBrl).toBe(0);
   });

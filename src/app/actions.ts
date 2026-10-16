@@ -4,6 +4,9 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import {
   authorizeAndRunJob,
+  approveUgcReference,
+  regenerateUgcReference,
+  updateUgcIdentity,
   regenerateStoryboardScene,
   updateStoryboardScene,
   executeHybridStage, configureHybridStage, executeHybridPlanning,
@@ -20,6 +23,7 @@ import {
   type GenerationResultView,
 } from "@/application/campaign-actions";
 import { getRuntime } from "@/server/runtime";
+import { UgcEnvironmentChoiceSchema, UgcPresenterChoiceSchema } from "@/domain/ugc";
 
 /**
  * Server Actions FINAS: validam o formato dos argumentos (são endpoints públicos) e delegam
@@ -117,12 +121,12 @@ export async function executeStageAction(input: unknown): Promise<ActionResult<{
 }
 
 export async function regenerateStoryboardSceneAction(input: unknown): Promise<ActionResult<{ started: boolean }>> {
-  const parsed = z.object({ jobId: id, sceneId: id, stage: z.enum(["scenes", "avatar"]), token: z.string().length(64) }).safeParse(input);
+  const parsed = z.object({ jobId: id, sceneId: id, stage: z.enum(["scenes", "avatar", "ugc_video"]), token: z.string().length(64) }).safeParse(input);
   if (!parsed.success) return badInput();
   return regenerateStoryboardScene(getRuntime().deps, parsed.data);
 }
 export async function configureStageAction(input: unknown): Promise<ActionResult<{ saved: boolean }>> {
-  const parsed = z.object({ jobId: id, stage: z.enum(["narration", "scenes", "avatar", "render"]), mode: z.enum(["mock", "real"]) }).safeParse(input);
+  const parsed = z.object({ jobId: id, stage: z.enum(["narration", "scenes", "avatar", "ugc_reference", "ugc_video", "render"]), mode: z.enum(["mock", "real"]) }).safeParse(input);
   if (!parsed.success) return badInput();
   return configureHybridStage(getRuntime().deps, parsed.data);
 }
@@ -152,4 +156,24 @@ export async function updateStoryboardSceneAction(input: unknown): Promise<Actio
   const result = await updateStoryboardScene(getRuntime().deps, parsed.data);
   if (result.ok) revalidatePath("/campaigns");
   return result;
+}
+
+// ---------------------------------------------------------------- AI UGC (Lote 5.3)
+
+export async function approveUgcReferenceAction(input: unknown): Promise<ActionResult<{ resumed: boolean }>> {
+  const parsed = z.object({ jobId: id, referenceId: id }).safeParse(input);
+  if (!parsed.success) return badInput();
+  return approveUgcReference(getRuntime().deps, parsed.data);
+}
+
+export async function regenerateUgcReferenceAction(input: unknown): Promise<ActionResult<{ resumed: boolean }>> {
+  const parsed = z.object({ jobId: id }).safeParse(input);
+  if (!parsed.success) return badInput();
+  return regenerateUgcReference(getRuntime().deps, parsed.data);
+}
+
+export async function updateUgcIdentityAction(input: unknown): Promise<ActionResult<{ resumed: boolean }>> {
+  const parsed = z.object({ jobId: id, presenter: UgcPresenterChoiceSchema.optional(), environment: UgcEnvironmentChoiceSchema.optional() }).safeParse(input);
+  if (!parsed.success) return badInput();
+  return updateUgcIdentity(getRuntime().deps, parsed.data);
 }

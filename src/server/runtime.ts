@@ -41,6 +41,7 @@ export function getRuntime(): Runtime {
         uploads: new LocalUploadStore(config.uploadsDir),
         rendersDir: config.rendersDir,
         audioDir: config.audioDir,
+        ugcDir: config.ugcDir,
         videosDir: config.videosDir,
         audioProvider: config.audioProvider,
         offlineOnly: false,

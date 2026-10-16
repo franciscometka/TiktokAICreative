@@ -1,3 +1,4 @@
+import { UgcEnvironmentChoiceSchema, UgcPresenterChoiceSchema, UgcRequestSchema, type UgcRequest } from "@/domain/ugc";
 import { StageModesSchema, type StageModes } from "@/domain/execution";
 import { z } from "zod";
 import { AvatarPresetSchema, type AvatarPreset } from "@/domain/presenter";
@@ -53,6 +54,10 @@ export interface CampaignFormInput {
   speakerProfileId?: string;
   presenterPresetId?: string;
   presenterChoice?: "woman" | "man" | "none";
+  /** Modo principal (Lote 5.3): "standard" (padrão) ou "ai_ugc". */
+  creativeMode?: "standard" | "ai_ugc";
+  ugcPresenter?: "auto" | "woman" | "man";
+  ugcEnvironment?: string;
   budget: { maxCostPerCreativeBrl: string; maxCostPerCampaignBrl: string; allowOverBudget: boolean };
 }
 
@@ -83,6 +88,8 @@ export interface ParsedCampaignForm {
   speakerProfileId: string;
   presenterPresetId?: AvatarPreset;
   presenterChoice?: "woman" | "man" | "none";
+  creativeMode: "standard" | "ai_ugc";
+  ugc?: UgcRequest;
   budget: { maxCostPerCreativeBrl: number; maxCostPerCampaignBrl: number; allowOverBudget: boolean };
 }
 
@@ -164,6 +171,9 @@ const FormSchema = z
     }),
     presenterPresetId: z.preprocess(v => v === "" ? undefined : v, AvatarPresetSchema.optional()),
     presenterChoice: z.enum(["woman", "man", "none"]).optional(),
+    creativeMode: z.enum(["standard", "ai_ugc"]).optional(),
+    ugcPresenter: UgcPresenterChoiceSchema.optional(),
+    ugcEnvironment: z.preprocess(v => v === "" ? undefined : v, UgcEnvironmentChoiceSchema.optional()),
     speakerProfileId: z
       .string()
       .optional()
@@ -226,10 +236,13 @@ export function parseCampaignForm(input: unknown): Result<ParsedCampaignForm, Fi
     styles,
     quality: f.quality as PresetQuality,
     speakerProfileId: f.speakerProfileId || DEFAULT_SPEAKER_PROFILE_ID,
-    presenterPresetId: f.simpleFlow
+    // AI UGC não usa o avatar Presenter: pessoa + produto vêm da referência UGC.
+    presenterPresetId: f.creativeMode === "ai_ugc" ? undefined : f.simpleFlow
       ? f.presenterChoice === "none" ? undefined : f.presenterChoice === "man" ? "game-character-man" : "influencer"
       : f.presenterPresetId,
-    presenterChoice: f.presenterChoice,
+    presenterChoice: f.creativeMode === "ai_ugc" ? undefined : f.presenterChoice,
+    creativeMode: f.creativeMode ?? "standard",
+    ugc: f.creativeMode === "ai_ugc" ? UgcRequestSchema.parse({ presenter: f.ugcPresenter ?? "auto", environment: f.ugcEnvironment ?? "auto" }) : undefined,
     budget: {
       // Os dois foram validados como obrigatórios acima.
       maxCostPerCreativeBrl: f.budget.maxCostPerCreativeBrl ?? 0,
@@ -266,6 +279,7 @@ export function toCampaignRequest(form: ParsedCampaignForm, images: readonly Pro
     speakerProfileId: form.speakerProfileId,
     presenterPresetId: form.presenterPresetId,
     presenterChoice: form.presenterChoice,
+    ...(form.creativeMode === "ai_ugc" ? { creativeMode: "ai_ugc" as const, ugc: form.ugc } : {}),
   };
 }
 
@@ -297,6 +311,9 @@ export function formInputFromRequest(request: CampaignRequest): CampaignFormInpu
     presenterChoice: request.simpleFlow
       ? request.presenterChoice ?? (request.presenterPresetId === "game-character-man" ? "man" : request.presenterPresetId ? "woman" : "none")
       : request.presenterChoice,
+    creativeMode: request.creativeMode ?? "standard",
+    ugcPresenter: request.ugc?.presenter,
+    ugcEnvironment: request.ugc?.environment,
     budget: {
       maxCostPerCreativeBrl: toInput(request.budget.maxCostPerCreativeBrl),
       maxCostPerCampaignBrl: toInput(request.budget.maxCostPerCampaignBrl),

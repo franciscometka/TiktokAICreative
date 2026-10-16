@@ -1,5 +1,7 @@
 import type { JobQuote, StageQuote, StageCapabilities } from "@/domain/execution";
 import { jobWorkflow, type RecommendedAction, type WorkflowStep } from "./job-workflow";
+import { buildUgcView, ugcSceneInfo, type UgcSceneInfo, type UgcView } from "./ugc-view";
+import { isUgcPersonSource } from "@/domain/ugc";
 import { presenterSceneViews, type PresenterSceneView } from "./presenter-view";
 import { claudeModelName } from "@/config/llm-models";
 import type { ActualCostSummary } from "@/costs/ledger";
@@ -66,6 +68,8 @@ export interface SceneView {
   videoUrl?: string;
   simulated: boolean;
   regenerationQuote?: StageQuote;
+  /** AI UGC: quem aparece, o que segura, o que fala e o que faz. */
+  ugc?: UgcSceneInfo;
 }
 
 export interface PresetAdjustmentView {
@@ -121,6 +125,8 @@ export interface CreativeView {
   hybrid?: boolean;
   nextAction?: RecommendedAction;
   workflow?: WorkflowStep[];
+  /** AI UGC (Lote 5.3): personagem, produto e referência pessoa + produto para aprovação visual. */
+  ugc?: UgcView;
   offline?: boolean;
   presenters?: PresenterSceneView[];
   number: number;
@@ -256,9 +262,10 @@ function sceneViews(creative: CreativePlan, campaignId: string, job: GenerationJ
       onScreenText: scene.onScreenText,
       visualDescription: scene.visualDescription,
       generationPrompt: scene.generationPrompt,
-      status: attempt ? "ready" : latest?.status === "failed" ? "failed" : job?.currentStage === (scene.visualSource === "presenter" ? "avatar" : "scenes") ? "generating" : "planned",
+      status: attempt ? "ready" : latest?.status === "failed" ? "failed" : job?.currentStage === (scene.visualSource === "presenter" ? "avatar" : isUgcPersonSource(scene.visualSource) ? "ugc_video" : "scenes") ? "generating" : "planned",
       videoUrl: attempt && !attempt.isMock && version ? `/api/video/${encodeURIComponent(campaignId)}/${encodeURIComponent(creative.id)}/${encodeURIComponent(scene.id)}/${encodeURIComponent(version)}` : undefined,
       simulated: attempt?.isMock ?? false,
+      ugc: ugcSceneInfo(scene, job),
     };
   });
 }
@@ -323,6 +330,10 @@ function creativeView(
     scenes: sceneViews(creative, campaign.id, job),
     presenters: presenterSceneViews(campaign, creative, job),
     workflow: jobWorkflow(campaign, creative, job, active),
+    ugc: buildUgcView({
+      campaign, creativeId: creative.id, job, active,
+      productPreviewUrl: job?.ugc ? imagePreviewUrl(campaign.request.product.id, job.ugc.product.imageId) ?? null : null,
+    }),
     offline: campaign.executionMode === "offline",
     adjustment: presetAdjustment(review, campaign.settings.label, campaign.plannerId),
     warnings: review?.final.warnings.map((w) => w.message) ?? [],

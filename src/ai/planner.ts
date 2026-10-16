@@ -1,4 +1,5 @@
 import type { CampaignPlan } from "@/domain/campaign";
+import type { CreativeMode, UgcAudioStrategy } from "@/domain/ugc";
 import type { CreativeStyle } from "@/domain/creative";
 import type { ProductInput } from "@/domain/product";
 import type { QualitySettings } from "@/domain/quality";
@@ -14,6 +15,9 @@ export interface PlanningRequest {
   videoConcept?: string;
   scriptMode?: "manual" | "generate";
   script?: string;
+  /** AI UGC (Lote 5.3): roteiro de creator com cenas ugc_* e estratégia de áudio do provider. */
+  creativeMode?: CreativeMode;
+  ugcAudioStrategy?: UgcAudioStrategy;
   settings: QualitySettings;
 }
 

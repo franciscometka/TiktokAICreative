@@ -5,7 +5,7 @@ import { configureStageAction, executeStageAction, executePlanningStageAction } 
 import type { StageCapabilities, StageQuote, ExecutionMode } from "@/domain/execution";
 import { formatBrl } from "@/lib/money";
 import { buttonClasses, Panel, Badge } from "../ui/primitives";
-export const STAGE_LABELS = { planning: "Roteiro e planejamento", narration: "Narração", scenes: "Cenas de vídeo", avatar: "Presenter / avatar", render: "Render final" };
+export const STAGE_LABELS = { planning: "Roteiro e planejamento", narration: "Narração", scenes: "Cenas de vídeo", avatar: "Presenter / avatar", ugc_reference: "Referência AI UGC", ugc_video: "Cenas AI UGC", render: "Render final" };
 export function StageExecutionPanel({ jobId, campaignId, quotes, capabilities }: { jobId?: string; campaignId: string; quotes: StageQuote[]; capabilities: StageCapabilities }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();

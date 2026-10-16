@@ -4,6 +4,7 @@ import { ClipDurationCheckSchema } from "./media-integrity";
 import { z } from "zod";
 import { AvatarPresetSchema, PresenterTaskSchema, PresenterAudioSchema } from "./presenter";
 import { NarrationInfoSchema } from "./audio";
+import { CreativeModeSchema, UgcJobStateSchema, UgcRequestSchema, UgcSceneConsistencySchema } from "./ugc";
 import { CampaignPlanSchema } from "./campaign";
 import {
   BudgetExceededDecisionSchema,
@@ -73,6 +74,10 @@ export const CampaignRequestSchema = z.object({
   speakerProfileId: z.string().optional(),
   presenterPresetId: AvatarPresetSchema.optional(),
   presenterChoice: z.enum(["woman", "man", "none"]).optional(),
+  /** Modo principal. Ausente = "standard" (campanhas anteriores). */
+  creativeMode: CreativeModeSchema.optional(),
+  /** Só com creativeMode = "ai_ugc": apresentador, ambiente e estilo visual. */
+  ugc: UgcRequestSchema.optional(),
 });
 export type CampaignRequest = z.infer<typeof CampaignRequestSchema>;
 
@@ -154,6 +159,8 @@ export const MediaAttemptSchema = z.object({
   rejectedAssetUri: z.string().optional(),
   /** Só em tentativas de áudio (Lote 4+): voz, request id, versão, timing e AudioFit. */
   narration: NarrationInfoSchema.optional(),
+  /** Cena AI UGC: referência, identidade, roupa, ambiente, produto e estratégia de áudio usados. */
+  ugc: UgcSceneConsistencySchema.optional(),
   createdAt: nonEmpty,
 });
 export type MediaAttempt = z.infer<typeof MediaAttemptSchema>;
@@ -193,7 +200,9 @@ export const GenerationJobSchema = z.object({
   stageRevision: z.number().int().nonnegative().optional(),
   waitingForStage: ExecutionStageSchema.optional(),
   stageApprovals: z.array(z.object({ mode: z.enum(["mock", "real"]).optional(), provider: z.string().optional(), model: z.string().optional(), stage: ExecutionStageSchema, unit: z.string(), quoteToken: z.string(), estimatedBrl: z.number().nonnegative(), approvedAt: z.string() })).optional(),
-  currentStage: z.enum(["narration", "scenes", "avatar", "render"]).optional(),
+  currentStage: z.enum(["narration", "scenes", "avatar", "ugc_reference", "ugc_video", "render"]).optional(),
+  /** AI UGC: identidade do personagem, produto-âncora e referências versionadas (pessoa + produto). */
+  ugc: UgcJobStateSchema.optional(),
   presenterTasks: z.array(PresenterTaskSchema).optional(),
   videoTasks: z.array(z.object({ attemptId: z.string().optional(), state: z.enum(["submitting", "pending", "settled"]).optional(), sceneId: z.string(), providerJobId: z.string(), provider: z.string(), model: z.string(), createdAt: z.string() })).optional(),
   id: nonEmpty,

@@ -38,6 +38,8 @@ export const QualitySettingsSchema = z.object({
   /** Modelo usado no planejamento da campanha. */
   llm: LlmChoiceSchema,
   rendering: PricingRefSchema,
+  /** AI UGC (Lote 5.3): referência pessoa+produto e vídeo UGC. Ausente fora desse modo. */
+  ugc: z.object({ reference: PricingRefSchema, video: PricingRefSchema }).optional(),
   generatedVideoSeconds: RangeSchema,
   finalVideoSeconds: RangeSchema,
   /** Meta de custo de referência. Ausente em "custom". */

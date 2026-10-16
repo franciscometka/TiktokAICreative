@@ -341,3 +341,38 @@ Novos projetos da interface usam `simpleFlow`, com Produto → preset → storyb
 O storyboard é persistido no plano antes da mídia. Editar uma cena recalcula a revisão e a estimativa, invalida a cotação anterior e é recusado depois que existem assets. Product UGC continua fora da lista selecionável, embora `VisualSource` permaneça preparado para ele.
 
 `JobAuthorization` persiste cotação, custo real de base, teto, status e motivo de pausa. Um clique autoriza a sequência narração → avatar → cenas → render. Cada unidade ainda recebe autorização efêmera, guard de orçamento, ledger e limite de tentativas nas camadas existentes. A sequência para no primeiro erro, custo incerto, revisão de áudio ou aumento; não há retry pago. Reinício nunca retoma sozinho: a UI oferece continuação explícita com nova cotação, preservando o teto e o histórico. Regeneração de cena permanece explícita, versionada e separada.
+
+
+## D79 — AI UGC como modo criativo próprio, separado do Presenter
+
+`creativeMode: "ai_ugc"` é um modo do fluxo simples, não um tipo de apresentador. Presenter (D74/D75) anima um avatar falando a narração; não segura produto nem tem identidade persistida por job. AI UGC gera uma PESSOA SEGURANDO/APRESENTANDO O PRODUTO REAL a partir da foto. Por isso há dois contratos novos, `UgcReferenceProvider` (imagem pessoa + produto) e `UgcVideoProvider` (clipes a partir da referência aprovada), em `src/providers/ugc/`, e duas etapas novas no job: `ugc_reference` e `ugc_video`. Em AI UGC o Presenter nunca é chamado; campos de apresentador do request são limpos.
+
+Cenas: `ugc_hook`, `ugc_demo`, `ugc_benefit`, `ugc_cta` (pessoa, via UgcVideoProvider) e `product_broll` (produto sem pessoa, via VideoProvider genérico, categoria de custo `broll`). `product_image`/`text_card` continuam no Remotion. Presets: Econômico = hook + imagem + CTA; Equilibrado = hook + benefício + B-roll + imagem + CTA; Premium = hook + demo + B-roll + benefício + B-roll + CTA (`config/ugc.ts`). Nichos não são fixos: o ambiente é sugerido por palavras do produto, com fallback "sala".
+
+## D80 — Referência UGC aprovada antes de qualquer cena UGC
+
+Ordem do job: `ugc_reference → narration → ugc_video → avatar → scenes → render`. A referência é persistida (`job.ugc.references[]`, versão vN, intenção durável `submitting → pending → succeeded|failed`) e, quando real, salva em `UGC_DIR/<campanha>/<criativo>/vN/` com escrita atômica; o browser só recebe IDs (`/api/ugc/...`). Após gerar, a cotação devolve `awaitingReview` e o job pausa com `waitingForStage: "ugc_reference"` SEM erro. A tela mostra "Esta será a pessoa apresentando seu produto" com Aprovar / Gerar outra referência / Trocar apresentador / Trocar ambiente / Editar conceito.
+
+`ugc_video` é bloqueado na cotação e no fluxo (`UgcReferenceRequiredError`) sem referência aprovada da identidade ATUAL. Aprovar, regenerar ou trocar identidade reativa a MESMA `JobAuthorization` pausada e relança a sequência sob o mesmo teto e baseline; uma nova referência é só mais uma unidade dentro do teto (limite `MAX_ATTEMPTS_PER_SCENE`), nunca retry automático. Trocar apresentador/ambiente incrementa `identity.revision` e invalida a aprovação; ambos são recusados depois que existe cena UGC (consistência). Envio real sem resposta fica `submitting` incerto: bloqueia repetição até decisão humana.
+
+## D81 — Consistência de identidade por job; biblioteca futura só em estrutura
+
+`UgcCharacterIdentity` (gênero, faixa etária, aparência, figurino, ambiente, estilo, revisão) é resolvida de forma determinística (hash FNV, sem `node:crypto` porque o wizard importa) e persistida no job. Toda cena UGC recebe a mesma referência aprovada, identidade e produto-âncora (`UgcProductAnchor`: imagem, nome, descrição e `preserve` = forma, cores, logo, embalagem, proporções), e cada tentativa grava `attempt.ugc` (referência, versão, identidade, figurino, ambiente, imagem do produto, estratégia de áudio, fala e ação) para auditoria. `UgcCharacterProfile` (biblioteca futura, `imageConsent` default false, tags livres) existe só como schema; nada a usa ainda.
+
+## D82 — Estratégia de áudio declarada pelo UgcVideoProvider
+
+Cada `UgcVideoProvider` declara `audioStrategy`:
+- `native_speech`: o modelo de vídeo gera a fala. A etapa de narração é pulada (sem linha de TTS na estimativa); `mediaComplete` não exige narração; cenas não-UGC ficam sem fala; o manifest marca `clipAudio: true` só nas cenas UGC e o Remotion desmuta apenas elas.
+- `external_lipsync`: narração ElevenLabs primeiro; cada cena UGC recebe sua janela do MP3 (`presenterPreview`) para lip-sync; clipes ficam mudos.
+
+Áudio duplicado é impossível por construção: o manifest lança "Áudio duplicado…" se uma cena com áudio próprio coexistir com narração real; o fluxo recusa clipe cujo `hasAudio` contradiz a estratégia. O mock usa `UGC_MOCK_AUDIO_STRATEGY` (default `native_speech`).
+
+## D83 — Fala UGC natural, sem experiência inventada
+
+Prompt `campaign-plan@1.5.0` (ativo) instrui linguagem de criador ("Olha isso aqui…", "Se você procura…", "Esse modelo chama atenção por…") e proíbe experiência/depoimento inventados ("uso há meses", "testei", "funcionou comigo", "comprei", depoimentos) e jargão de anúncio. `ai/ugc-script.ts` valida isso de forma determinística e checa que a fala cabe na cena (≤ 2,8 palavras/s); a validação do prompt recusa saída que viole, e o modo `standard` recusa fontes UGC. Editar cena no storyboard aplica as mesmas regras.
+
+## D84 — Custos UGC provisórios e contrato Google/Veo sem transporte
+
+Novas categorias: `ugc_reference`, `ugc_scene`, `broll` (além de voz e render). A estimativa conta uma referência + segundos por cena UGC + B-roll, sem TTS em `native_speech`. Preços são PLACEHOLDER (`unassigned-ugc`, `isPlaceholder: true`, "sem fonte oficial") em `config/pricing.ts`; nenhum preço real foi inventado. A UI já sinaliza preço provisório.
+
+Google/Veo/Flow: `google-ugc-contract.ts` só PREPARA o corpo (`verified: false`, `generateAudio: true`, recusa áudio externo) e `GOOGLE_UGC_CANDIDATES` lista candidatos não verificados. Não há transporte, chave ou chamada; o modo REAL de `ugc_reference`/`ugc_video` fica indisponível com motivo explícito. Automação da interface web do Flow é proibida: só API oficial.

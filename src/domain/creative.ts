@@ -44,7 +44,8 @@ export type Transition = z.infer<typeof TransitionSchema>;
  * De onde vem o visual da cena (estratégia híbrida de custo).
  * Os tipos em GENERATED_VISUAL_SOURCES consomem geração; o resto é composto no Remotion.
  */
-export const GENERATED_VISUAL_SOURCES = ["generated_video", "product_hero", "product_demo", "lifestyle", "presenter", "product_ugc"] as const;
+/** AI UGC (Lote 5.3): ugc_* = pessoa + produto a partir da referência aprovada; product_broll = close do produto. */
+export const GENERATED_VISUAL_SOURCES = ["generated_video", "product_hero", "product_demo", "lifestyle", "presenter", "product_ugc", "ugc_hook", "ugc_demo", "ugc_benefit", "ugc_cta", "product_broll"] as const;
 export const VISUAL_SOURCES = [
   ...GENERATED_VISUAL_SOURCES,
   "product_image",

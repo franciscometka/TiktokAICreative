@@ -35,6 +35,22 @@ export const VIDEO_STRATEGIES: Readonly<Record<GeneratedVisualSource, SceneStrat
   product_ugc: {
     direction: { framing: "person_medium", camera: "handheld", subjectAction: "the person shows and holds the product naturally", ambientMotion: "", pacing: "steady" },
   },
+  // AI UGC (Lote 5.3): mesma pessoa da referência aprovada, segurando o produto real.
+  ugc_hook: {
+    direction: { framing: "person_medium", camera: "handheld", subjectAction: "the person holds the product near the face and speaks directly to the camera", ambientMotion: "", pacing: "energetic" },
+  },
+  ugc_demo: {
+    direction: { framing: "person_medium", camera: "handheld", subjectAction: "the person turns the product slowly in the hands, showing its shape and details", ambientMotion: "", pacing: "steady" },
+  },
+  ugc_benefit: {
+    direction: { framing: "person_medium", camera: "handheld", subjectAction: "the person points at one detail of the product while talking to the camera", ambientMotion: "", pacing: "steady" },
+  },
+  ugc_cta: {
+    direction: { framing: "person_medium", camera: "locked", subjectAction: "the person holds the product toward the camera and smiles while speaking", ambientMotion: "", pacing: "steady" },
+  },
+  product_broll: {
+    direction: { framing: "product_detail", camera: "slow_dolly_in", subjectAction: "", ambientMotion: "soft light glides across the surface", pacing: "calm" },
+  },
 };
 
 /** Frases POSITIVAS de câmera (guia oficial: negação é imprevisível). */

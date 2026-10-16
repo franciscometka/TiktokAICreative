@@ -117,3 +117,12 @@ A experiência principal pede nome, imagens e descrição curta opcional; depois
 O planejamento produz roteiro natural (hook → problema/desejo → produto → benefícios confirmados → CTA) e storyboard completo antes de mídia: timeline, fala, visual, tipo, referência e status por cena. Fala, visual e tipo podem ser editados antes da geração; toda edição recalcula custo e invalida a cotação anterior.
 
 O botão “Gerar vídeo por até R$ X” persiste uma autorização para o job e executa narração → avatar → cenas → render dentro desse teto. Toda chamada mantém budget, ledger, versão, integridade e limite de tentativas. Falha, cobrança incerta ou aumento pausa o job; retry pago nunca é automático. MOCK percorre tudo sem API e termina com aviso explícito de que não existe MP4.
+
+
+## AI UGC (Lote 5.3)
+
+Segundo tipo de vídeo no fluxo simples. O usuário informa produto, imagens (obrigatórias), preset, apresentador (automático/mulher/homem) e ambiente (automático/escolhido); providers e modelos ficam ocultos.
+
+Pipeline: produto → enriquecimento → roteiro → storyboard → referência UGC → aprovação → cenas UGC → cenas de produto → render. A referência é uma imagem 9:16 de uma pessoa sintética segurando o produto real, preservando forma, cor, logo, embalagem e proporções. O job pausa em "Esta será a pessoa apresentando seu produto"; nada de cena UGC antes de Aprovar. Gerar outra, trocar apresentador ou ambiente consomem o mesmo teto autorizado.
+
+Cenas: gancho, demonstração, benefício e CTA com a mesma pessoa, figurino, ambiente e produto; B-roll do produto e imagens no Remotion. A fala é de criador, sem experiência inventada e dentro da duração. Áudio: fala nativa do modelo de vídeo ou narração + lip-sync, conforme o provider; nunca duas vozes. O storyboard mostra quem aparece, o que segura, o que fala, o que faz, duração, status e preview. Preços são provisórios até a escolha do provider real. Ver [AI-UGC.md](AI-UGC.md) e D79–D84.

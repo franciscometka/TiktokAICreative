@@ -32,6 +32,8 @@ export const ManifestAssetSchema = z.object({
   visualSource: VisualSourceSchema.optional(),
   /** Descrição da cena, usada só no placeholder em modo de desenvolvimento. */
   visualDescription: z.string().optional(),
+  /** AI UGC com fala nativa: o render usa o áudio DO CLIPE nesta cena (e não há narração separada). */
+  clipAudio: z.boolean().optional(),
 });
 export type ManifestAsset = z.infer<typeof ManifestAssetSchema>;
 

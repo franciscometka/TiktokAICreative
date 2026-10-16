@@ -16,6 +16,8 @@ import { sceneTimeline, secondsToFrames, totalFrames } from "./timeline";
  */
 
 export const PLACEHOLDER_LABEL = "MOCK · VÍDEO IA";
+/** Cena AI UGC simulada: nunca parece uma pessoa real gerada. */
+export const UGC_PLACEHOLDER_LABEL = "MOCK · AI UGC";
 
 export const OVERLAY_TIMING = {
   hookMaxSeconds: 3,
@@ -86,7 +88,7 @@ export function buildCompositionProps({ manifest, assets, urlFor, debug = false 
     if (asset.kind === "generated_video") {
       const resolved = asset.uri ? assets.get(asset.uri) : undefined;
       if (resolved?.kind === "file" && resolved.media === "video") return {
-        ...base, kind: "generated_video", image: null, placeholder: null, video: { src: urlFor(resolved.uri), fit: "contain" },
+        ...base, kind: "generated_video", image: null, placeholder: null, video: { src: urlFor(resolved.uri), fit: "contain", muted: !asset.clipAudio },
       };
       warnings.push({
         sceneId: asset.sceneId,
@@ -97,7 +99,7 @@ export function buildCompositionProps({ manifest, assets, urlFor, debug = false 
         ...base,
         kind: "generated_video",
         image: backdrop ? { ...backdrop, fit: "contain" } : null,
-        placeholder: { label: PLACEHOLDER_LABEL, description: debug ? (asset.visualDescription ?? null) : null },
+        placeholder: { label: asset.visualSource && asset.visualSource.startsWith("ugc_") ? UGC_PLACEHOLDER_LABEL : PLACEHOLDER_LABEL, description: debug ? (asset.visualDescription ?? null) : null },
       };
     }
 

@@ -62,6 +62,10 @@ const EnvSchema = z.object({
   UPLOADS_DIR: z.preprocess(emptyToUndefined, z.string().default(DEFAULT_UPLOADS_DIR)),
   RENDERS_DIR: z.preprocess(emptyToUndefined, z.string().default(DEFAULT_RENDERS_DIR)),
   VIDEOS_DIR: z.preprocess(emptyToUndefined, z.string().default(DEFAULT_VIDEOS_DIR)),
+  /** AI UGC (Lote 5.3): referências pessoa + produto versionadas. */
+  UGC_DIR: z.preprocess(emptyToUndefined, z.string().default("outputs/ugc")),
+  /** Estratégia de áudio do UGCVideoProvider MOCK (o real declara a sua). */
+  UGC_MOCK_AUDIO_STRATEGY: z.preprocess(emptyToUndefined, z.enum(["native_speech", "external_lipsync"]).default("native_speech")),
   AUDIO_DIR: z.preprocess(emptyToUndefined, z.string().default(DEFAULT_AUDIO_DIR)),
   TTS_TIMEOUT_MS: z.preprocess(emptyToUndefined, z.coerce.number().int().min(5_000).max(300_000).default(DEFAULT_TTS_TIMEOUT_MS)),
   RENDERER: z.preprocess(emptyToUndefined, z.enum(RENDERER_IDS).default("mock")),
@@ -97,6 +101,8 @@ export interface AppConfig {
   rendersDir: string;
   audioDir: string;
   videosDir: string;
+  ugcDir: string;
+  ugcMockAudioStrategy: "native_speech" | "external_lipsync";
   /** Timeout de UMA chamada de TTS (sem retry automático). */
   ttsTimeoutMs: number;
   renderer: {
@@ -141,6 +147,8 @@ export function loadAppConfig(
     rendersDir: e.RENDERS_DIR,
     audioDir: e.AUDIO_DIR,
     videosDir: e.VIDEOS_DIR,
+    ugcDir: e.UGC_DIR,
+    ugcMockAudioStrategy: e.UGC_MOCK_AUDIO_STRATEGY,
     ttsTimeoutMs: e.TTS_TIMEOUT_MS,
     renderer: {
       id: e.RENDERER,

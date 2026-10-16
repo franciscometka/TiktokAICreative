@@ -1,3 +1,5 @@
+import type { UgcEnvironmentChoice, UgcPresenterChoice } from "@/domain/ugc";
+import { LocalUgcAssetStore } from "@/storage/ugc-asset-store";
 import type { ExecutionStage, ExecutionMode } from "@/domain/execution";
 import type { VisualSource } from "@/domain/creative";
 import { randomUUID } from "node:crypto";
@@ -38,6 +40,8 @@ export interface AppDeps {
   /** Pasta das narrações (AUDIO_DIR), para servir o áudio por ID. */
   audioDir: string;
   videosDir?: string;
+  /** Pasta das referências AI UGC (UGC_DIR), para servir a imagem por ID. */
+  ugcDir?: string;
   /** Provider de narração configurado (só o id; nunca a chave). */
   audioProvider?: "mock" | "elevenlabs";
 }
@@ -128,13 +132,14 @@ export async function getCampaignView(deps: AppDeps, campaignId: string): Promis
       for (const creative of view.creatives) {
         if (!creative.jobId) continue;
         creative.hybrid = true;
-        creative.stageQuotes = await Promise.all((["narration", "scenes", "avatar", "render"] as const).map(stage => service.quoteStage(creative.jobId!, stage)));
+        const stages = creative.ugc ? (["ugc_reference", "narration", "ugc_video", "scenes", "render"] as const) : (["narration", "scenes", "avatar", "render"] as const);
+        creative.stageQuotes = await Promise.all(stages.map(stage => service.quoteStage(creative.jobId!, stage)));
         creative.jobQuote = await service.quoteJob(creative.jobId);
         for (const quote of creative.stageQuotes) if (quote.done) quote.repeat = await service.quoteStage(creative.jobId, quote.stage, false, true);
         for (const scene of creative.scenes.filter(item => item.isGenerated && item.status === "ready")) {
           scene.regenerationQuote = await service.quoteStage(
             creative.jobId,
-            scene.visualSource === "presenter" ? "avatar" : "scenes",
+            scene.visualSource === "presenter" ? "avatar" : scene.ugc && scene.visualSource.startsWith("ugc_") ? "ugc_video" : "scenes",
             false,
             true,
             scene.id,
@@ -438,7 +443,7 @@ export async function executeHybridStage(deps: AppDeps, input: { jobId: string; 
 }
 
 /** Nova versão de uma cena + recomposição local/MOCK. O render só segue automaticamente quando custa zero. */
-export async function regenerateStoryboardScene(deps: AppDeps, input: { jobId: string; sceneId: string; stage: "scenes" | "avatar"; token: string }): Promise<ActionResult<{ started: boolean }>> {
+export async function regenerateStoryboardScene(deps: AppDeps, input: { jobId: string; sceneId: string; stage: "scenes" | "avatar" | "ugc_video"; token: string }): Promise<ActionResult<{ started: boolean }>> {
   try {
     const result = await deps.service.executeStage(input.jobId, input.stage, input.token, { regenerate: true, sceneId: input.sceneId });
     const completion = result.completion.then(async outcome => {
@@ -470,6 +475,52 @@ export async function authorizeAndRunJob(deps: AppDeps, input: { jobId: string; 
   } catch (error) {
     return fail(error);
   }
+}
+
+// ---------------------------------------------------------------- AI UGC (Lote 5.3)
+
+/** "Aprovar": a pessoa da referência apresenta o produto. Retoma o job pausado, no mesmo teto. */
+export async function approveUgcReference(deps: AppDeps, input: { jobId: string; referenceId: string }): Promise<ActionResult<{ resumed: boolean }>> {
+  try {
+    const result = await deps.service.approveUgcReference(input.jobId, input.referenceId);
+    if (result.completion) logBackground(input.jobId, result.completion);
+    return { ok: true, value: { resumed: result.resumed } };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+/** "Gerar outra referência": nova versão (novo custo, dentro do teto); a anterior fica no histórico. */
+export async function regenerateUgcReference(deps: AppDeps, input: { jobId: string }): Promise<ActionResult<{ resumed: boolean }>> {
+  try {
+    const result = await deps.service.regenerateUgcReference(input.jobId);
+    if (result.completion) logBackground(input.jobId, result.completion);
+    return { ok: true, value: { resumed: result.resumed } };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+/** "Trocar apresentador" / "Trocar ambiente": nova identidade, exige nova referência aprovada. */
+export async function updateUgcIdentity(deps: AppDeps, input: { jobId: string; presenter?: UgcPresenterChoice; environment?: UgcEnvironmentChoice }): Promise<ActionResult<{ resumed: boolean }>> {
+  try {
+    const result = await deps.service.updateUgcIdentity(input.jobId, { presenter: input.presenter, environment: input.environment });
+    if (result.completion) logBackground(input.jobId, result.completion);
+    return { ok: true, value: { resumed: result.resumed } };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+/** Imagem de referência AI UGC por IDs: só versões reais registradas no job; nunca caminho do browser. */
+export async function resolveUgcReferenceFile(deps: AppDeps, ids: { campaignId: string; creativeId: string; version: string }) {
+  if (!deps.ugcDir || !SAFE_ENTITY_ID.test(ids.campaignId) || !SAFE_ENTITY_ID.test(ids.creativeId) || !RENDER_ID.test(ids.version)) return undefined;
+  let jobs;
+  try { jobs = await deps.service.listJobs(ids.campaignId); } catch { return undefined; }
+  const registered = jobs.find((j) => j.creativeId === ids.creativeId)?.ugc?.references.some((r) => r.state === "succeeded" && !r.isMock && r.version === ids.version);
+  if (!registered) return undefined;
+  const file = await new LocalUgcAssetStore(deps.ugcDir).resolveReference(ids);
+  return file ? { ...file, fileName: `referencia-${ids.creativeId}-${ids.version}.${file.mimeType.split("/")[1]}` } : undefined;
 }
 
 export async function updateStoryboardScene(deps: AppDeps, input: { jobId: string; sceneId: string; narration: string; visualDescription: string; visualSource: VisualSource }): Promise<ActionResult<{ saved: boolean }>> {

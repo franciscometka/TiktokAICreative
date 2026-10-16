@@ -15,6 +15,9 @@ export interface CampaignPlanPromptInput {
   videoConcept?: string;
   scriptMode?: "manual" | "generate";
   script?: string;
+  /** Lote 5.3 (campaign-plan@1.5.0+). */
+  creativeMode?: "standard" | "ai_ugc";
+  ugcAudioStrategy?: "native_speech" | "external_lipsync";
   settings: QualitySettings;
 }
 

@@ -4,6 +4,7 @@ import { ELEVENLABS_MODELS, ELEVENLABS_PROVIDER } from "./tts-models";
 
 import { RUNWAY_PRESENTER } from "./presenters";
 import { RUNWAY_VIDEO } from "./video-models";
+import { UGC_PLACEHOLDER_PROVIDER } from "./ugc-models";
 
 export const RUNWAY_CREDITS_PER_SECOND = 5;
 export const RUNWAY_CREDIT_USD = 0.01;
@@ -98,6 +99,13 @@ export const PRICING_TABLE: readonly ProviderPricing[] = [
     isPlaceholder: false,
     source: "elevenlabs.io/pricing/api — Multilingual v2 (tabela vigente, 2026-10-14)",
   },
+
+  // ---- AI UGC (Lote 5.3): PROVISÓRIO até escolher o provider oficial (ex.: Google/Veo) ----
+  { provider: UGC_PLACEHOLDER_PROVIDER, model: "reference-standard", unit: "per_generation", priceUsd: 0.04, updatedAt: "2026-10-16", isPlaceholder: true, source: "Provisório: nenhum provider AI UGC real escolhido (sem fonte oficial)" },
+  { provider: UGC_PLACEHOLDER_PROVIDER, model: "reference-premium", unit: "per_generation", priceUsd: 0.08, updatedAt: "2026-10-16", isPlaceholder: true, source: "Provisório: nenhum provider AI UGC real escolhido (sem fonte oficial)" },
+  { provider: UGC_PLACEHOLDER_PROVIDER, model: "ugc-video-economy", unit: "per_second", priceUsd: 0.15, updatedAt: "2026-10-16", isPlaceholder: true, source: "Provisório: nenhum provider AI UGC real escolhido (sem fonte oficial)" },
+  { provider: UGC_PLACEHOLDER_PROVIDER, model: "ugc-video-high", unit: "per_second", priceUsd: 0.25, updatedAt: "2026-10-16", isPlaceholder: true, source: "Provisório: nenhum provider AI UGC real escolhido (sem fonte oficial)" },
+  { provider: UGC_PLACEHOLDER_PROVIDER, model: "ugc-video-premium", unit: "per_second", priceUsd: 0.4, updatedAt: "2026-10-16", isPlaceholder: true, source: "Provisório: nenhum provider AI UGC real escolhido (sem fonte oficial)" },
 
   // ---- Renderização local (Remotion na máquina do usuário) ----
   {

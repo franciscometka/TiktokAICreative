@@ -63,5 +63,7 @@ export function discardedAttemptIds(job: GenerationJob): Set<string> {
 /** Todas as cenas com vídeo IA e a narração têm asset ativo: dá para (re)renderizar sem chamada paga. */
 export function mediaComplete(job: GenerationJob): boolean {
   const scenesDone = job.scenes.every((s) => !s.requiresGeneratedVideo || activeAttempt(s.attempts) !== undefined);
-  return scenesDone && activeAttempt(job.audioAttempts) !== undefined;
+  // AI UGC com fala nativa do vídeo: não existe narração TTS separada (D79).
+  const narrationNeeded = job.ugc?.audioStrategy !== "native_speech";
+  return scenesDone && (!narrationNeeded || activeAttempt(job.audioAttempts) !== undefined);
 }

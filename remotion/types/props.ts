@@ -12,6 +12,7 @@ export type SceneKind = "generated_video" | "product_image" | "text_card";
 export type SceneVisualSource =
   | "generated_video"
   | "product_hero" | "product_demo" | "lifestyle" | "presenter" | "product_ugc"
+  | "ugc_hook" | "ugc_demo" | "ugc_benefit" | "ugc_cta" | "product_broll"
   | "product_image"
   | "text_card"
   | "screenshot"
@@ -39,7 +40,8 @@ export interface SceneProps {
   transition: SceneTransition;
   onScreenText: string;
   image: ImageProps | null;
-  video?: { src: string; fit?: "contain" };
+  /** muted=false só em cenas AI UGC com fala nativa (o clipe é a voz; não há narração por cima). */
+  video?: { src: string; fit?: "contain"; muted?: boolean };
   /** Presente quando a cena é um vídeo IA ainda simulado. */
   placeholder: { label: string; description: string | null } | null;
 }

@@ -8,14 +8,15 @@ produto → análise/hooks/conceitos/roteiro/cenas (Claude) → validação + aj
 Custo é preocupação central; nada pago de mídia acontece sem aprovação explícita.
 
 ## Estado atual
+- Lote 5.3 AI UGC (D79–D84): modo `creativeMode: "ai_ugc"` com `UgcReferenceProvider`/`UgcVideoProvider` separados do Presenter; referência pessoa+produto versionada e APROVADA antes de qualquer cena UGC (pausa/retomada sob a mesma autorização); identidade persistida no job; áudio `native_speech` ou `external_lipsync`, nunca duplicado; prompt ativo `campaign-plan@1.5.0`. Só MOCK; preços `unassigned-ugc` placeholder; REAL indisponível. Ver `docs/AI-UGC.md`.
 - Redesign D78: fluxo principal simplificado (produto → preset/apresentador → storyboard → teto único → pipeline automático → resultado). Novos projetos usam Econômico 15–20s, Equilibrado 20–30s e Premium 30–45s. Configuração técnica fica recolhida; campanhas antigas preservam settings. Nenhuma validação paga deste fluxo.
 - Lote 5.1: diagnóstico público sem segredos, configuração inválida com fallback seguro para MOCK, preflight local por ação, navegador Remotion detectado sem download e "Próxima etapa recomendada" no job. Protocolo completo validado só com mocks/transportes falsos; nenhuma chamada paga.
-- Prompt ativo: `campaign-plan@1.4.0` (inclui brief e valida preservação do roteiro manual; ainda sem validação paga).
+- Prompt anterior (substituído pela 1.5.0): `campaign-plan@1.4.0` (inclui brief e valida preservação do roteiro manual; ainda sem validação paga).
 - Interface híbrida por etapa (D76): MOCK default; REAL apenas com provider configurado, cotação e confirmação por unidade. Nenhuma cascata paga. Planejamento real aguarda draft/aprovação. Guia: `docs/HYBRID-WORKFLOW.md`. CLI `--confirm` isolado continua bloqueada.
 - Lotes 0 a 5 implementados (Runway ainda sem validação paga). Lote 4 = narração real pt-BR com ElevenLabs (opcional), legendas com timing real, AudioFit/revisão, áudio versionado e MP4 com AAC. Lote 2 = experiência `/create` → `/campaigns/[id]` (planejar, revisar, custo, aprovar). Lote 3 = render real do MP4 com Remotion (local, R$0).
 - Planejamento: `LLM_PROVIDER=mock` (padrão, sem custo) ou `anthropic` (Claude real, pago).
 - Renderer: `RENDERER=mock` (padrão, sem arquivo) ou `remotion` (MP4 real). Narração: `AUDIO_PROVIDER=mock` (padrão, "MODO DE TESTE", sem som) ou `elevenlabs` (real, paga). Vídeo IA: `VIDEO_PROVIDER=mock|runway` (default mock); Runway Gen-4 Turbo real, ver `docs/RUNWAY.md`.
-- Prompt ativo: `campaign-plan@1.0.1` (1.0.0 + regras da D42). A 1.0.0 foi validada com o Claude real em 2026-10-14; a 1.0.1 ainda não. ElevenLabs validada com UMA chamada real em 2026-10-14 (D68).
+- Histórico de prompt: `campaign-plan@1.0.1` (1.0.0 + regras da D42). A 1.0.0 foi validada com o Claude real em 2026-10-14; a 1.0.1 ainda não. ElevenLabs validada com UMA chamada real em 2026-10-14 (D68).
 - **Não avance de lote sem instrução do usuário.** Ver `docs/TASKS.md`.
 
 ## Comandos
@@ -117,6 +118,8 @@ Para ver a tela de processamento com o mock: `MOCK_PLANNER_DELAY_MS=20000` em `.
 - Comentários e textos de UI em português; identificadores em inglês.
 
 ## O que NÃO fazer
+- Não gerar cena UGC sem referência aprovada; não chamar Presenter em AI UGC; não combinar fala nativa do clipe com narração real; não escrever fala UGC com experiência inventada.
+- Não automatizar a interface web do Google Flow; UGC real só por API oficial, com preço com fonte.
 - Não chamar API paga fora do pipeline/planner, nem em testes normais.
 - Não escrever IDs de modelo fora de `config/llm-models.ts`, nem preços/cotação fora de `src/config/`.
 - Não importar `@anthropic-ai/sdk` fora de `src/ai/anthropic/`.

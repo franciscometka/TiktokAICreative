@@ -1,3 +1,4 @@
+import { isUgcPersonSource } from "@/domain/ugc";
 import type {
   CostCategory,
   CostEstimate,
@@ -179,6 +180,9 @@ export interface ResolvedPricing {
   presenter?: ProviderPricing;
   audio: ProviderPricing;
   rendering: ProviderPricing;
+  /** AI UGC (Lote 5.3): presentes só quando o preset tem `ugc`. */
+  ugcReference?: ProviderPricing;
+  ugcVideo?: ProviderPricing;
 }
 
 export function resolvePricing(settings: QualitySettings, catalog: PricingCatalog): ResolvedPricing {
@@ -188,6 +192,7 @@ export function resolvePricing(settings: QualitySettings, catalog: PricingCatalo
     presenter: catalog.requireOne(RUNWAY_PRESENTER),
     audio: catalog.requireOne(settings.audio),
     rendering: catalog.requireOne(settings.rendering),
+    ...(settings.ugc ? { ugcReference: catalog.requireOne(settings.ugc.reference), ugcVideo: catalog.requireOne(settings.ugc.video) } : {}),
   };
 }
 
@@ -231,24 +236,37 @@ export function estimateSceneVideoCostUsd(scene: ScenePlan, videoPricing: Provid
   return costForUsage(videoPricing, sceneVideoUsage(scene, videoPricing)).costUsd;
 }
 
-/** Linhas de custo FUTURO (vídeo por cena, áudio, render) de um plano. */
-export function futureCostLines(plan: CreativePlan, pricing: Omit<ResolvedPricing, "llm">): CostLineItem[] {
+/**
+ * Linhas de custo FUTURO (vídeo por cena, áudio, render) de um plano. AI UGC (Lote 5.3): cenas
+ * ugc_* usam o preço do UGCVideoProvider (categoria ugc_scene), product_broll o do vídeo genérico
+ * (categoria broll), e há UMA linha de referência pessoa + produto (ugc_reference). Com fala nativa
+ * do vídeo (native_speech) não existe linha de TTS.
+ */
+export function futureCostLines(plan: CreativePlan, pricing: Omit<ResolvedPricing, "llm">, options: { nativeUgcSpeech?: boolean } = {}): CostLineItem[] {
+  const hasUgc = plan.scenes.some((s) => isUgcPersonSource(s.visualSource));
+  if (hasUgc && (!pricing.ugcVideo || !pricing.ugcReference)) throw new Error("Plano AI UGC sem preços de referência/vídeo UGC no preset.");
+  const sceneLine = (s: ScenePlan): CostLineItem => {
+    if (isUgcPersonSource(s.visualSource)) {
+      return lineItem(pricing.ugcVideo!, sceneVideoUsage(s, pricing.ugcVideo), {
+        category: "ugc_scene", phase: "generation", description: `Cena AI UGC ${s.order + 1} (${s.estimatedGenerationSeconds}s)`, sceneId: s.id,
+      });
+    }
+    const p = s.visualSource === "presenter" ? pricing.presenter! : pricing.video;
+    return lineItem(p, sceneVideoUsage(s, p), {
+      category: s.visualSource === "product_broll" ? "broll" : "video",
+      phase: "generation",
+      description: s.visualSource === "product_broll" ? `B-roll do produto — cena ${s.order + 1} (${s.estimatedGenerationSeconds}s)` : `Vídeo IA — cena ${s.order + 1} (${s.estimatedGenerationSeconds}s)`,
+      sceneId: s.id,
+    });
+  };
   return [
-    ...plan.scenes
-      .filter((s) => s.requiresGeneratedVideo)
-      .map((s) =>
-        lineItem(s.visualSource === "presenter" ? pricing.presenter! : pricing.video, sceneVideoUsage(s, s.visualSource === "presenter" ? pricing.presenter : pricing.video), {
-          category: "video",
-          phase: "generation",
-          description: `Vídeo IA — cena ${s.order + 1} (${s.estimatedGenerationSeconds}s)`,
-          sceneId: s.id,
-        }),
-      ),
-    lineItem(pricing.audio, narrationUsage(plan), {
+    ...(hasUgc ? [lineItem(pricing.ugcReference!, { generations: 1 }, { category: "ugc_reference", phase: "generation", description: "Referência AI UGC (pessoa + produto)" })] : []),
+    ...plan.scenes.filter((s) => s.requiresGeneratedVideo).map(sceneLine),
+    ...(options.nativeUgcSpeech ? [] : [lineItem(pricing.audio, narrationUsage(plan), {
       category: "audio",
       phase: "generation",
       description: "Narração (TTS)",
-    }),
+    })]),
     lineItem(pricing.rendering, renderUsage(plan), {
       category: "rendering",
       phase: "rendering",
@@ -263,6 +281,8 @@ export function sumLinesUsd(lines: readonly CostLineItem[], category?: CostCateg
 
 export interface EstimateCreativeCostInput {
   reusedNarration?: boolean;
+  /** AI UGC com fala nativa do vídeo: sem TTS separado. */
+  nativeUgcSpeech?: boolean;
   id: string;
   plan: CreativePlan;
   settings: QualitySettings;
@@ -279,7 +299,7 @@ export interface EstimateCreativeCostInput {
  */
 export function estimateCreativeCost(input: EstimateCreativeCostInput): CostEstimate {
   const { plan, settings, pricing, exchangeRate, incurred } = input;
-  const breakdown = futureCostLines(plan, pricing).filter(line => !(input.reusedNarration && line.category === "audio"));
+  const breakdown = futureCostLines(plan, pricing, { nativeUgcSpeech: input.nativeUgcSpeech }).filter(line => !(input.reusedNarration && line.category === "audio"));
   const futureUsd = sumLinesUsd(breakdown);
   const projectedUsd = incurred.llmCost.usd + futureUsd;
 
@@ -292,6 +312,13 @@ export function estimateCreativeCost(input: EstimateCreativeCostInput): CostEsti
     videoCost: toMoney(sumLinesUsd(breakdown, "video"), exchangeRate),
     audioCost: toMoney(sumLinesUsd(breakdown, "audio"), exchangeRate),
     renderingCost: toMoney(sumLinesUsd(breakdown, "rendering"), exchangeRate),
+    ...(breakdown.some((l) => l.category === "ugc_reference" || l.category === "ugc_scene" || l.category === "broll")
+      ? {
+          ugcReferenceCost: toMoney(sumLinesUsd(breakdown, "ugc_reference"), exchangeRate),
+          ugcSceneCost: toMoney(sumLinesUsd(breakdown, "ugc_scene"), exchangeRate),
+          brollCost: toMoney(sumLinesUsd(breakdown, "broll"), exchangeRate),
+        }
+      : {}),
     estimatedAdditionalUsd: roundUsd(futureUsd),
     estimatedAdditionalBrl: roundBrl(usdToBrl(futureUsd, exchangeRate)),
     projectedTotalUsd: roundUsd(projectedUsd),
