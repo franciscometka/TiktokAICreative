@@ -54,6 +54,8 @@ export const StyleSelectionSchema = z.enum(["auto", "manual"]);
 export type StyleSelection = z.infer<typeof StyleSelectionSchema>;
 
 export const CampaignRequestSchema = z.object({
+  simpleFlow: z.boolean().optional(),
+  enrichProduct: z.boolean().optional(),
   stageModes: StageModesSchema.optional(),
   projectName: z.string().trim().max(120).optional(),
   videoConcept: z.string().trim().max(2000).optional(),
@@ -70,6 +72,7 @@ export const CampaignRequestSchema = z.object({
   /** Perfil de voz da narração (config/voices.ts). Ausente = perfil padrão. */
   speakerProfileId: z.string().optional(),
   presenterPresetId: AvatarPresetSchema.optional(),
+  presenterChoice: z.enum(["woman", "man", "none"]).optional(),
 });
 export type CampaignRequest = z.infer<typeof CampaignRequestSchema>;
 
@@ -173,6 +176,17 @@ export const ApprovalSchema = z.object({
 export type Approval = z.infer<typeof ApprovalSchema>;
 
 export const GenerationJobSchema = z.object({
+  /** Autorização única do fluxo simples. O teto cobre apenas novas chamadas deste job. */
+  jobAuthorization: z.object({
+    quoteToken: z.string(),
+    estimatedBrl: z.number().nonnegative(),
+    maximumAuthorizedBrl: z.number().nonnegative(),
+    baselineActualBrl: z.number().nonnegative(),
+    status: z.enum(["active", "paused", "completed"]),
+    approvedAt: z.string(),
+    pausedReason: z.string().optional(),
+  }).optional(),
+  storyboardRevision: z.number().int().nonnegative().optional(),
   stageIntents: z.array(z.object({ stage: ExecutionStageSchema, unit: z.string(), state: z.enum(["running", "settled"]), createdAt: z.string() })).optional(),
   renderStale: z.boolean().optional(),
   stageModes: StageModesSchema.optional(),

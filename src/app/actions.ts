@@ -3,6 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import {
+  authorizeAndRunJob,
+  regenerateStoryboardScene,
+  updateStoryboardScene,
   executeHybridStage, configureHybridStage, executeHybridPlanning,
   acceptNarration,
   approveCreative,
@@ -106,11 +109,17 @@ export async function regenerateSceneAction(input: unknown): Promise<ActionResul
   } catch { return { ok: true, value: { message: "Não foi possível iniciar a regeneração. Consulte o estado do criativo antes de repetir." } }; }
 }
 
-const StageActionInput = z.object({ jobId: id, stage: z.enum(["narration", "scenes", "avatar", "render"]), token: z.string().length(64), regenerate: z.boolean().optional(), authorizeOverBudget: z.boolean().optional() });
+const StageActionInput = z.object({ jobId: id, stage: z.enum(["narration", "scenes", "avatar", "render"]), token: z.string().length(64), regenerate: z.boolean().optional(), authorizeOverBudget: z.boolean().optional(), sceneId: id.optional() });
 export async function executeStageAction(input: unknown): Promise<ActionResult<{ started: boolean }>> {
   const parsed = StageActionInput.safeParse(input);
   if (!parsed.success) return badInput();
   return executeHybridStage(getRuntime().deps, parsed.data);
+}
+
+export async function regenerateStoryboardSceneAction(input: unknown): Promise<ActionResult<{ started: boolean }>> {
+  const parsed = z.object({ jobId: id, sceneId: id, stage: z.enum(["scenes", "avatar"]), token: z.string().length(64) }).safeParse(input);
+  if (!parsed.success) return badInput();
+  return regenerateStoryboardScene(getRuntime().deps, parsed.data);
 }
 export async function configureStageAction(input: unknown): Promise<ActionResult<{ saved: boolean }>> {
   const parsed = z.object({ jobId: id, stage: z.enum(["narration", "scenes", "avatar", "render"]), mode: z.enum(["mock", "real"]) }).safeParse(input);
@@ -121,4 +130,26 @@ export async function executePlanningStageAction(input: unknown): Promise<Action
   const parsed = z.object({ campaignId: id, token: z.string().length(64) }).safeParse(input);
   if (!parsed.success) return badInput();
   return executeHybridPlanning(getRuntime().deps, parsed.data);
+}
+
+export async function authorizeJobAction(input: unknown): Promise<ActionResult<{ started: boolean }>> {
+  const parsed = z.object({ jobId: id, token: z.string().length(64) }).safeParse(input);
+  if (!parsed.success) return badInput();
+  const result = await authorizeAndRunJob(getRuntime().deps, parsed.data);
+  if (result.ok) revalidatePath("/campaigns");
+  return result;
+}
+
+export async function updateStoryboardSceneAction(input: unknown): Promise<ActionResult<{ saved: boolean }>> {
+  const parsed = z.object({
+    jobId: id,
+    sceneId: id,
+    narration: z.string().max(800),
+    visualDescription: z.string().trim().min(1).max(1000),
+    visualSource: z.enum(["generated_video", "product_hero", "product_demo", "lifestyle", "presenter", "product_image", "text_card", "screenshot", "simple_background", "existing_asset"]),
+  }).safeParse(input);
+  if (!parsed.success) return badInput();
+  const result = await updateStoryboardScene(getRuntime().deps, parsed.data);
+  if (result.ok) revalidatePath("/campaigns");
+  return result;
 }

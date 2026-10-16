@@ -197,3 +197,16 @@ Guia: [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md).
 - [x] Protocolo futuro limitado a 1 narração, 1 avatar, 1 cena de produto e 1 render local
 - [ ] Validação integrada REAL/paga — exige autorização futura
 - [ ] Product UGC real — fora de escopo
+
+## Redesign do fluxo utilizável ✅
+- [x] Produto simplificado: nome, imagens, descrição curta opcional e enriquecimento local sem claims
+- [x] Presets Econômico 15–20s, Equilibrado 20–30s e Premium 30–45s sem migrar campanhas antigas
+- [x] Apresentador simples: mulher, homem ou nenhum; mapeamento técnico interno
+- [x] Storyboard completo com timeline, fala, visual, referência, tipo e status de todas as cenas
+- [x] Edição de cena e nova ideia MOCK antes da mídia, com nova estimativa
+- [x] Cotação e autorização única persistente para o job inteiro
+- [x] Pipeline automático narração → avatar → cenas → render, com pausa em falha/aumento/incerteza
+- [x] Preview de asset real por cena e resultado final; MOCK deixa explícito que não há MP4
+- [x] Providers, modelos, ledger, tentativas, versões, diagnóstico e durações em detalhes recolhidos
+- [x] Testes offline do fluxo automático com mocks e transportes falsos; nenhuma chamada paga
+- [ ] AI UGC/Veo real — próximo lote; domínio continua preparado

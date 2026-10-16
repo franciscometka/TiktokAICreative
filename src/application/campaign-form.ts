@@ -28,6 +28,8 @@ export const FORM_LIMITS = {
 
 /** Dados crus do formulário, como o componente cliente envia. */
 export interface CampaignFormInput {
+  simpleFlow?: boolean;
+  enrichProduct?: boolean;
   stageModes?: StageModes;
   projectName?: string;
   videoConcept?: string;
@@ -50,12 +52,15 @@ export interface CampaignFormInput {
   /** Perfil de voz da narração (config/voices.ts). Ausente = padrão. */
   speakerProfileId?: string;
   presenterPresetId?: string;
+  presenterChoice?: "woman" | "man" | "none";
   budget: { maxCostPerCreativeBrl: string; maxCostPerCampaignBrl: string; allowOverBudget: boolean };
 }
 
 export type FieldErrors = Partial<Record<string, string>>;
 
 export interface ParsedCampaignForm {
+  simpleFlow?: boolean;
+  enrichProduct?: boolean;
   stageModes?: StageModes;
   projectName?: string;
   videoConcept?: string;
@@ -77,6 +82,7 @@ export interface ParsedCampaignForm {
   quality: PresetQuality;
   speakerProfileId: string;
   presenterPresetId?: AvatarPreset;
+  presenterChoice?: "woman" | "man" | "none";
   budget: { maxCostPerCreativeBrl: number; maxCostPerCampaignBrl: number; allowOverBudget: boolean };
 }
 
@@ -125,6 +131,8 @@ const money = (label: string, required: boolean) =>
 
 const FormSchema = z
   .object({
+    simpleFlow: z.boolean().optional(),
+    enrichProduct: z.boolean().optional(),
     stageModes: StageModesSchema.optional(),
     projectName: z.string().trim().max(120).optional(),
     videoConcept: z.string().trim().max(2000).optional(),
@@ -137,7 +145,7 @@ const FormSchema = z
       .trim()
       .transform((v) => (v === "" ? undefined : v))
       .pipe(z.url({ protocol: /^https?$/, message: "Use um link completo, começando com https://." }).optional()),
-    description: trimmed(FORM_LIMITS.description, "Descrição").min(1, "Descreva o produto."),
+    description: trimmed(FORM_LIMITS.description, "Descrição"),
     features: list("características"),
     benefits: list("benefícios"),
     price: money("o preço", false),
@@ -155,6 +163,7 @@ const FormSchema = z
       message: "Escolha um nível de qualidade.",
     }),
     presenterPresetId: z.preprocess(v => v === "" ? undefined : v, AvatarPresetSchema.optional()),
+    presenterChoice: z.enum(["woman", "man", "none"]).optional(),
     speakerProfileId: z
       .string()
       .optional()
@@ -198,6 +207,8 @@ export function parseCampaignForm(input: unknown): Result<ParsedCampaignForm, Fi
   const styles: CreativeStyle[] =
     f.styleMode === "auto" ? [...CREATIVE_STYLES] : [...new Set(f.styles as CreativeStyle[])];
   return ok({
+    simpleFlow: f.simpleFlow,
+    enrichProduct: f.enrichProduct,
     stageModes: f.stageModes,
     projectName: f.projectName, videoConcept: f.videoConcept, scriptMode: f.scriptMode, script: f.script,
     productId: f.productId,
@@ -215,7 +226,10 @@ export function parseCampaignForm(input: unknown): Result<ParsedCampaignForm, Fi
     styles,
     quality: f.quality as PresetQuality,
     speakerProfileId: f.speakerProfileId || DEFAULT_SPEAKER_PROFILE_ID,
-    presenterPresetId: f.presenterPresetId,
+    presenterPresetId: f.simpleFlow
+      ? f.presenterChoice === "none" ? undefined : f.presenterChoice === "man" ? "game-character-man" : "influencer"
+      : f.presenterPresetId,
+    presenterChoice: f.presenterChoice,
     budget: {
       // Os dois foram validados como obrigatórios acima.
       maxCostPerCreativeBrl: f.budget.maxCostPerCreativeBrl ?? 0,
@@ -228,13 +242,15 @@ export function parseCampaignForm(input: unknown): Result<ParsedCampaignForm, Fi
 /** Monta o pedido do domínio. `images` vem do UploadStore (nunca de caminhos enviados pelo browser). */
 export function toCampaignRequest(form: ParsedCampaignForm, images: readonly ProductImage[]): CampaignRequest {
   return {
+    simpleFlow: form.simpleFlow,
+    enrichProduct: form.enrichProduct,
     stageModes: form.stageModes,
     projectName: form.projectName, videoConcept: form.videoConcept, scriptMode: form.scriptMode, script: form.script,
     product: {
       id: form.productId,
       name: form.name,
       url: form.url,
-      description: form.description,
+      description: form.description || `${form.name} — informações detalhadas não fornecidas.`,
       features: form.features,
       benefits: form.benefits,
       priceBrl: form.priceBrl,
@@ -249,6 +265,7 @@ export function toCampaignRequest(form: ParsedCampaignForm, images: readonly Pro
     budget: form.budget,
     speakerProfileId: form.speakerProfileId,
     presenterPresetId: form.presenterPresetId,
+    presenterChoice: form.presenterChoice,
   };
 }
 
@@ -257,6 +274,8 @@ export function formInputFromRequest(request: CampaignRequest): CampaignFormInpu
   const p = request.product;
   const toInput = (n: number) => n.toFixed(2).replace(".", ",");
   return {
+    simpleFlow: request.simpleFlow,
+    enrichProduct: request.enrichProduct,
     stageModes: request.stageModes,
     projectName: request.projectName, videoConcept: request.videoConcept, scriptMode: request.scriptMode, script: request.script,
     productId: p.id,
@@ -275,6 +294,9 @@ export function formInputFromRequest(request: CampaignRequest): CampaignFormInpu
     quality: request.quality === "custom" ? "economy" : request.quality,
     speakerProfileId: request.speakerProfileId ?? DEFAULT_SPEAKER_PROFILE_ID,
     presenterPresetId: request.presenterPresetId,
+    presenterChoice: request.simpleFlow
+      ? request.presenterChoice ?? (request.presenterPresetId === "game-character-man" ? "man" : request.presenterPresetId ? "woman" : "none")
+      : request.presenterChoice,
     budget: {
       maxCostPerCreativeBrl: toInput(request.budget.maxCostPerCreativeBrl),
       maxCostPerCampaignBrl: toInput(request.budget.maxCostPerCampaignBrl),

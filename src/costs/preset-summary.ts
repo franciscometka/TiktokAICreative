@@ -2,7 +2,7 @@ import { claudeModelName } from "@/config/llm-models";
 import { PRESET_ORDER, QUALITY_PRESETS, type PresetQuality } from "@/config/quality-presets";
 import type { ExchangeRate } from "@/domain/cost";
 import type { PricingRef } from "@/domain/quality";
-import type { Range } from "@/domain/quality";
+import type { QualitySettings, Range } from "@/domain/quality";
 import { estimatePresetRange, resolvePricing } from "./calculate";
 import type { PricingCatalog } from "./pricing-catalog";
 
@@ -24,9 +24,9 @@ export interface PresetSummary {
   containsPlaceholderPrices: boolean;
 }
 
-export function summarizePresets(catalog: PricingCatalog, exchangeRate: ExchangeRate, videoChoice?: PricingRef): PresetSummary[] {
+export function summarizePresets(catalog: PricingCatalog, exchangeRate: ExchangeRate, videoChoice?: PricingRef, presets: Record<PresetQuality, QualitySettings> = QUALITY_PRESETS): PresetSummary[] {
   return PRESET_ORDER.map((quality) => {
-    const settings = videoChoice ? { ...QUALITY_PRESETS[quality], video: videoChoice } : QUALITY_PRESETS[quality];
+    const settings = videoChoice ? { ...presets[quality], video: videoChoice } : presets[quality];
     const range = estimatePresetRange(settings, resolvePricing(settings, catalog), exchangeRate.rate);
     return {
       quality,

@@ -17,6 +17,7 @@ import { Badge, buttonClasses, Notice, Panel, SectionHeading } from "@/component
 import { formatBrl } from "@/lib/money";
 import { getPublicConfig, getRuntime } from "@/server/runtime";
 import { ReadinessPanel } from "@/components/readiness-panel";
+import { SimpleVideoWorkspace } from "@/components/campaign/simple-video-workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -102,16 +103,12 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
       <div className="mt-6">
         <Stepper steps={stepsFor(stepStates(view), planned ? [undefined, undefined, undefined, "#analise", "#custo"] : [])} />
       </div>
-      <div className="mt-6"><ReadinessPanel readiness={publicConfig.readiness} compact /></div>
-
       {view.videoConcept ? <p className="mt-4 max-w-3xl text-sm leading-relaxed text-zinc-600">{view.videoConcept}</p> : null}
       {view.offlineReadOnly ? <div className="mt-6"><Notice title="Projeto anterior em consulta">
         Os dados e custos originais foram preservados. Crie uma cópia para escolher modos por etapa.
         <Link href={`/create?from=${view.id}`} className={`${buttonClasses("secondary", "sm")} mt-3`}>Criar cópia híbrida para continuar</Link>
       </Notice></div> : null}
-      {view.stageCapabilities && view.planningQuote ? <div className="mt-6"><StageExecutionPanel campaignId={id} quotes={[view.planningQuote]} capabilities={view.stageCapabilities} /></div> : null}
-      {view.stageCapabilities ? view.creatives.map(c => c.stageQuotes ? <div className="mt-6" key={c.id}><StageExecutionPanel jobId={c.jobId} campaignId={id} quotes={c.stageQuotes} capabilities={view.stageCapabilities!} /></div> : null) : null}
-      {planned ? <section className="mt-6 space-y-4" aria-label="Jobs do projeto">{view.creatives.map(creative => <WorkflowPanel key={creative.id} creative={creative} />)}</section> : null}
+      {!planned && view.stageCapabilities && view.planningQuote ? <div className="mt-6"><StageExecutionPanel campaignId={id} quotes={[view.planningQuote]} capabilities={view.stageCapabilities} /></div> : null}
       {view.planning.simulated && (
         <div className="mt-6">
           <Notice title="Planejamento simulado">
@@ -147,7 +144,18 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
 
       {planned && view.creatives.some((c) => c.activity) && <AutoRefresh />}
 
+      {planned && <section className="mt-8 space-y-12" aria-label="Prévia e geração do vídeo">
+        {view.creatives.map((creative) => <SimpleVideoWorkspace key={creative.id} campaignId={view.id} creative={creative} productImages={view.product.images} />)}
+      </section>}
+
       {planned && (
+        <details className="mt-10 rounded-2xl border border-zinc-200 bg-white p-4 sm:p-5">
+          <summary className="cursor-pointer text-sm font-semibold text-zinc-800">Configurações avançadas e detalhes técnicos</summary>
+          <div className="mt-5 space-y-5">
+            <ReadinessPanel readiness={publicConfig.readiness} compact />
+            {view.stageCapabilities ? view.creatives.map(c => c.stageQuotes ? <StageExecutionPanel jobId={c.jobId} campaignId={id} quotes={c.stageQuotes} capabilities={view.stageCapabilities!} key={c.id} /> : null) : null}
+            <section className="space-y-4" aria-label="Jobs do projeto">{view.creatives.map(creative => <WorkflowPanel key={creative.id} creative={creative} />)}</section>
+          </div>
         <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
           <div className="min-w-0 space-y-10">
             {view.analysis && <AnalysisSection analysis={view.analysis} />}
@@ -221,6 +229,7 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
             </div>
           </aside>
         </div>
+        </details>
       )}
     </main>
   );

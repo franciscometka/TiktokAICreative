@@ -14,12 +14,13 @@ function toInput(n: number): string {
   return n.toFixed(2).replace(".", ",");
 }
 
-export default async function CreatePage({ searchParams }: { searchParams: Promise<{ from?: string }> }) {
-  const { from } = await searchParams;
+export default async function CreatePage({ searchParams }: { searchParams: Promise<{ from?: string; edit?: string }> }) {
+  const { from, edit } = await searchParams;
   const publicConfig = getPublicConfig();
   const { service } = getRuntime().deps;
 
   let initial: CampaignFormInput = {
+    simpleFlow: true,
     projectName: "", videoConcept: "", scriptMode: "generate", script: "",
     productId: newProductId(),
     name: "",
@@ -34,7 +35,9 @@ export default async function CreatePage({ searchParams }: { searchParams: Promi
     creativeCount: 1,
     styleMode: "auto",
     styles: [],
-    quality: "economy",
+    quality: "high",
+    presenterPresetId: "influencer",
+    presenterChoice: "woman",
     speakerProfileId: DEFAULT_SPEAKER_PROFILE_ID,
     budget: {
       maxCostPerCreativeBrl: toInput(publicConfig.defaultBudget.maxCostPerCreativeBrl),
@@ -50,6 +53,10 @@ export default async function CreatePage({ searchParams }: { searchParams: Promi
     try {
       const campaign = await service.getCampaign(from);
       initial = formInputFromRequest(campaign.request);
+      if (edit === "script" && campaign.plan?.creatives[0]) {
+        initial.scriptMode = "manual";
+        initial.script = campaign.plan.creatives[0].script;
+      }
       fromName = campaign.request.product.name;
       initialImages = initial.imageIds.flatMap((id) => {
         const previewUrl = imagePreviewUrl(initial.productId, id);
@@ -68,8 +75,7 @@ export default async function CreatePage({ searchParams }: { searchParams: Promi
           {fromName ? `Planejar de novo: ${fromName}` : "Criar projeto e job"}
         </h1>
         <p className="mt-1.5 max-w-2xl text-sm text-zinc-600">
-          Informe produto, imagens, conceito, roteiro e avatar. Você revisa as cenas e o custo de referência antes de iniciar a
-          execução de cada etapa.
+          Informe o produto, escolha o estilo e revise a prévia cena a cena. A geração começa com uma única autorização de custo.
         </p>
       </div>
       <div className="mb-6"><ReadinessPanel readiness={publicConfig.readiness} /></div>

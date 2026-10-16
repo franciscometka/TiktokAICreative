@@ -1,4 +1,5 @@
 import type { ExecutionStage, ExecutionMode } from "@/domain/execution";
+import type { VisualSource } from "@/domain/creative";
 import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
@@ -128,7 +129,17 @@ export async function getCampaignView(deps: AppDeps, campaignId: string): Promis
         if (!creative.jobId) continue;
         creative.hybrid = true;
         creative.stageQuotes = await Promise.all((["narration", "scenes", "avatar", "render"] as const).map(stage => service.quoteStage(creative.jobId!, stage)));
+        creative.jobQuote = await service.quoteJob(creative.jobId);
         for (const quote of creative.stageQuotes) if (quote.done) quote.repeat = await service.quoteStage(creative.jobId, quote.stage, false, true);
+        for (const scene of creative.scenes.filter(item => item.isGenerated && item.status === "ready")) {
+          scene.regenerationQuote = await service.quoteStage(
+            creative.jobId,
+            scene.visualSource === "presenter" ? "avatar" : "scenes",
+            false,
+            true,
+            scene.id,
+          );
+        }
         const job = jobs.find(item => item.id === creative.jobId);
         const plan = campaign.plan?.creatives.find(item => item.id === creative.id);
         if (job && plan) creative.nextAction = recommendedNextAction(plan, job, creative.stageQuotes, service.isJobActive(job.id));
@@ -421,9 +432,26 @@ export async function resolveSceneVideoFile(deps: AppDeps, ids: { campaignId: st
   return info?.isFile() ? { absolutePath, sizeBytes: info.size, fileName: `cena-${ids.sceneId}-${ids.version}.mp4` } : undefined;
 }
 
-export async function executeHybridStage(deps: AppDeps, input: { jobId: string; stage: ExecutionStage; token: string; regenerate?: boolean; authorizeOverBudget?: boolean }): Promise<ActionResult<{ started: boolean }>> {
+export async function executeHybridStage(deps: AppDeps, input: { jobId: string; stage: ExecutionStage; token: string; regenerate?: boolean; authorizeOverBudget?: boolean; sceneId?: string }): Promise<ActionResult<{ started: boolean }>> {
   try { const result = await deps.service.executeStage(input.jobId, input.stage, input.token, input); logBackground(input.jobId, result.completion); return { ok: true, value: { started: true } }; }
   catch (error) { return fail(error); }
+}
+
+/** Nova versão de uma cena + recomposição local/MOCK. O render só segue automaticamente quando custa zero. */
+export async function regenerateStoryboardScene(deps: AppDeps, input: { jobId: string; sceneId: string; stage: "scenes" | "avatar"; token: string }): Promise<ActionResult<{ started: boolean }>> {
+  try {
+    const result = await deps.service.executeStage(input.jobId, input.stage, input.token, { regenerate: true, sceneId: input.sceneId });
+    const completion = result.completion.then(async outcome => {
+      if (outcome.kind !== "WAITING_STAGE") return outcome;
+      const render = await deps.service.quoteStage(input.jobId, "render");
+      if (!render.ready || render.estimatedBrl !== 0) return outcome;
+      return (await deps.service.executeStage(input.jobId, "render", render.token)).completion;
+    });
+    logBackground(input.jobId, completion);
+    return { ok: true, value: { started: true } };
+  } catch (error) {
+    return fail(error);
+  }
 }
 export async function configureHybridStage(deps: AppDeps, input: { jobId: string; stage: ExecutionStage; mode: ExecutionMode }): Promise<ActionResult<{ saved: boolean }>> {
   try { await deps.service.configureStage(input.jobId, input.stage, input.mode); return { ok: true, value: { saved: true } }; }
@@ -432,4 +460,23 @@ export async function configureHybridStage(deps: AppDeps, input: { jobId: string
 export async function executeHybridPlanning(deps: AppDeps, input: { campaignId: string; token: string }): Promise<ActionResult<{ started: boolean }>> {
   try { const result = await deps.service.executePlanning(input.campaignId, input.token); logBackground(input.campaignId, result.completion); return { ok: true, value: { started: true } }; }
   catch (error) { return fail(error); }
+}
+
+export async function authorizeAndRunJob(deps: AppDeps, input: { jobId: string; token: string }): Promise<ActionResult<{ started: boolean }>> {
+  try {
+    const result = await deps.service.authorizeAndRunJob(input.jobId, input.token);
+    logBackground(input.jobId, result.completion);
+    return { ok: true, value: { started: true } };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+export async function updateStoryboardScene(deps: AppDeps, input: { jobId: string; sceneId: string; narration: string; visualDescription: string; visualSource: VisualSource }): Promise<ActionResult<{ saved: boolean }>> {
+  try {
+    await deps.service.updateStoryboardScene(input.jobId, input);
+    return { ok: true, value: { saved: true } };
+  } catch (error) {
+    return fail(error);
+  }
 }

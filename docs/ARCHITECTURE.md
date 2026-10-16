@@ -230,3 +230,9 @@ Pré-requisito já atendido: ledger persistido em `ledger.jsonl`.
 `detectRemotionBrowser` consulta apenas o filesystem; nunca chama `ensureBrowser`. A preparação continua exclusiva de `npm run render:setup`, enquanto `npm run render:check` é read-only e sem rede.
 
 `quotePlanning` e `quoteStage` expõem checks de preflight junto da cotação. O painel os mostra antes da confirmação; `executePlanning`/`executeStage` recalculam a mesma cotação sob lock e só então criam a autorização efêmera de uma unidade. `application/job-workflow.ts` deriva a próxima ação recomendada do estado e das cotações, sem duplicar regras de execução no componente.
+
+## Fluxo simples e execução automática (D78)
+
+`simpleFlow` seleciona os presets de UX sem alterar settings de campanhas antigas. `SimpleVideoWorkspace` consome apenas o view model serializável: storyboard, timeline, status, custo e URLs por ID. `updateStoryboardScene` valida a cena, recusa UGC e jobs com mídia, revisa o plano, atualiza o estado das cenas e recalcula a estimativa sob o lock da campanha.
+
+`quoteJob` cria o teto conservador e um fingerprint das entradas, modos, estimativa e revisão do storyboard. `authorizeAndRunJob` persiste `jobAuthorization` e inicia `runAuthorizedJob` no registro de jobs ativos. A orquestração chama as mesmas etapas híbridas uma a uma; antes de cada unidade compara gasto desde a aprovação + cotação com o teto. Cada provider continua protegido por `withRealStageAuthorization`. Estado interrompido é derivado e só continua após novo clique.

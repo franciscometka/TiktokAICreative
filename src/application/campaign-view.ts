@@ -1,4 +1,4 @@
-import type { StageQuote, StageCapabilities } from "@/domain/execution";
+import type { JobQuote, StageQuote, StageCapabilities } from "@/domain/execution";
 import { jobWorkflow, type RecommendedAction, type WorkflowStep } from "./job-workflow";
 import { presenterSceneViews, type PresenterSceneView } from "./presenter-view";
 import { claudeModelName } from "@/config/llm-models";
@@ -8,7 +8,7 @@ import type { CostBudget } from "@/domain/cost";
 import type { CreativePlan, VisualSource } from "@/domain/creative";
 import type { Campaign, GenerationJob, JobStatus, StyleSelection } from "@/domain/pipeline";
 import type { RenderRecord } from "@/domain/render";
-import { mediaComplete } from "@/pipeline/guards";
+import { activeAttempt, mediaComplete } from "@/pipeline/guards";
 import type { CreativeReview } from "@/domain/plan-evaluation";
 import type { Range } from "@/domain/quality";
 import { STORED_IMAGE_NAME } from "@/domain/upload";
@@ -62,6 +62,10 @@ export interface SceneView {
   onScreenText: string;
   visualDescription: string;
   generationPrompt: string;
+  status: "planned" | "generating" | "ready" | "failed";
+  videoUrl?: string;
+  simulated: boolean;
+  regenerationQuote?: StageQuote;
 }
 
 export interface PresetAdjustmentView {
@@ -112,6 +116,7 @@ export interface JobActivity {
 }
 
 export interface CreativeView {
+  jobQuote?: JobQuote;
   stageQuotes?: StageQuote[];
   hybrid?: boolean;
   nextAction?: RecommendedAction;
@@ -227,11 +232,14 @@ const CANCELLABLE: readonly JobStatus[] = ["planned", "cost_estimated", "awaitin
 /** Jobs cujo custo futuro ainda pode acontecer (entram no "projetado" da campanha). */
 const PENDING_FUTURE: readonly JobStatus[] = ["planned", "cost_estimated", "awaiting_approval", "budget_exceeded"];
 
-function sceneViews(creative: CreativePlan): SceneView[] {
+function sceneViews(creative: CreativePlan, campaignId: string, job: GenerationJob | undefined): SceneView[] {
   let cursor = 0;
   return creative.scenes.map((scene) => {
     const start = cursor;
     cursor += scene.duration;
+    const attempt = activeAttempt(job?.scenes.find((state) => state.sceneId === scene.id)?.attempts ?? []);
+    const version = attempt?.assetUri?.replaceAll("\\", "/").match(/\/(v\d+)\/clip\.mp4$/)?.[1];
+    const latest = job?.scenes.find((state) => state.sceneId === scene.id)?.attempts.at(-1);
     return {
       id: scene.id,
       number: scene.order + 1,
@@ -248,6 +256,9 @@ function sceneViews(creative: CreativePlan): SceneView[] {
       onScreenText: scene.onScreenText,
       visualDescription: scene.visualDescription,
       generationPrompt: scene.generationPrompt,
+      status: attempt ? "ready" : latest?.status === "failed" ? "failed" : job?.currentStage === (scene.visualSource === "presenter" ? "avatar" : "scenes") ? "generating" : "planned",
+      videoUrl: attempt && !attempt.isMock && version ? `/api/video/${encodeURIComponent(campaignId)}/${encodeURIComponent(creative.id)}/${encodeURIComponent(scene.id)}/${encodeURIComponent(version)}` : undefined,
+      simulated: attempt?.isMock ?? false,
     };
   });
 }
@@ -309,7 +320,7 @@ function creativeView(
     callToAction: creative.callToAction,
     durationSeconds: creative.duration,
     generatedSeconds: review?.final.generatedSeconds ?? job?.estimate?.generatedVideoSeconds ?? 0,
-    scenes: sceneViews(creative),
+    scenes: sceneViews(creative, campaign.id, job),
     presenters: presenterSceneViews(campaign, creative, job),
     workflow: jobWorkflow(campaign, creative, job, active),
     offline: campaign.executionMode === "offline",

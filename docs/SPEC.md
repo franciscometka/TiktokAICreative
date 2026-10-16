@@ -109,3 +109,11 @@ A interface oferece MOCK/REAL por planejamento, narração, cenas, presenter e r
 - O job mostra uma única "Próxima etapa recomendada", incluindo revisão de áudio, cena de avatar/produto e render.
 - `render:check` apenas verifica o navegador; `render:setup` continua sendo a única instalação explícita.
 - Testes cobrem o percurso completo por etapas em MOCK e o protocolo REAL com transportes falsos. Product UGC real permanece fora de escopo.
+
+## Fluxo simples de produção
+
+A experiência principal pede nome, imagens e descrição curta opcional; depois oferece Econômico (15–20s), Equilibrado (20–30s) e Premium (30–45s), além de mulher, homem ou sem apresentador. Provider, modelo, voz e orçamento detalhado ficam recolhidos em Configurações avançadas.
+
+O planejamento produz roteiro natural (hook → problema/desejo → produto → benefícios confirmados → CTA) e storyboard completo antes de mídia: timeline, fala, visual, tipo, referência e status por cena. Fala, visual e tipo podem ser editados antes da geração; toda edição recalcula custo e invalida a cotação anterior.
+
+O botão “Gerar vídeo por até R$ X” persiste uma autorização para o job e executa narração → avatar → cenas → render dentro desse teto. Toda chamada mantém budget, ledger, versão, integridade e limite de tentativas. Falha, cobrança incerta ou aumento pausa o job; retry pago nunca é automático. MOCK percorre tudo sem API e termina com aviso explícito de que não existe MP4.

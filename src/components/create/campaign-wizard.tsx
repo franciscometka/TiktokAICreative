@@ -23,6 +23,7 @@ import { buttonClasses, cx, Notice, Panel, Spinner } from "../ui/primitives";
 import { ImageUploader } from "./image-uploader";
 import { ListEditor } from "./list-editor";
 import { QualitySelector } from "./quality-selector";
+import { enrichProductLocally } from "@/application/product-enrichment";
 
 const DRAFT_KEY = "creative-factory:create-draft:v1";
 
@@ -179,6 +180,19 @@ export function CampaignWizard({
 
   const selectedPreset = presets.find((p) => p.quality === form.quality);
 
+  function improveProduct() {
+    const enriched = enrichProductLocally({ name: form.name, description: form.description });
+    setDirty(true);
+    setForm((current) => ({
+      ...current,
+      enrichProduct: true,
+      description: enriched.description,
+      features: current.features.length ? current.features : enriched.features,
+      benefits: current.benefits.length ? current.benefits : enriched.benefits,
+      audience: current.audience || enriched.audience,
+    }));
+  }
+
   return (
     <div className="space-y-8">
       <Stepper steps={stepsFor(step === 0 ? ["current"] : ["done", "current"])} />
@@ -222,7 +236,7 @@ export function CampaignWizard({
             )}
           </div>
 
-          <div className="mt-6 grid gap-5 md:grid-cols-2">
+          <div className="mt-6 grid gap-5">
             <Field id="name" label="Nome do produto" required error={errors.name}>
               <input
                 id="name"
@@ -233,22 +247,11 @@ export function CampaignWizard({
                 placeholder="Garrafa Térmica Inox 750ml"
               />
             </Field>
-            <Field id="url" label="Link" error={errors.url}>
-              <input
-                id="url"
-                type="url"
-                inputMode="url"
-                className={inputClasses(!!errors.url)}
-                value={form.url}
-                onChange={(e) => update("url", e.target.value)}
-                placeholder="https://"
-              />
-            </Field>
-            <div className="md:col-span-2">
-              <Field id="description" label="Descrição" required error={errors.description} hint="O que é, como funciona, materiais, medidas.">
+            <div>
+              <Field id="description" label="Descrição curta (opcional)" error={errors.description} hint="Inclua apenas fatos confirmados. Você pode deixar em branco.">
                 <textarea
                   id="description"
-                  rows={4}
+                  rows={3}
                   className={inputClasses(!!errors.description)}
                   value={form.description}
                   maxLength={FORM_LIMITS.description}
@@ -256,79 +259,81 @@ export function CampaignWizard({
                 />
               </Field>
             </div>
-            <Field id="features" label="Características" error={errors.features} hint="Uma por item. Enter adiciona.">
-              <ListEditor
-                id="features"
-                items={form.features}
-                onChange={(v) => update("features", v)}
-                placeholder="Ex.: Aço inox 304"
-                max={FORM_LIMITS.listItems}
-                invalid={!!errors.features}
-              />
-            </Field>
-            <Field id="benefits" label="Benefícios" error={errors.benefits} hint="O que a pessoa ganha usando.">
-              <ListEditor
-                id="benefits"
-                items={form.benefits}
-                onChange={(v) => update("benefits", v)}
-                placeholder="Ex.: Água gelada o dia todo"
-                max={FORM_LIMITS.listItems}
-                invalid={!!errors.benefits}
-              />
-            </Field>
-            <Field id="price" label="Preço de venda" error={errors.price} hint="Exibido no criativo.">
-              <div className="relative">
-                <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-zinc-500">R$</span>
-                <input
-                  id="price"
-                  inputMode="decimal"
-                  className={cx(inputClasses(!!errors.price), "pl-9 tabular")}
-                  value={form.price}
-                  onChange={(e) => update("price", e.target.value)}
-                  placeholder="79,90"
-                />
-              </div>
-            </Field>
-            <Field id="audience" label="Público" error={errors.audience}>
-              <input
-                id="audience"
-                className={inputClasses(!!errors.audience)}
-                value={form.audience}
-                maxLength={FORM_LIMITS.audience}
-                onChange={(e) => update("audience", e.target.value)}
-                placeholder="Ex.: estudantes que levam água para o dia"
-              />
-            </Field>
-            <div className="md:col-span-2"><Field id="projectName" label="Nome do projeto (opcional)" error={errors.projectName}>
-              <input id="projectName" className={inputClasses(!!errors.projectName)} maxLength={120} value={form.projectName ?? ""} onChange={e => update("projectName", e.target.value)} placeholder="Ex.: Garrafa · apresentação de lançamento" />
-            </Field></div>
-            <div className="md:col-span-2">
-              <Field id="notes" label="Observações" error={errors.notes} hint="Cores, variações, materiais já existentes, restrições.">
-                <textarea
-                  id="notes"
-                  rows={2}
-                  className={inputClasses(!!errors.notes)}
-                  value={form.notes}
-                  maxLength={FORM_LIMITS.notes}
-                  onChange={(e) => update("notes", e.target.value)}
-                />
-              </Field>
-            </div>
-            <div className="md:col-span-2">
+            <div>
               <Field id="images" label="Imagens do produto" error={undefined}>
                 <ImageUploader productId={form.productId} images={images} onChange={setImageList} error={errors.imageIds} />
               </Field>
             </div>
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
+              <button type="button" className={buttonClasses("secondary", "md")} onClick={improveProduct} disabled={!form.name.trim()}>
+                Melhorar informações com IA
+              </button>
+              <p className="text-xs leading-relaxed text-emerald-900">
+                {form.stageModes?.planning === "real" ? "A estrutura local é preparada agora; o Claude aprimora a análise depois da aprovação do planejamento." : "No modo MOCK, organiza localmente o texto fornecido sem inventar claims."}
+              </p>
+            </div>
+
+            <details className="rounded-xl border border-zinc-200 bg-zinc-50/70 p-4">
+              <summary className="cursor-pointer text-sm font-semibold text-zinc-800">Mais informações do produto</summary>
+              <div className="mt-5 grid gap-5 md:grid-cols-2">
+                <Field id="url" label="Link" error={errors.url}><input id="url" type="url" inputMode="url" className={inputClasses(!!errors.url)} value={form.url} onChange={(e) => update("url", e.target.value)} placeholder="https://" /></Field>
+                <Field id="price" label="Preço de venda" error={errors.price}><div className="relative"><span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-zinc-500">R$</span><input id="price" inputMode="decimal" className={cx(inputClasses(!!errors.price), "pl-9 tabular")} value={form.price} onChange={(e) => update("price", e.target.value)} placeholder="79,90" /></div></Field>
+                <Field id="features" label="Características confirmadas" error={errors.features}><ListEditor id="features" items={form.features} onChange={(v) => update("features", v)} placeholder="Ex.: Aço inox 304" max={FORM_LIMITS.listItems} invalid={!!errors.features} /></Field>
+                <Field id="benefits" label="Benefícios confirmados" error={errors.benefits}><ListEditor id="benefits" items={form.benefits} onChange={(v) => update("benefits", v)} placeholder="Ex.: Fácil de transportar" max={FORM_LIMITS.listItems} invalid={!!errors.benefits} /></Field>
+                <Field id="audience" label="Público provável" error={errors.audience}><input id="audience" className={inputClasses(!!errors.audience)} value={form.audience} maxLength={FORM_LIMITS.audience} onChange={(e) => update("audience", e.target.value)} /></Field>
+                <Field id="projectName" label="Nome do projeto" error={errors.projectName}><input id="projectName" className={inputClasses(!!errors.projectName)} maxLength={120} value={form.projectName ?? ""} onChange={(e) => update("projectName", e.target.value)} /></Field>
+                <div className="md:col-span-2"><Field id="notes" label="Observações e restrições" error={errors.notes}><textarea id="notes" rows={2} className={inputClasses(!!errors.notes)} value={form.notes} maxLength={FORM_LIMITS.notes} onChange={(e) => update("notes", e.target.value)} /></Field></div>
+              </div>
+            </details>
           </div>
 
           <div className="mt-8 flex justify-end border-t border-zinc-100 pt-5">
             <button type="button" className={buttonClasses("primary", "lg")} onClick={goToStrategy}>
-              Continuar para estratégia
+              Escolher estilo do vídeo
             </button>
           </div>
         </Panel>
       ) : (
         <div className="space-y-6">
+          <Panel className="overflow-hidden border-zinc-900 bg-zinc-950 p-0 text-white">
+            <div className="border-b border-white/10 px-5 py-5 sm:px-6">
+              <p className="text-xs font-semibold tracking-[0.18em] text-emerald-300 uppercase">Direção do vídeo</p>
+              <h2 className="mt-2 text-2xl font-semibold tracking-tight">Escolha o nível. O sistema monta o resto.</h2>
+              <p className="mt-2 max-w-2xl text-sm text-zinc-300">Você verá roteiro, timeline e custo completo antes de autorizar qualquer geração.</p>
+            </div>
+            <div className="space-y-7 px-5 py-6 sm:px-6">
+              <div>
+                <p className="mb-3 text-sm font-medium">Qualidade e duração</p>
+                <QualitySelector presets={presets} value={form.quality} onChange={(q) => update("quality", q)} />
+              </div>
+              <fieldset>
+                <legend className="text-sm font-medium">Apresentador</legend>
+                <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                  {([
+                    { id: "influencer", label: "Mulher", detail: "Apresentadora em cena" },
+                    { id: "game-character-man", label: "Homem", detail: "Apresentador em cena" },
+                    { id: "", label: "Sem apresentador", detail: "Produto, imagens e texto" },
+                  ] as const).map((option) => {
+                    const choice = option.id === "" ? "none" : option.id === "game-character-man" ? "man" : "woman";
+                    const selected = (form.presenterChoice ?? (form.presenterPresetId ? "woman" : "none")) === choice;
+                    return <button key={option.label} type="button" role="radio" aria-checked={selected} onClick={() => { update("presenterChoice", choice); update("presenterPresetId", option.id); }} className={cx("rounded-xl border p-4 text-left transition", selected ? "border-emerald-300 bg-emerald-300 text-zinc-950" : "border-white/15 bg-white/5 hover:border-white/35")}><span className="block font-semibold">{option.label}</span><span className={cx("mt-1 block text-xs", selected ? "text-zinc-700" : "text-zinc-400")}>{option.detail}</span></button>;
+                  })}
+                </div>
+              </fieldset>
+              <Field id="videoConcept" label="Ideia do vídeo (opcional)" error={errors.videoConcept} hint="Uma orientação curta. O roteiro será gerado automaticamente.">
+                <textarea id="videoConcept" rows={3} maxLength={2000} className={inputClasses(!!errors.videoConcept)} value={form.videoConcept ?? ""} onChange={(e) => update("videoConcept", e.target.value)} placeholder="Ex.: direto, cotidiano e com foco nos detalhes do produto" />
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div><p className="text-xs text-zinc-400">Duração estimada</p><p className="mt-1 text-lg font-semibold">{selectedPreset ? `${selectedPreset.finalVideoSeconds.min}–${selectedPreset.finalVideoSeconds.max}s` : "—"}</p></div>
+                <div><p className="text-xs text-zinc-400">Faixa de referência</p><p className="mt-1 text-lg font-semibold">{selectedPreset?.targetCostBrl ? `R$ ${selectedPreset.targetCostBrl.min.toFixed(0)}–${selectedPreset.targetCostBrl.max.toFixed(0)}` : "Calculada na prévia"}</p></div>
+                <div><p className="text-xs text-zinc-400">Próximo passo</p><p className="mt-1 text-sm font-medium">Prévia completa das cenas</p></div>
+              </div>
+            </div>
+          </Panel>
+
+          <details className="rounded-xl border border-zinc-200 bg-white p-4">
+            <summary className="cursor-pointer text-sm font-semibold text-zinc-800">Configurações avançadas</summary>
+            <div className="mt-5 space-y-6">
           <Panel className="space-y-4 p-5 sm:p-6">
             <h2 className="text-lg font-semibold tracking-tight">Modo por etapa</h2>
             <p className="mt-2 text-sm text-zinc-600">Tudo começa em MOCK. REAL só pode ser executado após revisar o custo e confirmar a etapa no projeto.</p>
@@ -499,6 +504,8 @@ export function CampaignWizard({
               </span>
             </label>
           </Panel>
+            </div>
+          </details>
 
           <Panel className="p-5 sm:p-6">
             <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
@@ -525,7 +532,7 @@ export function CampaignWizard({
                   disabled={pending || !planningAvailable}
                 >
                   {pending && <Spinner />}
-                  {pending ? "Iniciando…" : form.stageModes?.planning === "real" ? "Criar projeto e revisar custo" : "Planejar campanha"}
+                  {pending ? "Criando prévia…" : form.stageModes?.planning === "real" ? "Criar projeto e revisar planejamento" : "Criar prévia do vídeo"}
                 </button>
               </div>
             </div>

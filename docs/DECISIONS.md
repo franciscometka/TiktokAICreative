@@ -333,3 +333,11 @@ O navegador do Remotion é detectado por existência do executável configurado 
 Toda cotação por etapa inclui preflight de provider/configuração, assets, narração/alignment e avatar quando aplicáveis, duração, tentativas, orçamento e confirmação. O painel é informativo; a segurança continua no servidor: a execução refaz a cotação sob lock, verifica token/orçamento/estado e cria autorização efêmera para uma única chamada. A próxima ação é derivada das cotações na camada application. Nenhuma cascata, retry pago, mutação do ledger ou simplificação das proteções existentes.
 
 O protocolo futuro é deliberadamente pequeno: uma narração, uma cena curta de avatar, uma cena curta de produto e um render local, cada item com cotação e clique próprios. A implementação é validada em MOCK e com transportes falsos; chamadas reais continuam pendentes de autorização. Product UGC real permanece desabilitado.
+
+## D78 — Fluxo simples com storyboard e autorização única do job
+
+Novos projetos da interface usam `simpleFlow`, com Produto → preset → storyboard → teto → geração automática. Os presets de apresentação são Econômico (15–20s), Equilibrado (20–30s) e Premium (30–45s); os settings históricos continuam intactos para não reinterpretar campanhas existentes. O formulário exige só nome, imagens opcionais e descrição curta opcional. “Melhorar informações com IA” estrutura localmente apenas fatos fornecidos no MOCK; com planejamento REAL, a análise do Claude continua atrás da cotação e aprovação existentes.
+
+O storyboard é persistido no plano antes da mídia. Editar uma cena recalcula a revisão e a estimativa, invalida a cotação anterior e é recusado depois que existem assets. Product UGC continua fora da lista selecionável, embora `VisualSource` permaneça preparado para ele.
+
+`JobAuthorization` persiste cotação, custo real de base, teto, status e motivo de pausa. Um clique autoriza a sequência narração → avatar → cenas → render. Cada unidade ainda recebe autorização efêmera, guard de orçamento, ledger e limite de tentativas nas camadas existentes. A sequência para no primeiro erro, custo incerto, revisão de áudio ou aumento; não há retry pago. Reinício nunca retoma sozinho: a UI oferece continuação explícita com nova cotação, preservando o teto e o histórico. Regeneração de cena permanece explícita, versionada e separada.

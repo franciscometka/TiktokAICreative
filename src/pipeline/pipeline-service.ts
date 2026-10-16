@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { MOCK_STAGE_MODES, type ExecutionStage, type ExecutionMode, type StageCapabilities, type StageQuote } from "@/domain/execution";
+import { MOCK_STAGE_MODES, type ExecutionStage, type ExecutionMode, type JobQuote, type StageCapabilities, type StageQuote } from "@/domain/execution";
 import type { PreflightCheck } from "@/domain/readiness";
 import { withRealStageAuthorization } from "@/config/execution-policy";
 import { RUNWAY_VIDEO } from "@/config/video-models";
+import { SIMPLE_QUALITY_PRESETS } from "@/config/simple-presets";
 import { generatePresenter, presenterPreview, PresenterPendingError, type PresenterFlowDeps } from "./presenter-flow";
 import type { PresenterProvider } from "@/providers/presenter/presenter-provider";
 import { readFile } from "node:fs/promises";
@@ -49,7 +50,7 @@ import type {
   ProviderPricing,
 } from "@/domain/cost";
 import type { NarrationInfo, NarrationTiming } from "@/domain/audio";
-import type { CreativePlan, ScenePlan } from "@/domain/creative";
+import { ScenePlanSchema, type CreativePlan, type ScenePlan, type VisualSource } from "@/domain/creative";
 import { getSpeakerProfile } from "@/config/voices";
 import {
   CampaignRequestSchema,
@@ -271,13 +272,15 @@ export class PipelineService {
     });
     return { campaign, completion: withRealStageAuthorization("planning", () => this.launchPlanning(campaign)) };
   }
-  async quoteStage(jobId: string, stage: ExecutionStage, internal = false, regenerate = false): Promise<StageQuote> {
+  async quoteStage(jobId: string, stage: ExecutionStage, internal = false, regenerate = false, targetSceneId?: string): Promise<StageQuote> {
     if (stage === "planning") return this.quotePlanning((await this.getJob(jobId)).campaignId);
     const ctx = await this.load(jobId); const { job, creative, campaign } = ctx;
     const mode = job.stageModes?.[stage] ?? "mock";
     const narration = activeAttempt(job.audioAttempts);
     const scenes = creative.scenes.filter(s => (stage === "avatar" || stage === "scenes") && s.requiresGeneratedVideo && (stage === "avatar" ? s.visualSource === "presenter" : s.visualSource !== "presenter"));
-    const scene = regenerate ? scenes[0] : scenes.find(s => !this.matchesMode(activeAttempt(job.scenes.find(g => g.sceneId === s.id)?.attempts ?? []), mode));
+    const scene = regenerate
+      ? targetSceneId ? scenes.find(item => item.id === targetSceneId) : scenes[0]
+      : scenes.find(s => !this.matchesMode(activeAttempt(job.scenes.find(g => g.sceneId === s.id)?.attempts ?? []), mode));
     let unit = stage === "narration" ? "narration" : stage === "render" ? "render" : scene?.id ?? "done";
     const done = !regenerate && (stage === "narration" ? this.matchesMode(narration, mode) : stage === "render" ? job.status === "completed" && !job.renderStale && job.renders.some(r => r.status === "completed" && (mode === "mock" || !r.isMock)) : !scene);
     let model = stage === "narration" ? ctx.pricing.audio.model : stage === "render" ? ctx.pricing.rendering.model : stage === "avatar" ? RUNWAY_PRESENTER.model : ctx.pricing.video.model;
@@ -351,12 +354,174 @@ export class PipelineService {
     ];
     return { regenerate, budgetDecision, stage, mode, unit, token: this.fingerprint({ job, stage, mode, unit, estimatedBrl, model, provider, budgetDecision, regenerate }), provider, model, estimatedBrl, actualBrl: entries.filter(e => !e.simulated).reduce((a,e) => a+e.costBrl,0), simulatedBrl: entries.filter(e => e.simulated).reduce((a,e) => a+e.costBrl,0), ready: !blocked && !done, blocked, done, state: this.isJobActive(jobId) && job.currentStage === stage ? "Em andamento" : done ? "Concluído" : blocked ? "Bloqueado" : "Aguardando ação explícita", preflight };
   }
-  async executeStage(jobId: string, stage: ExecutionStage, token: string, options: { regenerate?: boolean; authorizeOverBudget?: boolean } = {}) {
+
+  /** Cotação única do fluxo simples. Conservadora: qualquer etapa REAL reserva o futuro inteiro da estimativa. */
+  async quoteJob(jobId: string): Promise<JobQuote> {
+    const ctx = await this.load(jobId);
+    const stages = await Promise.all((['narration', 'avatar', 'scenes', 'render'] as const).map(stage => this.quoteStage(jobId, stage)));
+    const entries = (await this.deps.ledger.list({ jobId })).filter(entry => !entry.simulated);
+    const actualBrl = roundBrl(entries.reduce((total, entry) => total + entry.costBrl, 0));
+    const hasRealStage = (['narration', 'avatar', 'scenes', 'render'] as const).some(stage => ctx.job.stageModes?.[stage] === 'real');
+    const stageEstimate = roundBrl(stages.reduce((total, quote) => total + quote.estimatedBrl, 0));
+    // A estimativa histórica do job não incluía o custo específico do provider de
+    // presenter. Reserve todas as cenas de avatar ainda não geradas para que o teto
+    // único não aumente no meio da execução automática.
+    let presenterReserve = 0;
+    if (ctx.job.stageModes?.avatar === 'real') {
+      const rate = (await this.deps.exchangeRates.getUsdBrl()).rate;
+      const presenter = this.presenterProvider(ctx);
+      for (const scene of ctx.creative.scenes.filter(item => item.visualSource === 'presenter' && item.requiresGeneratedVideo)) {
+        const state = ctx.job.scenes.find(item => item.sceneId === scene.id);
+        if (!this.matchesMode(activeAttempt(state?.attempts ?? []), 'real')) {
+          presenterReserve += presenter.estimateCost(scene.duration).costUsd * rate;
+        }
+      }
+    }
+    const conservativeEstimate = hasRealStage
+      ? roundBrl(Math.max(stageEstimate, ctx.job.estimate?.estimatedAdditionalBrl ?? 0) + presenterReserve)
+      : 0;
+    const maximumAuthorizedBrl = roundBrl(actualBrl + conservativeEstimate);
+    let blocked: string | undefined;
+    if (!this.deps.hybrid || !['hybrid', 'offline'].includes(ctx.campaign.executionMode ?? '')) blocked = 'Crie uma cópia no fluxo atual para usar a geração automática.';
+    else if (this.isJobActive(jobId)) blocked = 'O job já está em execução.';
+    else if (ctx.job.status === 'cancelled') blocked = 'O job foi cancelado.';
+    else if (!ctx.job.estimate) blocked = 'A estimativa do job ainda não está pronta.';
+    else {
+      const unavailable = (['narration', 'avatar', 'scenes', 'render'] as const).find(stage =>
+        ctx.job.stageModes?.[stage] === 'real' && !this.deps.hybrid?.capabilities[stage].available,
+      );
+      if (unavailable) blocked = this.deps.hybrid.capabilities[unavailable].reason;
+    }
+    const token = this.fingerprint({
+      jobId,
+      estimateId: ctx.job.estimate?.id,
+      stageModes: ctx.job.stageModes,
+      stageRevision: ctx.job.stageRevision,
+      storyboardRevision: ctx.job.storyboardRevision,
+      maximumAuthorizedBrl,
+      actualBrl,
+      units: stages.map(({ stage, mode, unit, provider, model }) => ({ stage, mode, unit, provider, model })),
+    });
+    return { jobId, token, estimatedBrl: conservativeEstimate, maximumAuthorizedBrl, actualBrl, ready: !blocked, blocked, stages };
+  }
+
+  /**
+   * Aprova o teto do job inteiro e inicia a sequência. Cada provider continua recebendo uma
+   * autorização efêmera por chamada; a sequência para no primeiro erro, incerteza ou aumento.
+   */
+  async authorizeAndRunJob(jobId: string, token: string) {
+    const prepared = await this.withJobLock(jobId, async () => {
+      this.assertJobIdle(jobId);
+      const quote = await this.quoteJob(jobId);
+      if (quote.token !== token || !quote.ready) throw new Error(quote.blocked ?? 'A estimativa mudou; revise o novo teto antes de gerar.');
+      let job = await this.getJob(jobId);
+      if (!job.estimate) throw new Error('Job sem estimativa.');
+      const estimateId = job.estimate.id;
+      const budget = await this.checkJobBudget(await this.load(jobId), quote.estimatedBrl);
+      if (budget.kind === 'BUDGET_EXCEEDED') throw new Error(`O teto de R$ ${quote.maximumAuthorizedBrl.toFixed(2)} excede o orçamento configurado.`);
+      if (job.status === 'planned') job = await this.estimateJob(job.id);
+      if (job.status === 'cost_estimated') job = transitionJob(job, 'awaiting_approval', this.deps.clock());
+      if (job.status === 'failed') {
+        job = transitionJob(job, 'cost_estimated', this.deps.clock());
+        job = transitionJob(job, 'awaiting_approval', this.deps.clock());
+      }
+      job = {
+        ...job,
+        approval: { estimateId, approvedTotalBrl: quote.maximumAuthorizedBrl, overBudget: false, approvedAt: this.deps.clock() },
+        jobAuthorization: {
+          quoteToken: token,
+          estimatedBrl: quote.estimatedBrl,
+          maximumAuthorizedBrl: quote.maximumAuthorizedBrl,
+          baselineActualBrl: quote.actualBrl,
+          status: 'active',
+          approvedAt: this.deps.clock(),
+        },
+        waitingForStage: undefined,
+        error: undefined,
+      };
+      if (job.status === 'awaiting_approval' || job.status === 'completed' || job.status === 'budget_exceeded') job = transitionJob(job, 'generating', this.deps.clock());
+      await this.deps.store.saveJob(job);
+      return job;
+    });
+    return { job: prepared, completion: this.launchJob(jobId, () => this.runAuthorizedJob(jobId)) };
+  }
+
+  private async pauseAuthorizedJob(jobId: string, reason: string): Promise<GenerationOutcome> {
+    const job = await this.withJobLock(jobId, async () => {
+      const current = await this.getJob(jobId);
+      const next = {
+        ...current,
+        jobAuthorization: current.jobAuthorization ? { ...current.jobAuthorization, status: 'paused' as const, pausedReason: reason } : undefined,
+        waitingForStage: current.currentStage,
+        error: reason,
+        updatedAt: this.deps.clock(),
+      };
+      await this.deps.store.saveJob(next);
+      return next;
+    });
+    return { kind: 'WAITING_STAGE', job };
+  }
+
+  private async runAuthorizedJob(jobId: string): Promise<GenerationOutcome> {
+    for (const stage of ['narration', 'avatar', 'scenes', 'render'] as const) {
+      while (true) {
+        const job = await this.getJob(jobId);
+        const authorization = job.jobAuthorization;
+        if (!authorization || authorization.status !== 'active') return this.pauseAuthorizedJob(jobId, 'A autorização do job não está ativa.');
+        const quote = await this.quoteStage(jobId, stage, true);
+        if (quote.done) break;
+        if (quote.blocked) return this.pauseAuthorizedJob(jobId, quote.blocked);
+        const actual = await this.getJobCostReport(jobId);
+        const spentSinceApproval = Math.max(0, actual.actual.totalBrl - authorization.baselineActualBrl);
+        if (toCents(spentSinceApproval + quote.estimatedBrl) > toCents(authorization.estimatedBrl)) {
+          return this.pauseAuthorizedJob(jobId, 'A cotação aumentou além do teto aprovado. Revise o novo custo antes de continuar.');
+        }
+        await this.withJobLock(jobId, async () => {
+          const current = await this.getJob(jobId);
+          const approval = current.jobAuthorization;
+          if (!approval || approval.status !== 'active') throw new Error('Autorização do job expirada.');
+          await this.deps.store.saveJob({
+            ...current,
+            stageApprovals: [...(current.stageApprovals ?? []), {
+              stage, mode: quote.mode, provider: quote.provider, model: quote.model, unit: quote.unit,
+              quoteToken: quote.token, estimatedBrl: quote.estimatedBrl, approvedAt: this.deps.clock(),
+            }],
+            waitingForStage: undefined,
+            error: undefined,
+          });
+        });
+        const outcome = await this.performHybridStage(jobId, stage);
+        if (outcome.kind !== 'WAITING_STAGE') {
+          if (outcome.kind === 'COMPLETED') {
+            const completed = await this.withJobLock(jobId, async () => {
+              const current = await this.getJob(jobId);
+              const next = { ...current, jobAuthorization: current.jobAuthorization ? { ...current.jobAuthorization, status: 'completed' as const, pausedReason: undefined } : undefined };
+              await this.deps.store.saveJob(next);
+              return next;
+            });
+            return { ...outcome, job: completed };
+          }
+          const reason = outcome.kind === 'FAILED' ? outcome.error
+            : outcome.kind === 'AUDIO_REVIEW' ? 'A duração da narração precisa de revisão.'
+            : 'O orçamento precisa de uma nova decisão.';
+          const paused = await this.withJobLock(jobId, async () => {
+            const current = await this.getJob(jobId);
+            const next = { ...current, jobAuthorization: current.jobAuthorization ? { ...current.jobAuthorization, status: 'paused' as const, pausedReason: reason } : undefined };
+            await this.deps.store.saveJob(next);
+            return next;
+          });
+          return { ...outcome, job: paused };
+        }
+      }
+    }
+    return { kind: 'WAITING_STAGE', job: await this.getJob(jobId) };
+  }
+  async executeStage(jobId: string, stage: ExecutionStage, token: string, options: { regenerate?: boolean; authorizeOverBudget?: boolean; sceneId?: string } = {}) {
     if (stage === "planning") throw new Error("Use a ação de planejamento do projeto.");
     let budgetStillBlocked = false;
     const job = await this.withJobLock(jobId, async () => {
       this.assertJobIdle(jobId);
-      const quote = await this.quoteStage(jobId, stage, false, options.regenerate);
+      const quote = await this.quoteStage(jobId, stage, false, options.regenerate, options.sceneId);
       if (token !== quote.token || (!quote.ready && !(options.authorizeOverBudget && quote.budgetDecision?.canAuthorizeOverBudget))) throw new Error(quote.blocked ?? "Estimativa alterada ou etapa concluída; revise novamente.");
       await this.adoptOfflineCampaign(await this.getCampaign((await this.getJob(jobId)).campaignId));
       let job = await this.getJob(jobId);
@@ -373,9 +538,9 @@ export class PipelineService {
       await this.deps.store.saveJob(job); return job;
     });
     if (budgetStillBlocked) return { job, completion: Promise.resolve({ kind: "WAITING_STAGE" as const, job }) };
-    return { job, completion: this.launchJob(jobId, () => this.performHybridStage(jobId, stage, options.regenerate)) };
+    return { job, completion: this.launchJob(jobId, () => this.performHybridStage(jobId, stage, options.regenerate, options.sceneId)) };
   }
-  private async performHybridStage(jobId: string, stage: ExecutionStage, regenerate = false): Promise<GenerationOutcome> {
+  private async performHybridStage(jobId: string, stage: ExecutionStage, regenerate = false, targetSceneId?: string): Promise<GenerationOutcome> {
     this.hybridInvocations.add(jobId);
     try {
       return await withRealStageAuthorization(stage, async () => {
@@ -386,7 +551,7 @@ export class PipelineService {
         return this.withJobLock(jobId, async () => {
           let ctx = await this.load(jobId); let job = ctx.job;
           assertCanStartPaidCall(job);
-          const quote = await this.quoteStage(jobId, stage, true, regenerate);
+          const quote = await this.quoteStage(jobId, stage, true, regenerate, targetSceneId);
           if (quote.blocked || quote.done) throw new Error(quote.blocked ?? "Etapa já concluída");
           const paused = await this.pauseIfOverBudget(ctx, quote.estimatedBrl);
           if (paused) return paused;
@@ -402,7 +567,7 @@ export class PipelineService {
             const result = await this.generateNarration({ ...ctx, job }, provider.provider); job = result.job;
             if (result.attempt.status === "failed") { job = { ...job, stageIntents: job.stageIntents?.map(i => i.stage === stage ? { ...i, state: "settled" as const } : i) }; return this.fail(job, result.attempt.error); }
           } else {
-            for (const scene of ctx.creative.scenes.filter(s => s.requiresGeneratedVideo && (stage === "avatar" ? s.visualSource === "presenter" : s.visualSource !== "presenter"))) {
+            for (const scene of ctx.creative.scenes.filter(s => s.requiresGeneratedVideo && (stage === "avatar" ? s.visualSource === "presenter" : s.visualSource !== "presenter") && (!targetSceneId || s.id === targetSceneId))) {
               const state = job.scenes.find(s => s.sceneId === scene.id)!;
               if (!regenerate && this.matchesMode(activeAttempt(state.attempts), mode)) continue;
               const pending = job.presenterTasks?.some(t => t.sceneId === scene.id && (t.state === "pending" || t.state === "submitting")) || job.videoTasks?.some(t => t.sceneId === scene.id && t.state === "pending");
@@ -465,7 +630,9 @@ export class PipelineService {
     const planningMode = request.stageModes?.planning ?? "mock";
     if (!this.deps.hybrid) this.assertPlannerAvailable();
     if (this.deps.hybrid) for (const [stage, mode] of Object.entries(request.stageModes ?? {})) { if (mode === "real" && !this.deps.hybrid.capabilities[stage as ExecutionStage].available) throw new Error(this.deps.hybrid.capabilities[stage as ExecutionStage].reason); }
-    const resolved = resolveQualitySettings(request.quality, request.customSettings);
+    const resolved = request.simpleFlow && request.quality !== "custom"
+      ? SIMPLE_QUALITY_PRESETS[request.quality]
+      : resolveQualitySettings(request.quality, request.customSettings);
     const settings = this.deps.videoChoice && request.quality !== "custom" ? { ...resolved, video: this.deps.videoChoice } : resolved;
     await this.assertPlanningFitsBudget(request, settings, 0);
 
@@ -547,6 +714,58 @@ export class PipelineService {
 
   listCampaignIds(): Promise<string[]> {
     return this.deps.store.listCampaignIds();
+  }
+
+  /** Edita o storyboard antes da geração e invalida somente estimativa/aprovação derivadas. */
+  async updateStoryboardScene(jobId: string, input: { sceneId: string; narration: string; visualDescription: string; visualSource: VisualSource }): Promise<GenerationJob> {
+    return this.withJobLock(jobId, async () => {
+      this.assertJobIdle(jobId);
+      const ctx = await this.load(jobId);
+      if (!['planned', 'cost_estimated', 'awaiting_approval'].includes(ctx.job.status)) throw new Error('Edite o roteiro em uma nova versão depois que a geração começar.');
+      if (ctx.job.audioAttempts.length > 0 || ctx.job.scenes.some(scene => scene.attempts.length > 0)) throw new Error('Este job já possui mídia. Crie outra versão para editar o storyboard sem invalidar assets.');
+      const generated = ['generated_video', 'product_hero', 'product_demo', 'lifestyle', 'presenter', 'product_ugc'].includes(input.visualSource);
+      if (input.visualSource === 'product_ugc') throw new Error('Product UGC ainda está preparado apenas na arquitetura e não pode ser selecionado neste lote.');
+      if (input.visualSource === 'presenter' && !ctx.campaign.request.presenterPresetId) throw new Error('Escolha um apresentador antes de transformar a cena em apresentação.');
+      const scene = ctx.creative.scenes.find(item => item.id === input.sceneId);
+      if (!scene) throw new Error('Cena não encontrada.');
+      const nextScene = ScenePlanSchema.parse({
+        ...scene,
+        narration: input.narration.trim(),
+        visualDescription: input.visualDescription.trim(),
+        visualSource: input.visualSource,
+        requiresGeneratedVideo: generated,
+        estimatedGenerationSeconds: generated ? Math.min(scene.duration, Math.max(2, scene.estimatedGenerationSeconds || scene.duration)) : 0,
+        generationPrompt: generated ? (scene.generationPrompt.trim() || `Natural product video. ${input.visualDescription.trim()}`) : '',
+        motion: input.visualSource === 'presenter' ? 'none' : generated ? scene.motion : scene.motion === 'none' ? 'ken_burns' : scene.motion,
+      });
+      const updatedCreative = {
+        ...ctx.creative,
+        scenes: ctx.creative.scenes.map(item => item.id === scene.id ? nextScene : item),
+        script: ctx.creative.scenes.map(item => item.id === scene.id ? nextScene.narration : item.narration).filter(Boolean).join(' '),
+      };
+      const rate = (await this.deps.exchangeRates.getUsdBrl()).rate;
+      const reviewed = reviewCampaignPlan({
+        ...ctx.campaign.plan!,
+        creatives: ctx.campaign.plan!.creatives.map(item => item.id === updatedCreative.id ? updatedCreative : item),
+      }, ctx.campaign.settings, ctx.pricing, rate);
+      const campaign = { ...ctx.campaign, plan: reviewed.plan, reviews: reviewed.reviews, updatedAt: this.deps.clock() };
+      let job: GenerationJob = {
+        ...ctx.job,
+        scenes: reviewed.plan.creatives.find(item => item.id === ctx.creative.id)!.scenes.map(item => ({
+          sceneId: item.id,
+          order: item.order,
+          requiresGeneratedVideo: item.requiresGeneratedVideo,
+          attempts: ctx.job.scenes.find(state => state.sceneId === item.id)?.attempts ?? [],
+        })),
+        storyboardRevision: (ctx.job.storyboardRevision ?? 0) + 1,
+        jobAuthorization: undefined,
+        stageApprovals: [],
+      };
+      if (job.status === 'awaiting_approval') job = transitionJob(job, 'cost_estimated', this.deps.clock());
+      await this.deps.store.saveCampaign(campaign);
+      await this.deps.store.saveJob(job);
+      return this.estimateJob(job.id);
+    });
   }
 
   private assertPlannerAvailable(): void {

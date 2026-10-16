@@ -8,6 +8,7 @@ produto → análise/hooks/conceitos/roteiro/cenas (Claude) → validação + aj
 Custo é preocupação central; nada pago de mídia acontece sem aprovação explícita.
 
 ## Estado atual
+- Redesign D78: fluxo principal simplificado (produto → preset/apresentador → storyboard → teto único → pipeline automático → resultado). Novos projetos usam Econômico 15–20s, Equilibrado 20–30s e Premium 30–45s. Configuração técnica fica recolhida; campanhas antigas preservam settings. Nenhuma validação paga deste fluxo.
 - Lote 5.1: diagnóstico público sem segredos, configuração inválida com fallback seguro para MOCK, preflight local por ação, navegador Remotion detectado sem download e "Próxima etapa recomendada" no job. Protocolo completo validado só com mocks/transportes falsos; nenhuma chamada paga.
 - Prompt ativo: `campaign-plan@1.4.0` (inclui brief e valida preservação do roteiro manual; ainda sem validação paga).
 - Interface híbrida por etapa (D76): MOCK default; REAL apenas com provider configurado, cotação e confirmação por unidade. Nenhuma cascata paga. Planejamento real aguarda draft/aprovação. Guia: `docs/HYBRID-WORKFLOW.md`. CLI `--confirm` isolado continua bloqueada.

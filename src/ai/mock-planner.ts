@@ -95,9 +95,9 @@ export function buildMockDraft(request: PlanningRequest): CampaignPlanDraft {
     analysis: {
       summary: `[MOCK] Análise simulada de ${product.name}. Nenhum LLM foi chamado.`,
       targetAudiences: [product.targetAudience ?? "[MOCK] público geral do TikTok Shop"],
-      problemsSolved: ["[MOCK] problema genérico"],
-      benefits: product.benefits.length > 0 ? product.benefits : ["[MOCK] benefício genérico"],
-      differentiators: ["[MOCK] diferencial"],
+      problemsSolved: ["Problema ou desejo não informado; revisar antes de gerar."],
+      benefits: product.benefits.length > 0 ? product.benefits : ["Benefícios não informados; nenhuma promessa foi criada."],
+      differentiators: product.features,
       sellingAngles: styles.map((s) => `[MOCK] ${s}`),
       objections: ["[MOCK] preço", "[MOCK] confiança na entrega"],
       communicationRisks: ["[MOCK] não prometer resultados"],
@@ -108,8 +108,8 @@ export function buildMockDraft(request: PlanningRequest): CampaignPlanDraft {
   };
 }
 
-function hookText(product: ProductInput, style: CreativeStyle): string {
-  return `[MOCK] ${style}: você precisa ver o ${product.name}`;
+function hookText(product: ProductInput, _style: CreativeStyle): string {
+  return `Olha só este ${product.name}.`;
 }
 
 function buildCreative(
@@ -132,8 +132,8 @@ function buildCreative(
   const totalGenDuration = genDuration();
 
   const hook = hookText(product, style);
-  const benefit = product.benefits[0] ?? product.description;
-  const cta = "[MOCK] Clique no carrinho laranja e garanta o seu";
+  const benefit = product.benefits[0];
+  const cta = "Confira as informações do produto antes de escolher.";
 
   const scenes: ScenePlanDraft[] = SCENE_TEMPLATES.map((t, i) => {
     const sceneDuration = durations[i] ?? 0;
@@ -141,8 +141,12 @@ function buildCreative(
     const genSeconds = isGenerated
       ? Math.max(0.5, Math.min(sceneDuration, roundHalf((targetGen * sceneDuration) / totalGenDuration)))
       : 0;
-    const narration =
-      t.role === "hook" ? hook : t.role === "cta" ? cta : `[MOCK] ${t.role}: ${benefit}`;
+    const narration = t.role === "hook" ? hook
+      : t.role === "problem" ? `Se você está procurando uma opção como ${product.name}, vale conhecer os detalhes.`
+      : t.role === "reveal" ? product.description
+      : t.role === "benefits" ? (benefit ? `Entre os benefícios informados está: ${benefit}.` : "Os benefícios ainda precisam ser confirmados pelo vendedor.")
+      : t.role === "demo" ? `Veja as imagens e as características confirmadas de ${product.name}.`
+      : cta;
     return {
       duration: sceneDuration,
       narration,
@@ -193,7 +197,9 @@ function applyBrief(creative: CreativePlanDraft, request: PlanningRequest): Crea
   const size = Math.ceil(words.length / creative.scenes.length);
   const scenes = creative.scenes.map((scene, i) => {
     const narration = words.slice(i * size, (i + 1) * size).join(" ");
-    const duration = Math.max(0.5, Math.round((narration ? narration.split(/\s+/).length / 2.5 : 0.5) * 10) / 10);
+    // O preset define a duração prometida na UX. Distribuir outro texto não pode
+    // encurtar silenciosamente o vídeo depois que a pessoa escolheu essa faixa.
+    const duration = scene.duration;
     return { ...scene, narration, duration, estimatedGenerationSeconds: scene.requiresGeneratedVideo ? Math.min(duration, scene.estimatedGenerationSeconds) : 0,
       visualDescription: `${request.videoConcept || "Apresentação do produto"} — cena ${i + 1}` };
   });

@@ -41,10 +41,12 @@ describe("validação do formulário", () => {
     expect(form.budget).toEqual({ maxCostPerCreativeBrl: 15, maxCostPerCampaignBrl: 100, allowOverBudget: true });
   });
 
-  it("nome e descrição são obrigatórios, com mensagem por campo", () => {
+  it("nome é obrigatório e descrição pode ficar vazia no fluxo simples", () => {
     const errors = errorsOf(formInput({ name: "  ", description: "" }));
     expect(errors.name).toBe("Informe o nome do produto.");
-    expect(errors.description).toBe("Descreva o produto.");
+    expect(errors.description).toBeUndefined();
+    const parsed = valueOf(formInput({ description: "" }));
+    expect(parsed.description).toBe("");
   });
 
   it("link precisa ser http(s); preço precisa ser positivo", () => {
@@ -116,6 +118,15 @@ describe("toCampaignRequest / formInputFromRequest", () => {
     const form = valueOf(formInput({ styleMode: "auto", styles: [] }));
     const back = formInputFromRequest(toCampaignRequest(form, []));
     expect(valueOf(back)).toEqual(form);
+  });
+
+  it("mapeia a escolha simples de apresentador sem manter enums paralelos no domínio", () => {
+    const woman = valueOf(formInput({ simpleFlow: true, presenterChoice: "woman", presenterPresetId: undefined }));
+    expect(toCampaignRequest(woman, []).presenterPresetId).toBe("influencer");
+    const man = valueOf(formInput({ simpleFlow: true, presenterChoice: "man", presenterPresetId: undefined }));
+    expect(toCampaignRequest(man, []).presenterPresetId).toBe("game-character-man");
+    const none = valueOf(formInput({ simpleFlow: true, presenterChoice: "none", presenterPresetId: "influencer" }));
+    expect(toCampaignRequest(none, []).presenterPresetId).toBeUndefined();
   });
 });
 

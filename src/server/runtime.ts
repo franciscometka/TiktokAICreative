@@ -10,6 +10,7 @@ import { summarizePresets, type PresetSummary } from "@/costs/preset-summary";
 import { StaticPricingCatalog } from "@/costs/pricing-catalog";
 import type { CostBudget } from "@/domain/cost";
 import { LocalUploadStore } from "@/storage/upload-store";
+import { SIMPLE_QUALITY_PRESETS } from "@/config/simple-presets";
 
 /**
  * Runtime do processo Next.js (SERVIDOR). Um único PipelineService por processo: ele guarda os
@@ -85,6 +86,6 @@ export function getPublicConfig(): PublicAppConfig {
 
 export function getPresetSummaries(): PresetSummary[] {
   const config = getRuntime().config;
-  return summarizePresets(new StaticPricingCatalog(PRICING_TABLE), config.exchangeRate, config.videoProvider === "runway" ? RUNWAY_VIDEO : undefined);
+  return summarizePresets(new StaticPricingCatalog(PRICING_TABLE), config.exchangeRate, config.videoProvider === "runway" ? RUNWAY_VIDEO : undefined, SIMPLE_QUALITY_PRESETS);
 }
 

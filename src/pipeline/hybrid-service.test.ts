@@ -59,6 +59,62 @@ async function setup(modes: Partial<StageModes> = {}, avatar = true, options: { 
 }
 
 describe("execução híbrida por etapa — somente transportes falsos", () => {
+  it("aprova uma vez e percorre automaticamente o job MOCK inteiro", async () => {
+    const f = await setup();
+    const jobId = f.campaign.jobIds[0]!;
+    const quote = await f.service.quoteJob(jobId);
+    expect(quote.ready).toBe(true);
+    expect(quote.maximumAuthorizedBrl).toBe(0);
+    const outcome = await (await f.service.authorizeAndRunJob(jobId, quote.token)).completion;
+    expect(outcome.kind).toBe("COMPLETED");
+    expect((await f.service.getJob(jobId)).jobAuthorization?.status).toBe("completed");
+    expect(f.audio.calls).toHaveLength(0);
+    expect(f.video.calls).toHaveLength(0);
+    expect(f.presenter.posts).toBe(0);
+  });
+
+  it("executa providers falsos automaticamente sem ultrapassar o teto autorizado", async () => {
+    const f = await setup({ narration: "real", scenes: "real", avatar: "real", render: "real" });
+    const jobId = f.campaign.jobIds[0]!;
+    const quote = await f.service.quoteJob(jobId);
+    expect(quote.maximumAuthorizedBrl).toBeGreaterThan(0);
+    const outcome = await (await f.service.authorizeAndRunJob(jobId, quote.token)).completion;
+    expect(outcome.kind).toBe("COMPLETED");
+    expect(f.audio.calls).toHaveLength(1);
+    expect(f.presenter.posts).toBeGreaterThanOrEqual(1);
+    expect(f.video.calls.some(call => call.url.endsWith("/image_to_video"))).toBe(true);
+    expect(f.realRenders).toBe(1);
+  });
+
+  it("para na primeira falha sem retry pago automático", async () => {
+    const f = await setup({ narration: "real" }, false, { timeout: true });
+    const jobId = f.campaign.jobIds[0]!;
+    const quote = await f.service.quoteJob(jobId);
+    const outcome = await (await f.service.authorizeAndRunJob(jobId, quote.token)).completion;
+    expect(outcome.kind).toBe("FAILED");
+    expect(f.audio.calls).toHaveLength(1);
+    expect(f.video.calls).toHaveLength(0);
+    expect(f.presenter.posts).toBe(0);
+  });
+
+  it("edita o storyboard antes da geração e invalida a cotação anterior", async () => {
+    const f = await setup({}, false);
+    const jobId = f.campaign.jobIds[0]!;
+    const before = await f.service.quoteJob(jobId);
+    const campaign = await f.service.getCampaign(f.campaign.id);
+    const scene = campaign.plan!.creatives[0]!.scenes[0]!;
+    const updated = await f.service.updateStoryboardScene(jobId, {
+      sceneId: scene.id,
+      narration: "Uma fala revisada e natural.",
+      visualDescription: "Produto inteiro sobre uma mesa clara.",
+      visualSource: "product_image",
+    });
+    expect(updated.storyboardRevision).toBe(1);
+    const after = await f.service.quoteJob(jobId);
+    expect(after.token).not.toBe(before.token);
+    expect((await f.service.getCampaign(f.campaign.id)).plan!.creatives[0]!.scenes[0]!.narration).toBe("Uma fala revisada e natural.");
+  });
+
   it("percorre projeto → roteiro → narração → avatar → cena → render inteiramente MOCK pelos botões de etapa", async () => {
     const f = await setup();
     const id = f.campaign.jobIds[0]!;
@@ -223,6 +279,26 @@ describe("execução híbrida por etapa — somente transportes falsos", () => {
     expect(new Set(attempts.map(a => a.narration?.version)).size).toBe(3);
     const blocked = await f.service.quoteStage(id, "narration", false, true); expect(blocked.blocked).toMatch(/Limite de tentativas/);
     expect(f.audio.calls).toHaveLength(3);
+  });
+  it("refaz a cena escolhida, mostra cotação própria e preserva a versão anterior", async () => {
+    const f = await setup();
+    const id = f.campaign.jobIds[0]!;
+    const jobQuote = await f.service.quoteJob(id);
+    expect((await (await f.service.authorizeAndRunJob(id, jobQuote.token)).completion).kind).toBe("COMPLETED");
+    const campaign = await f.service.getCampaign(f.campaign.id);
+    const generated = campaign.plan!.creatives[0]!.scenes.filter(scene => scene.requiresGeneratedVideo);
+    const target = generated.at(-1)!;
+    const before = await f.service.getJob(id);
+    const untouched = generated[0]!;
+    const stage = target.visualSource === "presenter" ? "avatar" : "scenes";
+    const quote = await f.service.quoteStage(id, stage, false, true, target.id);
+    expect(quote.ready, quote.blocked).toBe(true);
+    expect(quote.unit).toBe(target.id);
+    await (await f.service.executeStage(id, stage, quote.token, { regenerate: true, sceneId: target.id })).completion;
+    const after = await f.service.getJob(id);
+    expect(after.scenes.find(scene => scene.sceneId === target.id)!.attempts).toHaveLength(2);
+    expect(after.scenes.find(scene => scene.sceneId === untouched.id)!.attempts).toHaveLength(before.scenes.find(scene => scene.sceneId === untouched.id)!.attempts.length);
+    expect(after.scenes.find(scene => scene.sceneId === target.id)!.attempts.filter(attempt => attempt.active)).toHaveLength(1);
   });
   it("autoriza exceder só até o valor mostrado e somente com permissão da política", async () => {
     const f = await setup({ narration: "real" }, false); const id = f.campaign.jobIds[0]!;

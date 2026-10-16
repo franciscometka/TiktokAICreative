@@ -22,3 +22,14 @@ export interface StageQuote {
   ready: boolean; blocked?: string; done: boolean; state: string;
   preflight?: PreflightCheck[];
 }
+
+export interface JobQuote {
+  jobId: string;
+  token: string;
+  estimatedBrl: number;
+  maximumAuthorizedBrl: number;
+  actualBrl: number;
+  ready: boolean;
+  blocked?: string;
+  stages: StageQuote[];
+}
