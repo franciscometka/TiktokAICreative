@@ -8,7 +8,7 @@ import { ugcPricingRefs } from "@/config/ugc-models";
 import { StaticPricingCatalog } from "@/costs/pricing-catalog";
 import { product } from "@/test/fixtures";
 import { PNG_1X1 } from "@/test/google-fake";
-import { FAKE_KREA_KEY, KREA_IMAGE_JOB, KREA_VIDEO_JOB, kreaFake, type KreaFakeOptions } from "@/test/krea-fake";
+import { FAKE_KREA_KEY, KREA_ASSET_ID, KREA_IMAGE_JOB, KREA_VIDEO_JOB, kreaFake, type KreaFakeOptions } from "@/test/krea-fake";
 import { makeMp4 } from "@/test/mp4-fixture";
 import { waitForCompletion } from "../poll";
 import { KreaHttpClient, KreaUgcError } from "./krea-http";
@@ -30,7 +30,9 @@ const env = (extra: Record<string, string> = {}) => ({ KREA_API_KEY: FAKE_KREA_K
 const refs = kreaUgcPricingRefs("high");
 const http = (fake: ReturnType<typeof kreaFake>) => new KreaHttpClient(FAKE_KREA_KEY, fake.fetch);
 const reference = (options: KreaFakeOptions = {}) => { const fake = kreaFake(options); return { fake, provider: new UgcReferenceProviderKrea(catalog.requireOne(refs.reference), http(fake), loadImage) }; };
+const submitReference = async (provider: UgcReferenceProviderKrea) => provider.submit(referenceRequest, await provider.prepare(referenceRequest));
 const video = (options: KreaFakeOptions = {}, quality: "high" | "premium" = "high") => { const fake = kreaFake(options); return { fake, provider: new UgcVideoProviderKrea(catalog.requireOne(kreaUgcPricingRefs(quality).video), http(fake), loadImage) }; };
+const submitVideo = async (provider: UgcVideoProviderKrea, request = videoRequest) => provider.submit(request, await provider.prepare(request));
 const poll = { maxPolls: 5, intervalMs: 0, sleep: async () => {} };
 
 describe("modelos e preços Krea", () => {
@@ -39,7 +41,7 @@ describe("modelos e preços Krea", () => {
     expect(kreaUgcPricingRefs("premium").video.model).toBe("veo-3.1-fast:1080p");
     expect(kreaVeoConfigForPricingModel("veo-3.1-fast:1080p")).toMatchObject({ endpoint: "/generate/video/google/veo-3.1-fast", resolution: "1080p", nativeAudio: true });
     expect(() => kreaVeoConfigForPricingModel("veo-3.1-lite")).toThrow(/não reconhecido/);
-    expect([1, 4, 4.1, 6, 7, 8, 12].map(kreaRequestedDuration)).toEqual([4, 4, 6, 6, 8, 8, 8]);
+    expect([1, 4, 4.1, 5.5, 6, 7, 8, 12].map(kreaRequestedDuration)).toEqual([4, 4, 6, 6, 6, 8, 8, 8]);
     expect(catalog.requireOne(refs.reference)).toMatchObject({ unit: "per_generation", priceUsd: 0.08, isPlaceholder: false });
     // 8s Fast 720p = US$0,80; 1080p = US$0,96 (tabela oficial da Krea).
     expect(video().provider.estimateCost(8).costUsd).toBeCloseTo(0.8, 6);
@@ -112,8 +114,9 @@ describe("builders puros", () => {
 describe("referência Nano Banana 2 via Krea (fetch falso)", () => {
   it("upload do asset → UM POST pago → polling → PNG; chave só no header", async () => {
     const { fake, provider } = reference({ runningPolls: 1 });
-    const ref = await provider.submit(referenceRequest);
+    const ref = await submitReference(provider);
     expect(ref.providerJobId).toBe(`krea:${KREA_IMAGE_JOB}`);
+    expect(ref.requestId).toBe("req_krea");
     expect(fake.calls[0]).toMatchObject({ method: "POST", url: "https://api.krea.ai/assets", multipart: true });
     const post = fake.calls.find(c => c.url.endsWith("/generate/image/google/nano-banana-2"))!;
     expect(post.body).toMatchObject({ image_urls: ["https://gen.krea.ai/assets/asset_1.png"], aspect_ratio: "9:16", resolution: "1K" });
@@ -130,13 +133,13 @@ describe("referência Nano Banana 2 via Krea (fetch falso)", () => {
 
   it("aceita result.urls como lista de objetos", async () => {
     const { provider } = reference({ urlShape: "objects" });
-    const ref = await provider.submit(referenceRequest);
+    const ref = await submitReference(provider);
     expect((await provider.downloadResult(ref)).mimeType).toBe("image/png");
   });
 
   it("400 na criação: rejected_before_job, sem segredo, sem novo envio", async () => {
     const { fake, provider } = reference({ create: "rejected" });
-    const error = await provider.submit(referenceRequest).then(() => { throw new Error("esperava erro"); }, e => e as KreaUgcError);
+    const error = await submitReference(provider).then(() => { throw new Error("esperava erro"); }, e => e as KreaUgcError);
     expect(error).toBeInstanceOf(KreaUgcError);
     expect(error).toMatchObject({ phase: "rejected_before_job", diagnostic: { billing: "rejected", operation: "none", httpStatus: 400, requestId: "req_krea" } });
     expect(error.message).not.toContain(FAKE_KREA_KEY);
@@ -147,7 +150,7 @@ describe("referência Nano Banana 2 via Krea (fetch falso)", () => {
   it("rede após envio ou 200 sem job_id: uncertain (pode ter cobrado), nunca reenvia", async () => {
     for (const create of ["network", "no_job_id"] as const) {
       const { fake, provider } = reference({ create });
-      const error = await provider.submit(referenceRequest).then(() => { throw new Error("esperava erro"); }, e => e as KreaUgcError);
+      const error = await submitReference(provider).then(() => { throw new Error("esperava erro"); }, e => e as KreaUgcError);
       expect(error).toMatchObject({ phase: "uncertain" });
       expect(error.message).not.toContain(FAKE_KREA_KEY);
       expect(fake.posts()).toBe(1);
@@ -156,34 +159,69 @@ describe("referência Nano Banana 2 via Krea (fetch falso)", () => {
 
   it("job failed: status failed com mensagem sanitizada", async () => {
     const { provider } = reference({ outcome: "failed" });
-    const ref = await provider.submit(referenceRequest);
+    const ref = await submitReference(provider);
     const status = await provider.getStatus(ref);
-    expect(status).toMatchObject({ state: "failed", diagnostic: { providerCode: "nsfw", operation: "created" } });
+    expect(status).toMatchObject({ state: "failed", diagnostic: { providerCode: "nsfw", operation: "created", billing: "rejected" } });
     expect(status.error).not.toContain(FAKE_KREA_KEY);
   });
 
   it("completed sem urls: falha; imagem inválida: falha cobrada sem retry", async () => {
     const empty = reference({ outcome: "no_urls" });
-    expect((await empty.provider.getStatus(await empty.provider.submit(referenceRequest))).state).toBe("failed");
+    const emptyRef = await submitReference(empty.provider);
+    expect((await empty.provider.getStatus(emptyRef)).state).toBe("succeeded");
+    await expect(empty.provider.downloadResult(emptyRef)).rejects.toMatchObject({ billedUsage: { generations: 1 } });
     const bad = reference({ image: new TextEncoder().encode("not-an-image") });
-    const error = await bad.provider.downloadResult(await bad.provider.submit(referenceRequest)).catch(e => e as KreaUgcError);
+    const error = await bad.provider.downloadResult(await submitReference(bad.provider)).catch(e => e as KreaUgcError);
     expect(error).toMatchObject({ phase: "failed_after_job", billedUsage: { generations: 1 } });
   });
 
-  it("download fora de *.krea.ai ou sem HTTPS é recusado sem rede", async () => {
-    for (const resultUrl of ["https://evil.example.com/x.png", "http://gen.krea.ai/x.png", "https://krea.ai.evil.com/x.png"]) {
+  it("download recusa HTTP e hosts privados sem rede; HTTPS público nunca recebe a chave", async () => {
+    for (const resultUrl of ["http://gen.krea.ai/x.png", "https://localhost/x.png", "https://127.0.0.1/x.png", "https://[::1]/x.png"]) {
       const { fake, provider } = reference({ resultUrl });
-      const ref = await provider.submit(referenceRequest);
+      const ref = await submitReference(provider);
       await expect(provider.downloadResult(ref)).rejects.toBeInstanceOf(KreaUgcError);
       expect(fake.calls.some(c => c.url === resultUrl)).toBe(false);
     }
+    const external = reference({ resultUrl: "https://cdn.example.com/x.png" });
+    const ref = await submitReference(external.provider);
+    await expect(external.provider.downloadResult(ref)).rejects.toBeInstanceOf(KreaUgcError);
+    expect(external.fake.calls.find(c => c.url === "https://cdn.example.com/x.png")?.headers.authorization).toBeUndefined();
+  });
+
+  it("download segue redirect HTTPS público revalidado sem enviar Authorization", async () => {
+    const calls: Array<{ url: string; authorization?: string }> = [];
+    const transport: typeof fetch = async (input, init) => {
+      const url = String(input);
+      const headers = new Headers(init?.headers);
+      calls.push({ url, ...(headers.get("authorization") ? { authorization: headers.get("authorization")! } : {}) });
+      if (url === "https://cdn.example.com/start") return new Response(null, { status: 302, headers: { location: "https://media.example.net/result.png" } });
+      if (url === "https://media.example.net/result.png") return new Response(PNG_1X1, { status: 200, headers: { "content-type": "image/png" } });
+      return new Response(null, { status: 404 });
+    };
+    const client = new KreaHttpClient(FAKE_KREA_KEY, transport);
+    await expect(client.download("https://cdn.example.com/start", KREA_IMAGE_JOB, "image")).resolves.toEqual(new Uint8Array(PNG_1X1));
+    expect(calls).toEqual([
+      { url: "https://cdn.example.com/start" },
+      { url: "https://media.example.net/result.png" },
+    ]);
+  });
+
+  it("preparação persiste hash/id/url e reutiliza asset confirmado sem novo upload", async () => {
+    const { fake, provider } = reference();
+    const first = await provider.prepare(referenceRequest);
+    expect(first.metadata).toMatchObject({ kreaAssetProvider: "krea", kreaAssetVersion: 1, kreaAssetId: KREA_ASSET_ID });
+    expect(first.metadata.kreaAssetHash).toMatch(/^[0-9a-f]{64}$/);
+    const second = await provider.prepare(referenceRequest, first.metadata);
+    expect(second).toEqual(first);
+    expect(fake.calls.filter(c => c.method === "POST" && c.url.endsWith("/assets"))).toHaveLength(1);
+    expect(fake.calls.filter(c => c.method === "GET" && c.url.includes("/assets/"))).toHaveLength(1);
   });
 });
 
 describe("cena Veo 3.1 via Krea (fetch falso)", () => {
   it("upload da referência aprovada → UM POST com áudio nativo → MP4 com trilha de áudio; custo pela duração comprada", async () => {
     const { fake, provider } = video({ runningPolls: 2 });
-    const ref = await provider.submit(videoRequest);
+    const ref = await submitVideo(provider);
     expect(ref.providerJobId).toBe(`krea:${KREA_VIDEO_JOB}:8s`);
     const post = fake.calls.find(c => c.url.endsWith("/generate/video/google/veo-3.1-fast"))!;
     expect(post.body).toEqual({ prompt: expect.stringContaining("Brazilian Portuguese"), start_image: "https://gen.krea.ai/assets/asset_1.png", aspect_ratio: "9:16", duration: 8, generate_audio: true, resolution: "720p" });
@@ -197,13 +235,13 @@ describe("cena Veo 3.1 via Krea (fetch falso)", () => {
 
   it("pedido inválido é recusado antes de upload e POST", async () => {
     const { fake, provider } = video();
-    await expect(provider.submit({ ...videoRequest, aspectRatio: "16:9" as "9:16" })).rejects.toThrow(/9:16/);
+    await expect(submitVideo(provider, { ...videoRequest, aspectRatio: "16:9" as "9:16" })).rejects.toThrow(/9:16/);
     expect(fake.calls).toHaveLength(0);
   });
 
   it("clipe sem trilha de áudio é reportado (hasAudio=false) para o pipeline decidir", async () => {
     const { provider } = video({ clip: makeMp4(8) });
-    const result = await provider.downloadResult(await provider.submit(videoRequest));
+    const result = await provider.downloadResult(await submitVideo(provider));
     expect(result.hasAudio).toBe(false);
   });
 });

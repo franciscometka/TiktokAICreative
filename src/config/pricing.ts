@@ -112,13 +112,13 @@ export const PRICING_TABLE: readonly ProviderPricing[] = [
   { provider: GOOGLE_UGC_PROVIDER, model: VEO_3_1_MODELS.standard, unit: "per_second", priceUsd: 0.40, updatedAt: "2026-10-16", isPlaceholder: false, source: "https://ai.google.dev/gemini-api/docs/pricing — Veo 3.1 Standard 720p/1080p" },
   { provider: GOOGLE_UGC_PROVIDER, model: `${VEO_3_1_MODELS.standard}:1080p`, unit: "per_second", priceUsd: 0.40, updatedAt: "2026-10-16", isPlaceholder: false, source: "https://ai.google.dev/gemini-api/docs/pricing — Veo 3.1 Standard 720p/1080p" },
 
-  // ---- AI UGC via Krea (UGC_PROVIDER=krea). Fonte: https://api.krea.ai/openapi.json (x-krea-pricing), 2026-10-16.
+  // ---- AI UGC via Krea (UGC_PROVIDER=krea). Fontes: docs oficiais por endpoint, verificadas em 2026-10-16.
   // Preço FIXO por requisição; Veo com áudio = linear em 4/6/8s → expresso por segundo.
-  { provider: KREA_UGC_PROVIDER, model: KREA_UGC_REFERENCE_MODEL, unit: "per_generation", priceUsd: 0.08, updatedAt: "2026-10-16", isPlaceholder: false, source: "https://api.krea.ai/openapi.json — Nano Banana 2, 1K: US$0,08 por requisição" },
-  { provider: KREA_UGC_PROVIDER, model: KREA_VEO_MODELS.fast, unit: "per_second", priceUsd: 0.10, updatedAt: "2026-10-16", isPlaceholder: false, source: "https://api.krea.ai/openapi.json — Veo 3.1 Fast 720p com áudio: US$0,40/0,60/0,80 (4/6/8s)" },
-  { provider: KREA_UGC_PROVIDER, model: `${KREA_VEO_MODELS.fast}:1080p`, unit: "per_second", priceUsd: 0.12, updatedAt: "2026-10-16", isPlaceholder: false, source: "https://api.krea.ai/openapi.json — Veo 3.1 Fast 1080p com áudio: US$0,48/0,72/0,96 (4/6/8s)" },
-  { provider: KREA_UGC_PROVIDER, model: KREA_VEO_MODELS.standard, unit: "per_second", priceUsd: 0.40, updatedAt: "2026-10-16", isPlaceholder: false, source: "https://api.krea.ai/openapi.json — Veo 3.1 720p com áudio: US$1,60/2,40/3,20 (4/6/8s)" },
-  { provider: KREA_UGC_PROVIDER, model: `${KREA_VEO_MODELS.standard}:1080p`, unit: "per_second", priceUsd: 0.40, updatedAt: "2026-10-16", isPlaceholder: false, source: "https://api.krea.ai/openapi.json — Veo 3.1 1080p com áudio: US$1,60/2,40/3,20 (4/6/8s)" },
+  { provider: KREA_UGC_PROVIDER, model: KREA_UGC_REFERENCE_MODEL, unit: "per_generation", priceUsd: 0.08, currency: "USD", updatedAt: "2026-10-16", isPlaceholder: false, source: "https://www.krea.ai/docs/api-reference/image/nano-banana-2 — Nano Banana 2, 1K: US$0,08 por requisição" },
+  { provider: KREA_UGC_PROVIDER, model: KREA_VEO_MODELS.fast, unit: "per_second", priceUsd: 0.10, currency: "USD", updatedAt: "2026-10-16", isPlaceholder: false, source: "https://www.krea.ai/docs/api-reference/video/veo-31-fast — 720p com áudio: US$0,40/0,60/0,80 (4/6/8s)" },
+  { provider: KREA_UGC_PROVIDER, model: `${KREA_VEO_MODELS.fast}:1080p`, unit: "per_second", priceUsd: 0.12, currency: "USD", updatedAt: "2026-10-16", isPlaceholder: false, source: "https://www.krea.ai/docs/api-reference/video/veo-31-fast — 1080p com áudio: US$0,48/0,72/0,96 (4/6/8s)" },
+  { provider: KREA_UGC_PROVIDER, model: KREA_VEO_MODELS.standard, unit: "per_second", priceUsd: 0.40, currency: "USD", updatedAt: "2026-10-16", isPlaceholder: false, source: "https://www.krea.ai/docs/api-reference/video/veo-31 — 720p com áudio: US$1,60/2,40/3,20 (4/6/8s)" },
+  { provider: KREA_UGC_PROVIDER, model: `${KREA_VEO_MODELS.standard}:1080p`, unit: "per_second", priceUsd: 0.40, currency: "USD", updatedAt: "2026-10-16", isPlaceholder: false, source: "https://www.krea.ai/docs/api-reference/video/veo-31 — 1080p com áudio: US$1,60/2,40/3,20 (4/6/8s)" },
 
   // ---- Renderização local (Remotion na máquina do usuário) ----
   {

@@ -344,6 +344,7 @@ export class PipelineService {
           }
           if (current && (current.state === "submitting" || current.state === "pending" || current.state === "uncertain")) {
             if (current.providerJobId && current.state !== "uncertain") unit = `reference:resume:${current.providerJobId}`;
+            else if (current.provider === "krea" && current.state === "submitting" && current.metadata?.paidSubmissionStarted !== true) unit = `reference:prepare:${current.id}`;
             else blocked ??= "Envio anterior da referência incerto e sem operation ID. Sem reenvio automático; confira o provider antes de continuar.";
           }
           const identityAttempts = state.references.filter(reference => reference.identityId === state.identity.id && reference.identityRevision === state.identity.revision).length;
@@ -378,7 +379,9 @@ export class PipelineService {
         } else if (stage === "ugc_video") {
           if (!approvedReference(job.ugc)) blocked ??= "Nenhuma cena UGC é gerada antes de uma referência aprovada.";
           if (job.ugc?.audioStrategy === "external_lipsync" && !narration) blocked ??= "Execute a narração primeiro (lip sync).";
-          if ((pendingUgc?.state === "submitting" || pendingUgc?.state === "uncertain") && !pendingUgc.providerOperationId) blocked ??= "Envio UGC anterior incerto: sem operation ID, não haverá reenvio automático.";
+          if ((pendingUgc?.state === "uncertain" || pendingUgc?.state === "submitting" && (pendingUgc.provider !== "krea" || pendingUgc.metadata?.paidSubmissionStarted === true)) && !pendingUgc.providerOperationId) {
+            blocked ??= "Envio UGC anterior incerto: sem operation ID, não haverá reenvio automático.";
+          } else if (pendingUgc?.provider === "krea" && pendingUgc.state === "submitting" && !pendingUgc.providerOperationId) unit = `${scene.id}:prepare:${pendingUgc.attemptId}`;
           if (pendingUgc?.providerOperationId) unit = `${scene.id}:resume:${pendingUgc.providerOperationId}`;
           const ugcVideo = this.ugcVideoProvider(ctx); model = ugcVideo.descriptor.model;
           estimatedBrl = ugcVideo.estimateCost(scene.estimatedGenerationSeconds).costUsd * (await this.deps.exchangeRates.getUsdBrl()).rate;

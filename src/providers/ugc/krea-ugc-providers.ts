@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { costForUsage } from "@/costs/calculate";
 import {
   KREA_REFERENCE_ENDPOINT,
@@ -13,7 +14,7 @@ import { imageDimensions } from "@/render/image-dimensions";
 import { inspectMp4 } from "../video/mp4";
 import { ProviderError, type ProviderJobRef, type ProviderJobStatus } from "../types";
 import type { KreaHttpClient, KreaJob } from "./krea-http";
-import type { UgcImageResult, UgcReferenceProvider, UgcReferenceRequest, UgcVideoProvider, UgcVideoRequest, UgcVideoResult } from "./ugc-providers";
+import type { UgcImageResult, UgcPreparedReference, UgcReferenceProvider, UgcReferenceRequest, UgcVideoProvider, UgcVideoRequest, UgcVideoResult } from "./ugc-providers";
 
 /** Lê imagem LOCAL autorizada (uploads/UGC) já validada; mesma assinatura do leitor Google. */
 export type KreaImageLoader = (uri: string) => Promise<{ data: Uint8Array; mimeType: string }>;
@@ -67,7 +68,7 @@ export function buildKreaVeoBody(request: UgcVideoRequest, config: KreaVeoConfig
  * ID persistido pelo pipeline: `krea:<job_id>` ou `krea:<job_id>:<s>s` (vídeo). A duração COMPRADA
  * viaja no próprio ID → custo real correto mesmo após reinício, sem estado em memória.
  */
-const REF_ID = /^krea:([\w-]{8,128})(?::(4|6|8)s)?$/;
+const REF_ID = /^krea:([0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})(?::(4|6|8)s)?$/i;
 export function parseKreaJobRef(providerJobId: string): { jobId: string; seconds?: KreaVeoDuration } {
   const match = REF_ID.exec(providerJobId);
   if (!match) throw new ProviderError("Job ID da Krea inválido.");
@@ -78,20 +79,19 @@ const RUNNING: readonly KreaJob["status"][] = ["processing", "sampling", "interm
 
 function status(http: KreaHttpClient, providerJobId: string, job: KreaJob): ProviderJobStatus {
   if (job.status === "completed") {
-    if (job.urls.length > 0) return { providerJobId, state: "succeeded" };
-    const error = http.error({ kind: "provider", providerCode: "NO_RESULT", billing: "unconfirmed" }, "failed_after_job", job.jobId);
-    return { providerJobId, state: "failed", error: error.message, diagnostic: error.diagnostic };
+    return { providerJobId, state: "succeeded" };
   }
   if (job.status === "failed" || job.status === "cancelled") {
-    const error = http.error({ kind: "provider", providerCode: job.errorCode ?? job.status.toUpperCase(), providerMessage: job.errorMessage, billing: "unconfirmed" }, "failed_after_job", job.jobId);
+    const error = http.error({ kind: "provider", providerCode: job.errorCode ?? job.status.toUpperCase(), providerMessage: job.errorMessage, billing: "rejected" }, "failed_after_job", job.jobId);
     return { providerJobId, state: "failed", error: error.message, diagnostic: error.diagnostic };
   }
   return { providerJobId, state: RUNNING.includes(job.status) ? "running" : "queued" };
 }
 
-async function completedUrl(http: KreaHttpClient, jobId: string): Promise<string> {
+async function completedUrl(http: KreaHttpClient, jobId: string, billedUsage: { generations?: number; seconds?: number }): Promise<string> {
   const job = await http.getJob(jobId);
-  if (job.status !== "completed" || !job.urls[0]) throw http.error({ kind: "invalid_response", billing: "unconfirmed" }, "uncertain", jobId);
+  if (job.status !== "completed") throw http.error({ kind: "invalid_response", billing: "unconfirmed" }, "uncertain", jobId);
+  if (!job.urls[0]) throw http.error({ kind: "invalid_response", providerCode: "NO_RESULT", billing: "confirmed" }, "failed_after_job", jobId, billedUsage);
   return job.urls[0];
 }
 
@@ -108,13 +108,31 @@ export class UgcReferenceProviderKrea implements UgcReferenceProvider {
     return { kind: "estimate" as const, ...costForUsage(this.pricing, { generations: 1 }), pricing: this.pricing };
   }
 
-  async submit(request: UgcReferenceRequest): Promise<ProviderJobRef> {
-    // Leitura/validação local ANTES da rede; upload não é geração paga.
+  async prepare(request: UgcReferenceRequest, previous?: Record<string, string | number | boolean>): Promise<UgcPreparedReference> {
     const product = await this.loadImage(request.product.imageUri);
-    const productUrl = await this.http.uploadAsset(product.data, product.mimeType, "product");
+    const sourceHash = createHash("sha256").update(product.data).digest("hex");
+    const priorId = previous?.kreaAssetId;
+    if (previous?.kreaAssetHash === sourceHash && previous?.kreaAssetProvider === KREA_UGC_PROVIDER && previous?.kreaAssetVersion === 1 && typeof priorId === "string") {
+      const current = await this.http.getAsset(priorId);
+      if (current) return { metadata: this.assetMetadata(current, sourceHash) };
+    }
+    const uploaded = await this.http.uploadAsset(product.data, product.mimeType, "product");
+    return { metadata: this.assetMetadata(uploaded, sourceHash) };
+  }
+
+  private assetMetadata(asset: { id: string; imageUrl: string; uploadedAt: string }, sourceHash: string): UgcPreparedReference["metadata"] {
+    return {
+      kreaAssetProvider: KREA_UGC_PROVIDER, kreaAssetVersion: 1, kreaAssetHash: sourceHash,
+      kreaAssetId: asset.id, kreaAssetUrl: asset.imageUrl, kreaAssetUploadedAt: asset.uploadedAt,
+    };
+  }
+
+  async submit(request: UgcReferenceRequest, prepared?: UgcPreparedReference): Promise<ProviderJobRef> {
+    const productUrl = prepared?.metadata.kreaAssetUrl;
+    if (typeof productUrl !== "string") throw new ProviderError("Asset Krea não preparado; nenhum envio pago foi feito.");
     const body = buildKreaReferenceBody(request, productUrl);
-    const { jobId } = await this.http.createJob(KREA_REFERENCE_ENDPOINT, { ...body }, [request.prompt]);
-    return { providerJobId: `krea:${jobId}` };
+    const { jobId, requestId } = await this.http.createJob(KREA_REFERENCE_ENDPOINT, { ...body }, [request.prompt]);
+    return { providerJobId: `krea:${jobId}`, ...(requestId ? { requestId } : {}) };
   }
 
   async getStatus(ref: ProviderJobRef): Promise<ProviderJobStatus> {
@@ -124,7 +142,7 @@ export class UgcReferenceProviderKrea implements UgcReferenceProvider {
 
   async downloadResult(ref: ProviderJobRef): Promise<UgcImageResult> {
     const { jobId } = parseKreaJobRef(ref.providerJobId);
-    const data = await this.http.download(await completedUrl(this.http, jobId), jobId);
+    const data = await this.http.download(await completedUrl(this.http, jobId, { generations: 1 }), jobId, "image");
     const mimeType = detectImageType(data);
     const size = mimeType ? imageDimensions(data, mimeType) : undefined;
     // Job concluído (cobrado) mas arquivo inválido: custo registrado, sem retry.
@@ -150,14 +168,27 @@ export class UgcVideoProviderKrea implements UgcVideoProvider {
     return { kind: "estimate" as const, ...costForUsage(this.pricing, { seconds: kreaRequestedDuration(seconds) }), pricing: this.pricing };
   }
 
-  async submit(request: UgcVideoRequest): Promise<ProviderJobRef> {
-    // Valida o pedido (sem rede) antes do upload e do POST pago.
+  async prepare(request: UgcVideoRequest, previous?: Record<string, string | number | boolean>): Promise<UgcPreparedReference> {
     buildKreaVeoBody(request, this.modelConfig, "https://placeholder.invalid/");
     const image = await this.loadImage(request.reference.imageUri);
-    const startUrl = await this.http.uploadAsset(image.data, image.mimeType, "reference");
+    const sourceHash = createHash("sha256").update(image.data).digest("hex");
+    const priorId = previous?.kreaAssetId;
+    if (previous?.kreaAssetHash === sourceHash && previous?.kreaAssetProvider === KREA_UGC_PROVIDER && previous?.kreaAssetVersion === 1 && typeof priorId === "string") {
+      const current = await this.http.getAsset(priorId);
+      if (current) return { metadata: { kreaAssetProvider: KREA_UGC_PROVIDER, kreaAssetVersion: 1, kreaAssetHash: sourceHash,
+        kreaAssetId: current.id, kreaAssetUrl: current.imageUrl, kreaAssetUploadedAt: current.uploadedAt } };
+    }
+    const asset = await this.http.uploadAsset(image.data, image.mimeType, "reference");
+    return { metadata: { kreaAssetProvider: KREA_UGC_PROVIDER, kreaAssetVersion: 1, kreaAssetHash: sourceHash,
+      kreaAssetId: asset.id, kreaAssetUrl: asset.imageUrl, kreaAssetUploadedAt: asset.uploadedAt } };
+  }
+
+  async submit(request: UgcVideoRequest, prepared?: UgcPreparedReference): Promise<ProviderJobRef> {
+    const startUrl = prepared?.metadata.kreaAssetUrl;
+    if (typeof startUrl !== "string") throw new ProviderError("Asset Krea não preparado; nenhum envio pago foi feito.");
     const body = buildKreaVeoBody(request, this.modelConfig, startUrl);
-    const { jobId } = await this.http.createJob(this.modelConfig.endpoint, { ...body }, [request.speech, request.action]);
-    return { providerJobId: `krea:${jobId}:${body.duration}s` };
+    const { jobId, requestId } = await this.http.createJob(this.modelConfig.endpoint, { ...body }, [request.speech, request.action]);
+    return { providerJobId: `krea:${jobId}:${body.duration}s`, ...(requestId ? { requestId } : {}) };
   }
 
   async getStatus(ref: ProviderJobRef): Promise<ProviderJobStatus> {
@@ -167,7 +198,7 @@ export class UgcVideoProviderKrea implements UgcVideoProvider {
 
   async downloadResult(ref: ProviderJobRef): Promise<UgcVideoResult> {
     const { jobId, seconds } = parseKreaJobRef(ref.providerJobId);
-    const data = await this.http.download(await completedUrl(this.http, jobId), jobId);
+    const data = await this.http.download(await completedUrl(this.http, jobId, seconds ? { seconds } : {}), jobId, "video");
     const inspection = inspectMp4(data);
     return {
       uri: "", data, mimeType: "video/mp4", durationSeconds: inspection.durationSeconds ?? seconds ?? 0,

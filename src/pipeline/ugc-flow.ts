@@ -17,7 +17,7 @@ import {
 import type { Clock } from "@/lib/clock";
 import type { IdGenerator } from "@/lib/ids";
 import { waitForCompletion, type PollOptions } from "@/providers/poll";
-import { InvalidMediaError, ProviderError } from "@/providers/types";
+import { InvalidMediaError, ProviderError, type ProviderJobRef } from "@/providers/types";
 import type { UgcReferenceProvider, UgcVideoProvider, UgcVideoRequest } from "@/providers/ugc/ugc-providers";
 import type { AudioSlicer } from "@/speech/presenter-audio";
 import type { AudioAssetStore } from "@/storage/audio-asset-store";
@@ -104,7 +104,10 @@ export async function generateUgcReference(
   const uncertain = state.references.findLast((r) =>
     r.identityId === state.identity.id && r.identityRevision === state.identity.revision
     && (r.state === "submitting" || r.state === "pending" || r.state === "uncertain"));
-  if (uncertain && (!uncertain.providerJobId || uncertain.state === "uncertain")) throw new UgcPendingError("Envio anterior da referência sem ID confirmado; possível cobrança. Nenhum novo envio será feito.");
+  const paidSubmissionStarted = uncertain?.metadata?.paidSubmissionStarted === true;
+  if (uncertain && (uncertain.state === "uncertain" || (!uncertain.providerJobId && (!provider.prepare || paidSubmissionStarted)))) {
+    throw new UgcPendingError("Envio anterior da referência sem ID confirmado; possível cobrança. Nenhum novo envio será feito.");
+  }
   const prompt = buildUgcReferencePrompt(state.identity, state.product);
   const estimatedCostUsd = provider.estimateCost().costUsd;
   if (!uncertain) assertWithinApproved(estimatedCostUsd, input.maxCostUsd);
@@ -149,8 +152,15 @@ export async function generateUgcReference(
 
   try {
     if (!reference.providerJobId) {
-      const ref = await provider.submit({ product: state.product, identity: state.identity, prompt: reference.prompt, aspectRatio: "9:16" });
-      reference = await persist({ ...reference, state: "pending", providerJobId: ref.providerJobId });
+      const request = { product: state.product, identity: state.identity, prompt: reference.prompt, aspectRatio: "9:16" as const };
+      let prepared;
+      if (provider.prepare) {
+        prepared = await provider.prepare(request, reference.metadata);
+        reference = await persist({ ...reference, metadata: { ...(reference.metadata ?? {}), ...prepared.metadata } });
+      }
+      if (!provider.descriptor.isMock) reference = await persist({ ...reference, metadata: { ...(reference.metadata ?? {}), paidSubmissionStarted: true } });
+      const ref = await provider.submit(request, prepared);
+      reference = await persist({ ...reference, state: "pending", providerJobId: ref.providerJobId, ...(ref.requestId ? { requestId: ref.requestId } : {}) });
     }
     const ref = { providerJobId: reference.providerJobId! };
     await waitForCompletion((r) => provider.getStatus(r), ref, deps.pollOptions);
@@ -167,7 +177,8 @@ export async function generateUgcReference(
       imageUri = stored.uri;
       version = stored.version;
     }
-    reference = await persist({ ...reference, version, state: "succeeded", imageUri, ...(result.requestId ? { requestId: result.requestId } : {}), ...(result.metadata ? { metadata: result.metadata } : {}) });
+    reference = await persist({ ...reference, version, state: "succeeded", imageUri, ...(result.requestId ? { requestId: result.requestId } : {}),
+      ...(result.metadata ? { metadata: { ...(reference.metadata ?? {}), ...result.metadata } } : {}) });
   } catch (error) {
     if (error instanceof ProviderError && error.billedUsage) await recordCost(error.billedUsage);
     if (errorPhase(error, provider.descriptor.isMock) === "uncertain") {
@@ -216,7 +227,8 @@ export async function generateUgcScene(
   };
   const previous = job.scenes.find((s) => s.sceneId === scene.id)?.attempts ?? [];
   const pendingOperation = job.ugcVideoOperations?.findLast(operation => operation.sceneId === scene.id && operation.state !== "settled");
-  if (pendingOperation && !pendingOperation.providerOperationId && (pendingOperation.state === "submitting" || pendingOperation.state === "uncertain")) {
+  if (pendingOperation && !pendingOperation.providerOperationId && (pendingOperation.state === "uncertain"
+    || (pendingOperation.state === "submitting" && (!provider.prepare || pendingOperation.metadata?.paidSubmissionStarted === true)))) {
     throw new UgcPendingError("Envio anterior da cena UGC sem operation ID confirmado; possível cobrança. Nenhum novo envio será feito.");
   }
   const attemptId = pendingOperation?.attemptId ?? deps.ids("attempt");
@@ -258,7 +270,9 @@ export async function generateUgcScene(
   let attempt: MediaAttempt;
   let providerJobId: string | null = pendingOperation?.providerOperationId ?? null;
   try {
-    let ref = providerJobId ? { providerJobId } : undefined;
+    let ref: ProviderJobRef | undefined = providerJobId
+      ? { providerJobId, ...(pendingOperation?.requestId ? { requestId: pendingOperation.requestId } : {}) }
+      : undefined;
     if (!ref) {
       if (!provider.descriptor.isMock) {
         await persistOperation({
@@ -267,14 +281,25 @@ export async function generateUgcScene(
           estimatedCostUsd: quote.costUsd, createdAt: deps.clock(),
         });
       }
-      ref = await provider.submit(request);
+      let prepared;
+      if (provider.prepare) {
+        prepared = await provider.prepare(request, pendingOperation?.metadata);
+        const preparing = job.ugcVideoOperations?.find(item => item.attemptId === attemptId);
+        if (preparing) await persistOperation({ ...preparing, metadata: { ...(preparing.metadata ?? {}), ...prepared.metadata }, updatedAt: deps.clock() });
+      }
+      if (!provider.descriptor.isMock) {
+        const preparedOperation = job.ugcVideoOperations?.find(item => item.attemptId === attemptId);
+        if (preparedOperation) await persistOperation({ ...preparedOperation, metadata: { ...(preparedOperation.metadata ?? {}), paidSubmissionStarted: true }, updatedAt: deps.clock() });
+      }
+      ref = await provider.submit(request, prepared);
       providerJobId = ref.providerJobId;
       if (!provider.descriptor.isMock) {
         await persistOperation({
           ...intent, attemptId, sceneId: scene.id, state: "pending", providerOperationId: ref.providerJobId,
           provider: provider.descriptor.id, model: provider.descriptor.model, referenceId: reference.id,
           referenceVersion: reference.version, requestedDurationSeconds: quote.quantity,
-          estimatedCostUsd: quote.costUsd, createdAt: pendingOperation?.createdAt ?? deps.clock(),
+          estimatedCostUsd: quote.costUsd, ...(ref.requestId ? { requestId: ref.requestId } : {}), metadata: job.ugcVideoOperations?.find(item => item.attemptId === attemptId)?.metadata,
+          createdAt: pendingOperation?.createdAt ?? deps.clock(),
         });
       }
     }
@@ -288,12 +313,13 @@ export async function generateUgcScene(
       attemptId, sceneId: scene.id, state: "settled", providerOperationId: ref.providerJobId,
       provider: provider.descriptor.id, model: provider.descriptor.model, referenceId: reference.id,
       referenceVersion: reference.version, requestedDurationSeconds: quote.quantity,
-      estimatedCostUsd: quote.costUsd, createdAt: pendingOperation?.createdAt ?? deps.clock(),
+      estimatedCostUsd: quote.costUsd, ...(ref.requestId ? { requestId: ref.requestId } : {}), metadata: job.ugcVideoOperations?.find(item => item.attemptId === attemptId)?.metadata,
+      createdAt: pendingOperation?.createdAt ?? deps.clock(),
     });
     // REAL: a trilha de áudio é conferida no MP4 salvo (auditável); mock: pela declaração.
     if (result.isMock && result.hasAudio !== consistency.clipHasAudio) throw new Error("O clipe UGC não respeitou a estratégia de áudio declarada; não será usado para evitar áudio duplicado.");
     if (result.isMock) {
-      attempt = { ...base, providerJobId, status: "succeeded", active: true, assetUri: result.uri, durationSeconds: result.durationSeconds, ugc: consistency };
+      attempt = { ...base, providerJobId, ...(ref.requestId ? { requestId: ref.requestId } : {}), status: "succeeded", active: true, assetUri: result.uri, durationSeconds: result.durationSeconds, ugc: consistency };
     } else {
       if (!result.data || !deps.videoAssets) throw new Error("Vídeo UGC real sem dados ou armazenamento indisponível.");
       const requested = billedSeconds;
@@ -301,7 +327,7 @@ export async function generateUgcScene(
       const media = checkClipDuration({ requestedSeconds: requested, providerReportedSeconds: result.providerReportedDurationSeconds, actualSeconds: stored.inspection.durationSeconds, fileComplete: stored.inspection.complete });
       if (media.status !== "valid") throw new InvalidMediaError(clipRejectionMessage(media, scene.order + 1), media, stored.uri);
       if (consistency.clipHasAudio && !stored.inspection.hasAudioTrack) throw new InvalidMediaError(`Cena ${scene.order + 1}: o MP4 não tem trilha de áudio nativo; não será usado.`, media, stored.uri);
-      attempt = { ...base, providerJobId, status: "succeeded", active: true, assetUri: stored.uri, durationSeconds: media.actualMediaDurationSeconds ?? requested, media, ugc: consistency };
+      attempt = { ...base, providerJobId, ...(ref.requestId ? { requestId: ref.requestId } : {}), status: "succeeded", active: true, assetUri: stored.uri, durationSeconds: media.actualMediaDurationSeconds ?? requested, media, ugc: consistency };
     }
   } catch (error) {
     if (error instanceof ProviderError && error.billedUsage) await recordCost(error.billedUsage);

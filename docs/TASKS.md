@@ -253,8 +253,10 @@ Guia: [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md).
 
 ## AI UGC via Krea (provider alternativo) ✅ (sem chamada paga)
 - [x] `UGC_PROVIDER=krea` + `KREA_API_KEY` server-side; readiness opt-in com `UGC_REAL_ALLOWED=true`
-- [x] `KreaHttpClient` (Bearer privado, sem retry, timeout, redação, download só `*.krea.ai`) + `KreaUgcError` A/B/C
+- [x] `KreaHttpClient` (Bearer privado, sem retry, timeout, redação, download HTTPS público devolvido pelo job, redirects revalidados sem chave) + `KreaUgcError` A/B/C
 - [x] `UgcReferenceProviderKrea` (asset upload → Nano Banana 2 1K 9:16) e `UgcVideoProviderKrea` (Veo 3.1 Fast, start_image aprovado, áudio nativo, 4/6/8s)
 - [x] Preços oficiais (OpenAPI 2026-10-16); estimativa pela duração comprada; job ID persistido carrega a duração
 - [x] Google intacto; testes offline (`test/krea-fake.ts`, unidade + pipeline)
-- [ ] Validar UMA referência e UMA cena reais na Krea — aguardando instrução (confirmar formato de `result.urls` e cobrança efetiva)
+- [ ] Validar UMA referência real na Krea — aguardando instrução; não gerar vídeo nessa primeira validação
+- [x] Auditoria pré-REAL: CLI escolhe Krea, dry-run zero rede/escrita, asset durável/reutilizável, UUID/result.urls atuais, download HTTPS com redirects seguros, readiness de modelo/preço e janelas de crash cobertas offline
+- [ ] Executar somente UMA referência Krea real e revisar visualmente; vídeo continua bloqueado até essa aprovação

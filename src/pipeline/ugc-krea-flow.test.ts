@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import { loadAppConfig } from "@/config/env";
 import { kreaRequestedDuration, kreaUgcPricingRefs } from "@/config/krea-ugc-models";
 import { kreaUgcReadiness } from "@/config/krea-ugc-readiness";
@@ -6,8 +7,9 @@ import { isUgcPersonSource } from "@/domain/ugc";
 import { createUgcProviderFactories } from "@/providers/ugc";
 import { FileCostLedger } from "@/storage/file-cost-ledger";
 import { PNG_1X1 } from "@/test/google-fake";
-import { FAKE_KREA_KEY, kreaFake, type KreaFakeOptions } from "@/test/krea-fake";
+import { FAKE_KREA_KEY, KREA_ASSET_ID, kreaFake, type KreaFakeOptions } from "@/test/krea-fake";
 import { ugcHarness } from "@/test/ugc-harness";
+import { FilePipelineStore } from "@/storage/file-pipeline-store";
 import { activeAttempt } from "./guards";
 import { hybridCapabilities } from "./hybrid-service";
 
@@ -41,6 +43,8 @@ describe("AI UGC via Krea no pipeline (fetch falso)", () => {
     expect((await h.run()).kind).toBe("WAITING_STAGE");
     const reference = (await h.job()).ugc!.references.at(-1)!;
     expect(reference).toMatchObject({ state: "succeeded", review: "pending", provider: "krea", model: "nano-banana-2", isMock: false });
+    expect(reference.metadata).toMatchObject({ kreaAssetProvider: "krea", kreaAssetVersion: 1, paidSubmissionStarted: true });
+    expect(reference.metadata?.kreaAssetHash).toMatch(/^[0-9a-f]{64}$/);
     expect(h.fake.posts("image")).toBe(1);
     expect((await h.ledger()).filter(e => e.category === "ugc_reference")).toEqual([expect.objectContaining({ simulated: false, costUsd: 0.08 })]);
     expect(JSON.stringify(await h.job())).not.toContain(FAKE_KREA_KEY);
@@ -85,5 +89,25 @@ describe("AI UGC via Krea no pipeline (fetch falso)", () => {
     expect((await h.service.quoteStage(h.jobId, "ugc_reference")).blocked).toMatch(/incerto/);
     expect((await h.run()).kind).toBe("WAITING_STAGE");
     expect(h.fake.posts()).toBe(1);
+  });
+
+  it("restart após upload: reutiliza asset persistido e faz somente o primeiro submit pago", async () => {
+    const h = await kreaHarness();
+    const store = new FilePipelineStore(h.config.dataDir);
+    const job = await store.getJob(h.jobId);
+    const state = job.ugc!;
+    const uploadedAt = "2026-10-16T00:00:00Z";
+    job.ugc = { ...state, references: [{
+      id: "ugcref_crash_after_upload", version: "v1", state: "submitting", review: "pending",
+      identityId: state.identity.id, identityRevision: state.identity.revision, provider: "krea", model: "nano-banana-2", isMock: false,
+      prompt: "Pessoa sintética adulta segurando o mesmo produto.", product: state.product, estimatedCostUsd: 0.08, createdAt: uploadedAt,
+      metadata: { kreaAssetProvider: "krea", kreaAssetVersion: 1, kreaAssetHash: createHash("sha256").update(PNG_1X1).digest("hex"), kreaAssetId: KREA_ASSET_ID,
+        kreaAssetUrl: "https://gen.krea.ai/assets/asset_1.png", kreaAssetUploadedAt: uploadedAt },
+    }] };
+    await store.saveJob(job);
+    expect((await h.run()).kind).toBe("WAITING_STAGE");
+    expect(h.fake.calls.filter(c => c.method === "POST" && c.url.endsWith("/assets"))).toHaveLength(0);
+    expect(h.fake.calls.filter(c => c.method === "GET" && c.url.includes("/assets/"))).toHaveLength(1);
+    expect(h.fake.posts("image")).toBe(1);
   });
 });

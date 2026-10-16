@@ -20,6 +20,17 @@ Modo "AI UGC" (Lote 5.3): foto real do produto → pessoa sintética segurando/a
 - Transporte: `providers/ugc/google-http.ts` (HTTP sanitizado, erros A/B/C) e `google-transports.ts` (Gemini `generateContent`, Veo `predictLongRunning` + polling + download). A factory só cria providers REAL com o preflight Google completo.
 - Habilitar (só servidor, `.env.local`): `GOOGLE_AI_API_KEY`, `UGC_PROVIDER=google`, `UGC_REAL_ALLOWED=true`. A chave sozinha não habilita. Na UI: "Gerando apresentador com seu produto..." → "Esta será a pessoa apresentando seu produto" (Aprovar / Gerar outra) → "Gerando cena UGC...".
 
+## Provider Krea (REAL opt-in, auditado sem chamada)
+
+- Referência: `POST /assets` da foto original → persistência local do asset → `POST /generate/image/google/nano-banana-2` em 1K/9:16 → `GET /jobs/{id}` → primeiro item de `result.urls`.
+- Antes do POST pago ficam persistidos SHA-256 da foto, UUID e URL do asset, provider, timestamp, job, versão, modelo, teto e custo. Em restart antes do envio pago, `GET /assets/{id}` confirma o asset para reuso. A Krea não documenta prazo fixo de validade; por isso o sistema nunca presume validade sem essa consulta.
+- Vídeo preparado: `POST /generate/video/google/veo-3.1-fast`, 720p em Econômico/Equilibrado e 1080p em Premium, 4/6/8s faturáveis, 9:16, `generate_audio=true`; referência aprovada obrigatória e sem ElevenLabs/segunda voz. Não executar antes de aprovar a referência real.
+- Readiness: `KREA_API_KEY` + `UGC_PROVIDER=krea` + `UGC_REAL_ALLOWED=true` + modelos e pricing oficiais válidos. A chave sozinha não habilita.
+- Dry-run da primeira referência: `npm run ugc:reference:real -- --image "C:/fotos/produto.jpg"`. Com a configuração Krea acima, mostra Nano Banana 2/US$0,08 e faz zero rede/escrita.
+- Primeira referência real futura: acrescente `--confirm`; faz um upload quando necessário e exatamente uma tentativa de geração. Nenhum vídeo é chamado.
+
+Fontes consultadas em 2026-10-16: documentação oficial Krea de [upload/get de assets](https://www.krea.ai/docs/api-reference/assets/upload-an-asset), [jobs](https://www.krea.ai/docs/developers/job-lifecycle), [Nano Banana 2](https://www.krea.ai/docs/api-reference/image/nano-banana-2) e [Veo 3.1 Fast](https://www.krea.ai/docs/api-reference/video/veo-31-fast).
+
 ## Protocolo da primeira validação real (NÃO executado)
 
 1. Teste A — dry-run: `npm run ugc:reference:real -- --image "C:/fotos/produto.jpg"` (sem rede; mostra modelo, custo US$0,067, entradas e readiness).

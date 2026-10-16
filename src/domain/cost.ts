@@ -27,6 +27,8 @@ export const ProviderPricingSchema = z.object({
   model: nonEmpty,
   unit: PricingUnitSchema,
   priceUsd: money,
+  /** Moeda explícita quando a fonte publica preço fixo; `priceUsd` permanece o campo canônico. */
+  currency: z.literal("USD").optional(),
   /** Data (YYYY-MM-DD) em que o preço foi verificado/definido. */
   updatedAt: z.iso.date(),
   /** true = valor provisório, ainda não verificado com o fornecedor. */

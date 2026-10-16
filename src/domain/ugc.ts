@@ -192,6 +192,7 @@ export const UgcVideoOperationSchema = z.object({
   referenceVersion: nonEmpty,
   requestedDurationSeconds: z.number().positive(),
   estimatedCostUsd: z.number().nonnegative(),
+  metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
   createdAt: nonEmpty,
 });
 export type UgcVideoOperation = z.infer<typeof UgcVideoOperationSchema>;

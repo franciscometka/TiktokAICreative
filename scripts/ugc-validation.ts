@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import type { GoogleUgcReadiness } from "../src/config/ugc-readiness";
+import type { PreflightCheck } from "../src/domain/readiness";
 import { writeFileAtomic } from "../src/storage/atomic-file";
 
 /** Intenção durável: gravada ANTES da rede; status nunca volta para permitir reenvio automático. */
@@ -26,6 +26,12 @@ export const ValidationIntentSchema = z.object({
   referenceIntentId: z.string().optional(),
   approvedAt: z.string().optional(),
   inputs: z.record(z.string(), z.string()).default({}),
+  provider: z.enum(["google", "krea"]).optional(),
+  paidSubmissionStartedAt: z.string().optional(),
+  asset: z.object({
+    provider: z.literal("krea"), version: z.number().int().positive(), sourceHash: z.string().regex(/^[0-9a-f]{64}$/),
+    id: z.string().uuid(), url: z.string().url(), uploadedAt: z.string(), jobId: z.string(),
+  }).optional(),
 });
 export type ValidationIntent = z.infer<typeof ValidationIntentSchema>;
 
@@ -52,8 +58,8 @@ export class ValidationIntentStore {
   }
 }
 
-export function printReadiness(readiness: GoogleUgcReadiness): void {
-  console.log(`Readiness Google AI UGC: ${readiness.ready ? "PRONTO" : "BLOQUEADO"}`);
+export function printReadiness(readiness: { ready: boolean; checks: PreflightCheck[] }, provider = "Google"): void {
+  console.log(`Readiness ${provider} AI UGC: ${readiness.ready ? "PRONTO" : "BLOQUEADO"}`);
   for (const check of readiness.checks) console.log(`  [${check.ok ? "ok" : "--"}] ${check.label}: ${check.detail}`);
 }
 

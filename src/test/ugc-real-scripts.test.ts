@@ -6,6 +6,7 @@ import { join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { FAKE_GOOGLE_KEY, PNG_1X1 } from "./google-fake";
+import { FAKE_KREA_KEY, KREA_ASSET_ID, KREA_IMAGE_JOB } from "./krea-fake";
 import { makeMp4 } from "./mp4-fixture";
 
 /** Hook carregado no processo do script: substitui fetch e registra cada chamada num arquivo. */
@@ -23,6 +24,10 @@ globalThis.fetch = async (input, init = {}) => {
   const url = String(input); const method = init.method ?? 'GET';
   appendFileSync(process.env.NETWORK_LOG, method + ' ' + url + '\\n');
   if (url.includes(':generateContent')) return Response.json({ responseId: 'resp_cli', candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: png } }] } }] }, { headers: { 'x-request-id': 'req_cli' } });
+  if (url.endsWith('/assets') && method === 'POST') return Response.json({ id: '${KREA_ASSET_ID}', image_url: 'https://cdn.example.com/assets/product.png', uploaded_at: '2026-10-16T00:00:00Z', width: 1, height: 1, size_bytes: 68, mime_type: 'image/png' });
+  if (url.endsWith('/generate/image/google/nano-banana-2') && method === 'POST') return Response.json({ job_id: '${KREA_IMAGE_JOB}', status: 'queued', created_at: '2026-10-16T00:00:00Z' }, { headers: { 'x-request-id': 'req_krea' } });
+  if (url.endsWith('/jobs/${KREA_IMAGE_JOB}')) return Response.json({ job_id: '${KREA_IMAGE_JOB}', status: 'completed', result: { urls: ['https://cdn.example.com/result.png'] } });
+  if (url === 'https://cdn.example.com/result.png') return new Response(Uint8Array.from(Buffer.from(png, 'base64')), { headers: { 'content-type': 'image/png' } });
   if (url.includes(':predictLongRunning')) return Response.json({ name: 'models/veo-3.1-fast-generate-preview/operations/op_cli' });
   if (url.includes('/operations/')) return Response.json({ done: true, response: { generateVideoResponse: { generatedSamples: [{ video: { uri: 'https://generativelanguage.googleapis.com/v1beta/files/v:download?alt=media' } }] } } });
   if (url.includes(':download')) return new Response(readFileSync(process.env.CLIP_FILE));
@@ -46,6 +51,7 @@ globalThis.fetch = async (input, init = {}) => {
 }
 const rel = (path: string) => relative(process.cwd(), path);
 const READY = { GOOGLE_AI_API_KEY: FAKE_GOOGLE_KEY, UGC_PROVIDER: "google", UGC_REAL_ALLOWED: "true" };
+const KREA_READY = { KREA_API_KEY: FAKE_KREA_KEY, UGC_PROVIDER: "krea", UGC_REAL_ALLOWED: "true" };
 
 describe("scripts AI UGC REAL", () => {
   it("dry-run (sem --confirm): nenhuma rede, nenhuma gravação; mostra modelo, formato, custo e readiness", async () => {
@@ -64,6 +70,7 @@ describe("scripts AI UGC REAL", () => {
     expect(f.network()).toHaveLength(0);
     expect(existsSync(join(f.root, "data"))).toBe(false);
     expect(existsSync(join(f.root, "uploads"))).toBe(false);
+    expect(existsSync(join(f.root, "ugc"))).toBe(false);
   }, 90_000);
 
   it("--confirm sem readiness completo (chave sozinha) é recusado sem rede", async () => {
@@ -74,6 +81,8 @@ describe("scripts AI UGC REAL", () => {
     expect(result.out).not.toContain(FAKE_GOOGLE_KEY);
     expect(f.network()).toHaveLength(0);
     expect(existsSync(join(f.root, "data"))).toBe(false);
+    expect(existsSync(join(f.root, "uploads"))).toBe(false);
+    expect(existsSync(join(f.root, "ugc"))).toBe(false);
   }, 60_000);
 
   it("flag desconhecida nunca vira confirmação", async () => {
@@ -108,4 +117,29 @@ describe("scripts AI UGC REAL", () => {
     expect(posts[1]).toMatch(/veo-3\.1-fast-generate-preview:predictLongRunning$/);
     expect(f.network().filter(line => line.includes("/operations/"))).toHaveLength(1);
   }, 120_000);
+
+  it("Krea: dry-run tem zero rede/escrita; --confirm persiste asset antes de exatamente um submit de geração", async () => {
+    const f = await fixture();
+    const dry = f.run("ugc-reference-real", ["--image", f.image], KREA_READY);
+    expect(dry.ok, dry.out).toBe(true);
+    expect(dry.out).toMatch(/nano-banana-2 · 9:16 · 1K/);
+    expect(dry.out).toContain("Readiness Krea AI UGC: PRONTO");
+    expect(dry.out).toContain("US$0.0800");
+    expect(f.network()).toHaveLength(0);
+    expect(existsSync(join(f.root, "data"))).toBe(false);
+    expect(existsSync(join(f.root, "uploads"))).toBe(false);
+    expect(existsSync(join(f.root, "ugc"))).toBe(false);
+
+    const real = f.run("ugc-reference-real", ["--image", f.image, "--confirm"], KREA_READY);
+    expect(real.ok, real.out).toBe(true);
+    expect(real.out).not.toContain(FAKE_KREA_KEY);
+    expect(f.network().filter(line => line.includes("/generate/image/") && line.startsWith("POST"))).toHaveLength(1);
+    expect(f.network().filter(line => line.endsWith("/assets") && line.startsWith("POST"))).toHaveLength(1);
+    const id = /intenção (ugcref_\w+)/.exec(real.out)?.[1];
+    const intent = JSON.parse(readFileSync(join(f.root, "data", "ugc-validation", `${id}.json`), "utf8"));
+    expect(intent).toMatchObject({ provider: "krea", status: "succeeded", operationId: `krea:${KREA_IMAGE_JOB}`, requestId: "req_krea", actualCostUsd: 0.08,
+      asset: { provider: "krea", version: 1, id: KREA_ASSET_ID, jobId: id } });
+    expect(intent.asset.sourceHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(intent.paidSubmissionStartedAt).toBeTruthy();
+  }, 90_000);
 });

@@ -32,11 +32,18 @@ export interface UgcImageResult {
   metadata?: Record<string, string | number>;
 }
 
+/** Metadados duráveis de uma entrada preparada antes da criação paga. */
+export interface UgcPreparedReference {
+  metadata: Record<string, string | number | boolean>;
+}
+
 /** UGCReferenceProvider: gera a imagem pessoa + produto. */
 export interface UgcReferenceProvider {
   readonly descriptor: ProviderDescriptor;
   estimateCost(): CostQuote;
-  submit(request: UgcReferenceRequest): Promise<ProviderJobRef>;
+  /** Opcional: upload/validação não paga, persistida pelo pipeline antes do POST de geração. */
+  prepare?(request: UgcReferenceRequest, previous?: Record<string, string | number | boolean>): Promise<UgcPreparedReference>;
+  submit(request: UgcReferenceRequest, prepared?: UgcPreparedReference): Promise<ProviderJobRef>;
   getStatus(ref: ProviderJobRef): Promise<ProviderJobStatus>;
   downloadResult(ref: ProviderJobRef): Promise<UgcImageResult>;
 }
@@ -77,7 +84,8 @@ export interface UgcVideoProvider {
   readonly audioStrategy: UgcAudioStrategy;
   readonly capabilities?: { supportsReferenceImages: boolean; maxReferenceImages: number; supportsSeed: boolean; nativeAudio: boolean };
   estimateCost(seconds: number): CostQuote;
-  submit(request: UgcVideoRequest): Promise<ProviderJobRef>;
+  prepare?(request: UgcVideoRequest, previous?: Record<string, string | number | boolean>): Promise<UgcPreparedReference>;
+  submit(request: UgcVideoRequest, prepared?: UgcPreparedReference): Promise<ProviderJobRef>;
   getStatus(ref: ProviderJobRef): Promise<ProviderJobStatus>;
   downloadResult(ref: ProviderJobRef): Promise<UgcVideoResult>;
 }
