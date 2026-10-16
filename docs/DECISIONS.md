@@ -371,8 +371,16 @@ Cada `UgcVideoProvider` declara `audioStrategy`:
 
 Prompt `campaign-plan@1.5.0` (ativo) instrui linguagem de criador ("Olha isso aqui…", "Se você procura…", "Esse modelo chama atenção por…") e proíbe experiência/depoimento inventados ("uso há meses", "testei", "funcionou comigo", "comprei", depoimentos) e jargão de anúncio. `ai/ugc-script.ts` valida isso de forma determinística e checa que a fala cabe na cena (≤ 2,8 palavras/s); a validação do prompt recusa saída que viole, e o modo `standard` recusa fontes UGC. Editar cena no storyboard aplica as mesmas regras.
 
-## D84 — Custos UGC provisórios e contrato Google/Veo sem transporte
+## D84 — Google Image Generation + Veo 3.1 preparados, transportes REAL desligados
 
-Novas categorias: `ugc_reference`, `ugc_scene`, `broll` (além de voz e render). A estimativa conta uma referência + segundos por cena UGC + B-roll, sem TTS em `native_speech`. Preços são PLACEHOLDER (`unassigned-ugc`, `isPlaceholder: true`, "sem fonte oficial") em `config/pricing.ts`; nenhum preço real foi inventado. A UI já sinaliza preço provisório.
+Referência futura: `gemini-3.1-flash-image` (Nano Banana 2), edição text+image→image 1K/9:16 com a imagem original do produto como entrada e preservação explícita de formato, cores, logo, embalagem e proporções. Não usar Imagen como provider principal. Vídeo futuro: `veo-3.1-lite-generate-preview`, `veo-3.1-fast-generate-preview` e `veo-3.1-generate-preview`, todos com áudio nativo e image-to-video 9:16. Estratégia: Econômico Lite 720p; Equilibrado Fast 720p; Premium Fast 1080p ou Standard 1080p pela configuração pura. Veo usa 4/6/8s; 1080p e `referenceImages` forçam 8s. Fast/Standard podem receber o produto original e referências adicionais (máximo três); Lite usa somente a referência UGC já composta como imagem inicial. Seed é auditável, nunca promessa de determinismo.
 
-Google/Veo/Flow: `google-ugc-contract.ts` só PREPARA o corpo (`verified: false`, `generateAudio: true`, recusa áudio externo) e `GOOGLE_UGC_CANDIDATES` lista candidatos não verificados. Não há transporte, chave ou chamada; o modo REAL de `ugc_reference`/`ugc_video` fica indisponível com motivo explícito. Automação da interface web do Flow é proibida: só API oficial.
+Pricing oficial consultado em https://ai.google.dev/gemini-api/docs/pricing em 2026-10-16 e isolado em `config/pricing.ts`: Lite 720p US$0,05/s; Lite 1080p US$0,08/s; Fast 720p US$0,10/s; Fast 1080p US$0,12/s; Standard 720p/1080p US$0,40/s. A referência 1K reserva US$0,067 de output; o transporte futuro deverá registrar também tokens reais de entrada/texto. A cotação usa duração faturável do provider, separada da duração editorial.
+
+`UgcReferenceProviderGoogle` e `UgcVideoProviderVeo` são adapters sobre contratos de transporte injetados; builders são puros. Não há implementação HTTP, chave ou factory REAL. A interface REAL permanece indisponível e nenhuma chamada é possível neste lote. Automação do Flow continua proibida.
+
+## D85 — Operação UGC durável e áudio nativo preservado
+
+Cada cena UGC REAL persistirá `ugcVideoOperations`: intenção `submitting` antes do POST, `pending` com operation ID antes do polling e `settled` no desfecho. Reinício/timeout retoma status/download pelo ID sem novo submit. Intenção sem ID ou cobrança incerta pausa e bloqueia reenvio; custo é deduplicado pelo attempt ID. A operação registra referência aprovada, versão, modelo, duração solicitada ao provider e custo estimado. Duração real continua pela inspeção de mídia da D73; versões nunca são sobrescritas.
+
+Veo sempre usa `native_speech`: a etapa ElevenLabs é pulada, o manifest recusa qualquer narração junto a clip audio, o `OffthreadVideo` é desmutado somente nessas cenas e o encoder Remotion considera áudio embutido ao decidir gerar AAC. `external_lipsync` permanece estratégia separada para providers futuros e não pode ser combinada com Veo. Falha ou timeout não cria retry pago automático.

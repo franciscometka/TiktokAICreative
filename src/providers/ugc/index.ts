@@ -24,3 +24,7 @@ export function createUgcProviderFactories(options: { mockAudioStrategy?: UgcAud
     video: (pricing, mode) => (mode === "real" ? unavailable() : new MockUgcVideoProvider(pricing, options.mockAudioStrategy ?? "native_speech")),
   };
 }
+
+// Contratos/adapters futuros; a factory acima deliberadamente NÃO os habilita.
+export { UgcReferenceProviderGoogle, UgcVideoProviderVeo } from "./google-ugc-providers";
+export type { GoogleUgcReferenceTransport, VeoUgcVideoTransport } from "./google-ugc-providers";

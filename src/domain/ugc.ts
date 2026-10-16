@@ -158,6 +158,25 @@ export const UgcSceneConsistencySchema = z.object({
 });
 export type UgcSceneConsistency = z.infer<typeof UgcSceneConsistencySchema>;
 
+/**
+ * Intenção durável de uma cena Veo. `submitting` é gravado antes do POST; `pending` guarda o
+ * operation ID e pode ser retomado sem novo POST; `settled` nunca é reenviado automaticamente.
+ */
+export const UgcVideoOperationSchema = z.object({
+  attemptId: nonEmpty,
+  sceneId: nonEmpty,
+  state: z.enum(["submitting", "pending", "settled"]),
+  providerOperationId: z.string().optional(),
+  provider: nonEmpty,
+  model: nonEmpty,
+  referenceId: nonEmpty,
+  referenceVersion: nonEmpty,
+  requestedDurationSeconds: z.number().positive(),
+  estimatedCostUsd: z.number().nonnegative(),
+  createdAt: nonEmpty,
+});
+export type UgcVideoOperation = z.infer<typeof UgcVideoOperationSchema>;
+
 export function approvedReference(state: UgcJobState | undefined): UgcReference | undefined {
   return state?.references.findLast(
     (r) => r.review === "approved" && r.state === "succeeded" && r.identityId === state.identity.id && r.identityRevision === state.identity.revision,

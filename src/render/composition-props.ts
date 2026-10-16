@@ -29,6 +29,11 @@ export const OVERLAY_TIMING = {
 /** Imagens mais "em pé" que isso ocupam a tela inteira (cover); as demais aparecem inteiras. */
 export const COVER_MAX_ASPECT = 0.7;
 
+/** Áudio final existe por narração separada OU por um clipe Veo explicitamente desmutado. */
+export function compositionHasAudio(props: Pick<CreativeProps, "audio" | "scenes">): boolean {
+  return props.audio.length > 0 || props.scenes.some(scene => scene.video?.muted === false);
+}
+
 export interface BuildPropsInput {
   manifest: RenderManifest;
   /** uri do manifest → resultado do AssetResolver. */

@@ -18,6 +18,8 @@ import type { PricingRef, QualitySettings } from "@/domain/quality";
 import { roundBrl, roundUsd, usdToBrl } from "@/lib/money";
 import { RUNWAY_VIDEO, runwayDuration } from "@/config/video-models";
 import { RUNWAY_PRESENTER, presenterBilledSeconds } from "@/config/presenters";
+import { veoConfigForPricingModel, veoRequestedDuration } from "@/config/ugc-models";
+import { UGC_PRESET_PLANS } from "@/config/ugc";
 import type { PricingCatalog } from "./pricing-catalog";
 
 /**
@@ -221,6 +223,14 @@ export function sceneVideoUsage(scene: Pick<ScenePlan, "estimatedGenerationSecon
   return { seconds, generations: 1 };
 }
 
+/** Uso faturável Veo por cena, separado da duração editorial exibida no storyboard. */
+export function ugcVideoUsage(seconds: number, pricing: ProviderPricing): Usage {
+  if (pricing.provider !== "google" || !pricing.model.startsWith("veo-3.1-")) return { seconds, generations: 1 };
+  const config = veoConfigForPricingModel(pricing.model);
+  const referenceImages = config.supportsReferenceImages ? 1 : 0; // produto original além da referência UGC aprovada
+  return { seconds: veoRequestedDuration(seconds, config, referenceImages), generations: 1 };
+}
+
 export function narrationUsage(plan: Pick<CreativePlan, "scenes" | "duration">): Usage {
   // Caracteres do texto FALADO (narração contínua normalizada): é o que o TTS cobra.
   return { characters: spokenNarrationCharacters(plan), seconds: plan.duration, generations: 1 };
@@ -247,8 +257,9 @@ export function futureCostLines(plan: CreativePlan, pricing: Omit<ResolvedPricin
   if (hasUgc && (!pricing.ugcVideo || !pricing.ugcReference)) throw new Error("Plano AI UGC sem preços de referência/vídeo UGC no preset.");
   const sceneLine = (s: ScenePlan): CostLineItem => {
     if (isUgcPersonSource(s.visualSource)) {
-      return lineItem(pricing.ugcVideo!, sceneVideoUsage(s, pricing.ugcVideo), {
-        category: "ugc_scene", phase: "generation", description: `Cena AI UGC ${s.order + 1} (${s.estimatedGenerationSeconds}s)`, sceneId: s.id,
+      const usage = ugcVideoUsage(s.estimatedGenerationSeconds, pricing.ugcVideo!);
+      return lineItem(pricing.ugcVideo!, usage, {
+        category: "ugc_scene", phase: "generation", description: `Cena AI UGC ${s.order + 1} (${s.estimatedGenerationSeconds}s editoriais; ${usage.seconds}s provider)`, sceneId: s.id,
       });
     }
     const p = s.visualSource === "presenter" ? pricing.presenter! : pricing.video;
@@ -351,15 +362,32 @@ export function estimatePresetRange(
     priceUnits(pricing.llm.output, settings.llmTokensPerCreative.output);
 
   const totalFor = (genSeconds: number, finalSeconds: number) => {
-    const videoUsd = costForUsage(pricing.video, {
-      seconds: genSeconds,
-      generations: Math.ceil(genSeconds / ASSUMED_SECONDS_PER_GENERATED_CLIP),
-    }).costUsd;
-    const audioUsd = costForUsage(pricing.audio, {
-      characters: Math.round(finalSeconds * settings.narrationCharsPerSecond),
-      seconds: finalSeconds,
-      generations: 1,
-    }).costUsd;
+    let videoUsd: number;
+    let audioUsd: number;
+    if (settings.ugc && pricing.ugcReference && pricing.ugcVideo && settings.quality !== "custom") {
+      const plan = UGC_PRESET_PLANS[settings.quality];
+      const generatedShare = plan.filter(entry => entry.source !== "product_image").reduce((sum, entry) => sum + entry.share, 0);
+      const scale = generatedShare > 0 ? genSeconds / (finalSeconds * generatedShare) : 1;
+      const ugcUsd = plan.filter(entry => isUgcPersonSource(entry.source)).reduce((sum, entry) => {
+        const editorial = Math.max(0.5, entry.share * finalSeconds * scale);
+        return sum + costForUsage(pricing.ugcVideo!, ugcVideoUsage(editorial, pricing.ugcVideo!)).costUsd;
+      }, 0);
+      const brollSeconds = plan.filter(entry => entry.source === "product_broll").reduce((sum, entry) => sum + entry.share * finalSeconds * scale, 0);
+      videoUsd = costForUsage(pricing.ugcReference, { generations: 1 }).costUsd
+        + ugcUsd
+        + costForUsage(pricing.video, { seconds: brollSeconds, generations: Math.max(1, plan.filter(entry => entry.source === "product_broll").length) }).costUsd;
+      audioUsd = 0; // Veo 3.1: áudio nativo; ElevenLabs não entra no teto.
+    } else {
+      videoUsd = costForUsage(pricing.video, {
+        seconds: genSeconds,
+        generations: Math.ceil(genSeconds / ASSUMED_SECONDS_PER_GENERATED_CLIP),
+      }).costUsd;
+      audioUsd = costForUsage(pricing.audio, {
+        characters: Math.round(finalSeconds * settings.narrationCharsPerSecond),
+        seconds: finalSeconds,
+        generations: 1,
+      }).costUsd;
+    }
     const renderUsd = costForUsage(pricing.rendering, { seconds: finalSeconds, generations: 1 }).costUsd;
     return llmUsd + videoUsd + audioUsd + renderUsd;
   };
@@ -369,7 +397,7 @@ export function estimatePresetRange(
     max: toMoney(totalFor(settings.generatedVideoSeconds.max, settings.finalVideoSeconds.max), exchangeRate),
     generatedVideoSeconds: settings.generatedVideoSeconds,
     finalVideoSeconds: settings.finalVideoSeconds,
-    containsPlaceholderPrices: [pricing.video, pricing.audio, pricing.rendering, pricing.llm.input].some(
+    containsPlaceholderPrices: [pricing.video, pricing.audio, pricing.rendering, pricing.llm.input, pricing.ugcReference, pricing.ugcVideo].filter((p): p is ProviderPricing => p !== undefined).some(
       (p) => p.isPlaceholder,
     ),
   };

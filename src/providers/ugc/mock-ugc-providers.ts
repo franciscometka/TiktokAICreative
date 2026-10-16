@@ -1,4 +1,4 @@
-import { costForUsage } from "@/costs/calculate";
+import { costForUsage, ugcVideoUsage } from "@/costs/calculate";
 import type { ProviderPricing } from "@/domain/cost";
 import type { UgcAudioStrategy } from "@/domain/ugc";
 import { ProviderError, type ProviderJobRef } from "../types";
@@ -64,7 +64,7 @@ export class MockUgcVideoProvider implements UgcVideoProvider {
   }
 
   estimateCost(seconds: number) {
-    return { kind: "estimate" as const, ...costForUsage(this.pricing, { seconds, generations: 1 }), pricing: this.pricing };
+    return { kind: "estimate" as const, ...costForUsage(this.pricing, ugcVideoUsage(seconds, this.pricing)), pricing: this.pricing };
   }
 
   async submit(request: UgcVideoRequest): Promise<ProviderJobRef> {

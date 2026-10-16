@@ -4,7 +4,7 @@ import { ClipDurationCheckSchema } from "./media-integrity";
 import { z } from "zod";
 import { AvatarPresetSchema, PresenterTaskSchema, PresenterAudioSchema } from "./presenter";
 import { NarrationInfoSchema } from "./audio";
-import { CreativeModeSchema, UgcJobStateSchema, UgcRequestSchema, UgcSceneConsistencySchema } from "./ugc";
+import { CreativeModeSchema, UgcJobStateSchema, UgcRequestSchema, UgcSceneConsistencySchema, UgcVideoOperationSchema } from "./ugc";
 import { CampaignPlanSchema } from "./campaign";
 import {
   BudgetExceededDecisionSchema,
@@ -203,6 +203,8 @@ export const GenerationJobSchema = z.object({
   currentStage: z.enum(["narration", "scenes", "avatar", "ugc_reference", "ugc_video", "render"]).optional(),
   /** AI UGC: identidade do personagem, produto-âncora e referências versionadas (pessoa + produto). */
   ugc: UgcJobStateSchema.optional(),
+  /** Intenções/operações Veo persistidas para retomada sem POST duplicado. */
+  ugcVideoOperations: z.array(UgcVideoOperationSchema).optional(),
   presenterTasks: z.array(PresenterTaskSchema).optional(),
   videoTasks: z.array(z.object({ attemptId: z.string().optional(), state: z.enum(["submitting", "pending", "settled"]).optional(), sceneId: z.string(), providerJobId: z.string(), provider: z.string(), model: z.string(), createdAt: z.string() })).optional(),
   id: nonEmpty,

@@ -3,13 +3,14 @@ import { buildMockDraft } from "@/ai/mock-planner";
 import { fitSpeech } from "@/ai/mock-ugc-planner";
 import { PRICING_TABLE } from "@/config/pricing";
 import { SIMPLE_UGC_QUALITY_PRESETS } from "@/config/simple-presets";
+import { ugcVeoPreset } from "@/config/ugc-models";
 import { productAnchor, resolveUgcIdentity, suggestEnvironment, UGC_PRESET_PLANS } from "@/config/ugc";
 import { estimateCreativeCost, resolvePricing } from "@/costs/calculate";
 import { StaticPricingCatalog } from "@/costs/pricing-catalog";
 import { hydrateCampaignPlan } from "@/ai/hydrate";
 import { isUgcPersonSource, UgcCharacterProfileSchema } from "@/domain/ugc";
 import { buildRenderManifest } from "@/render/manifest";
-import { prepareGoogleUgcReference, prepareGoogleUgcVideo } from "@/providers/ugc/google-ugc-contract";
+import { buildGoogleUgcReferenceRequest, buildVeoUgcVideoRequest } from "@/providers/ugc/google-ugc-contract";
 import { product } from "@/test/fixtures";
 import { buildUgcReferencePrompt, findUgcSpeechViolations, speechFitsDuration, validateUgcScenes } from "./ugc-script";
 import { campaignPlanPromptV1_5_0 } from "./prompts/campaign-plan.v1_5_0";
@@ -133,19 +134,24 @@ describe("render e contrato futuro", () => {
     const { plan } = ugcPlan("economy");
     const hook = plan.scenes[0]!;
     const sceneVideos = new Map(plan.scenes.filter((s) => s.requiresGeneratedVideo).map((s) => [s.id, `mock://v/${s.id}`]));
-    expect(() => buildRenderManifest({ campaignId: "c", plan, product: p, sceneVideos, clipAudioSceneIds: new Set([hook.id]), narration: { uri: "outputs/audio/x.mp3", durationSeconds: 10, isMock: false }, outputDir: "outputs" })).toThrow(/duplicado/);
+    for (const isMock of [false, true]) {
+      expect(() => buildRenderManifest({ campaignId: "c", plan, product: p, sceneVideos, clipAudioSceneIds: new Set([hook.id]), narration: { uri: isMock ? "mock://audio/x.mp3" : "outputs/audio/x.mp3", durationSeconds: 10, isMock }, outputDir: "outputs" })).toThrow(/duplicado/);
+    }
     const ok = buildRenderManifest({ campaignId: "c", plan, product: p, sceneVideos, clipAudioSceneIds: new Set([hook.id]), outputDir: "outputs" });
     expect(ok.assets[0]!.clipAudio).toBe(true);
     expect(ok.audio).toEqual([]);
   });
 
-  it("contrato Google preparado: sem rede, não verificado, fala nativa e sem narração externa", () => {
+  it("contrato Google preparado: Nano Banana + Veo, fala nativa e sem narração externa", () => {
     const identity = resolveUgcIdentity({ id: "c", revision: 1, product: p, request: { presenter: "woman", environment: "kitchen", visualStyle: "natural_smartphone" } });
     const anchor = productAnchor(p)!;
-    const ref = prepareGoogleUgcReference({ product: anchor, identity, prompt: "x", aspectRatio: "9:16" });
-    expect(ref).toMatchObject({ provider: "google", verified: false, role: "reference_image" });
-    const video = { sceneId: "s", role: "ugc_hook" as const, reference: { id: "r", version: "v1", imageUri: "outputs/ugc/x.png" }, identity, product: anchor, speech: "Olha isso aqui", action: "segura", durationSeconds: 5, aspectRatio: "9:16" as const };
-    expect(prepareGoogleUgcVideo(video).input).toMatchObject({ generateAudio: true });
-    expect(() => prepareGoogleUgcVideo({ ...video, audio: { data: new Uint8Array(), startSeconds: 0, endSeconds: 1, narrationVersion: "v1" } })).toThrow(/native_speech/);
+    const ref = buildGoogleUgcReferenceRequest({ product: anchor, identity, prompt: "x", aspectRatio: "9:16" });
+    expect(ref).toMatchObject({ provider: "google", model: "gemini-3.1-flash-image", responseFormat: { aspectRatio: "9:16", imageSize: "1K" } });
+    expect(ref.input[1]).toMatchObject({ sourceUri: anchor.imageUri, purpose: "preserve_product" });
+    const video = { sceneId: "s", role: "ugc_hook" as const, reference: { id: "r", version: "v1", imageUri: "outputs/ugc/x.png", approved: true as const }, identity, product: anchor, speech: "Olha isso aqui", action: "segura", durationSeconds: 5, aspectRatio: "9:16" as const, additionalReferenceUris: [anchor.imageUri] };
+    const built = buildVeoUgcVideoRequest(video, ugcVeoPreset("high"));
+    expect(built.config).toMatchObject({ generateAudio: true, durationSeconds: "8", aspectRatio: "9:16", resolution: "720p" });
+    expect(built.config.referenceImages).toHaveLength(1);
+    expect(() => buildVeoUgcVideoRequest({ ...video, audio: { data: new Uint8Array(), startSeconds: 0, endSeconds: 1, narrationVersion: "v1" } }, ugcVeoPreset("high"))).toThrow(/áudio nativo/);
   });
 });

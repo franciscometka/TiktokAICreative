@@ -41,7 +41,7 @@ export interface UgcVideoRequest {
   sceneId: string;
   role: UgcPersonSource;
   /** Referência APROVADA (pessoa + produto). Sem ela não existe pedido. */
-  reference: { id: string; version: string; imageUri: string };
+  reference: { id: string; version: string; imageUri: string; approved: true };
   identity: UgcCharacterIdentity;
   product: UgcProductAnchor;
   /** Fala da cena (native_speech: o modelo fala este texto; external_lipsync: só contexto). */
@@ -50,6 +50,10 @@ export interface UgcVideoRequest {
   action: string;
   durationSeconds: number;
   aspectRatio: "9:16";
+  /** Referências extras (produto/pessoa) para modelos que suportam referenceImages; máximo 3. */
+  additionalReferenceUris?: readonly string[];
+  /** Ajuda a consistência quando suportado, mas NÃO garante determinismo. */
+  seed?: number;
   /** external_lipsync: trecho da narração ElevenLabs (bytes WAV) + janela no áudio contínuo. */
   audio?: { data: Uint8Array; startSeconds: number; endSeconds: number; narrationVersion: string };
 }
@@ -67,6 +71,7 @@ export interface UgcVideoProvider {
   readonly descriptor: ProviderDescriptor;
   /** Estratégia de áudio DECLARADA pelo provider (ver UgcAudioStrategy). */
   readonly audioStrategy: UgcAudioStrategy;
+  readonly capabilities?: { supportsReferenceImages: boolean; maxReferenceImages: number; supportsSeed: boolean; nativeAudio: boolean };
   estimateCost(seconds: number): CostQuote;
   submit(request: UgcVideoRequest): Promise<ProviderJobRef>;
   getStatus(ref: ProviderJobRef): Promise<ProviderJobStatus>;

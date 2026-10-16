@@ -224,13 +224,16 @@ Guia: [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md).
 - [x] Fala UGC natural validada (sem experiência inventada, cabe na duração); prompt 1.5.0
 - [x] Storyboard: quem aparece / o que segura / o que fala / o que faz
 - [x] Categorias de custo referência UGC, cena UGC, B-roll; preços placeholder
-- [x] Contrato Google/Veo preparado, sem transporte nem rede
+- [x] Contratos atualizados: Nano Banana `gemini-3.1-flash-image` + Veo 3.1 Lite/Fast/Standard, sem transporte nem rede
+- [x] Pricing oficial Veo isolado por modelo/resolução; presets Econômico Lite 720p, Equilibrado Fast 720p e Premium Fast 1080p (Standard configurável)
+- [x] Intenção/operação UGC durável antes/depois do submit; retomada por operation ID, timeout sem reenvio e custo deduplicado
+- [x] Áudio nativo Veo preservado no Remotion sem ElevenLabs/narração duplicada
 - [x] Testes offline: referência, aprovação, bloqueio, consistência, cenas, storyboard, presets, orçamento, retomada, regeneração, pipeline MOCK, separação Presenter × UGC, nenhuma chamada fora da autorização
 
 ### Falta para a primeira geração UGC real
-- [ ] Escolher e verificar modelo/endpoint OFICIAL (Google Veo/Imagen via API; nunca Flow web) e termos de uso
-- [ ] Preços oficiais com fonte em `config/pricing.ts` (substituir `unassigned-ugc`)
-- [ ] Transporte real de referência e vídeo com intenção durável antes do POST, polling limitado e retomada por ID
+- [x] Escolher modelos oficiais candidatos (Gemini image generation/Nano Banana + Veo 3.1; nunca Flow web)
+- [x] Preços oficiais Veo e referência 1K com fonte/data em `config/pricing.ts`
+- [ ] Implementar transportes HTTP reais de referência e vídeo sobre os contratos já preparados
 - [ ] Política de geração de pessoas (pessoa sintética, sem semelhança com reais) e consentimento para biblioteca
 - [ ] Resolver de asset para enviar a imagem de referência aprovada ao provider
 - [ ] Habilitar capabilities REAL de `ugc_reference`/`ugc_video` com credencial configurada

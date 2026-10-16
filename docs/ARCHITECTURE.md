@@ -238,12 +238,13 @@ Pré-requisito já atendido: ledger persistido em `ledger.jsonl`.
 `quoteJob` cria o teto conservador e um fingerprint das entradas, modos, estimativa e revisão do storyboard. `authorizeAndRunJob` persiste `jobAuthorization` e inicia `runAuthorizedJob` no registro de jobs ativos. A orquestração chama as mesmas etapas híbridas uma a uma; antes de cada unidade compara gasto desde a aprovação + cotação com o teto. Cada provider continua protegido por `withRealStageAuthorization`. Estado interrompido é derivado e só continua após novo clique.
 
 
-## AI UGC (Lote 5.3 / D79–D84)
+## AI UGC (Lote 5.3 / D79–D85)
 - Domínio: `domain/ugc.ts` (identidade, referência versionada, estado do job, consistência por cena, perfil de biblioteca futura). `GenerationJob.ugc`, `MediaAttempt.ugc`, `CampaignRequest.creativeMode/ugc`.
-- Config: `config/ugc.ts` (identidade determinística, ambiente sugerido, produto-âncora, planos por preset), `config/ugc-models.ts` (refs de preço placeholder, candidatos Google não verificados), presets `SIMPLE_UGC_QUALITY_PRESETS`.
-- Providers: `providers/ugc/` — `UgcReferenceProvider`, `UgcVideoProvider` (declara `audioStrategy`), mocks, contrato Google sem transporte, factory (REAL lança "não configurado").
+- Config: `config/ugc.ts` (identidade, ambiente, produto-âncora e planos), `config/ugc-models.ts` (Nano Banana/Veo, capacidades, durações e preset → modelo/resolução) e `config/pricing.ts` (fonte/data oficial).
+- Providers: `providers/ugc/` — `UgcReferenceProvider`/`UgcVideoProvider`, mocks, builders puros e adapters futuros `UgcReferenceProviderGoogle`/`UgcVideoProviderVeo` sobre transportes injetados. A factory de runtime REAL continua deliberadamente desligada.
 - Roteiro: `ai/ugc-script.ts` (regras de fala), `ai/mock-ugc-planner.ts`, prompt `campaign-plan@1.5.0`.
 - Fluxo: `pipeline/ugc-flow.ts` (`generateUgcReference`, `generateUgcScene`), integrado em `PipelineService` (`quoteStage`/`performHybridStage`, `approveUgcReference`, `regenerateUgcReference`, `updateUgcIdentity`, `resumeAfterUgcDecision`). Ordem `ugc_reference → narration → ugc_video → avatar → scenes → render`.
 - Storage: `storage/ugc-asset-store.ts` (`UGC_DIR`, vN atômico), rota `api/ugc/[campaignId]/[creativeId]/[version]`.
-- Render: `ManifestAsset.clipAudio` + guard de áudio duplicado; `OffthreadVideo` desmutado só em cenas com áudio próprio.
+- Render: `ManifestAsset.clipAudio` + guard de áudio duplicado; `OffthreadVideo` desmutado só em cenas com áudio próprio e o encoder preserva AAC quando a única fonte é o áudio nativo do clipe.
+- Durabilidade: referência e cena persistem intenção antes do POST; vídeo guarda `ugcVideoOperations` com operation ID, duração pedida e custo estimado. Retomada consulta/poll/download pelo ID, sem novo submit; timeout/cobrança incerta pausa.
 - UI: `application/ugc-view.ts`, `components/campaign/ugc-reference-panel.tsx`, cartões do storyboard com quem/segura/fala/faz.

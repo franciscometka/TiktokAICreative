@@ -334,8 +334,12 @@ export class PipelineService {
             awaitingReview = true;
             blocked ??= "Aprove a referência: esta será a pessoa apresentando seu produto.";
           }
-          if (current && (current.state === "submitting" || current.state === "pending")) blocked ??= "Envio anterior da referência incerto/pendente. Sem reenvio automático; confira o provider antes de continuar.";
-          if (!awaitingReview && state.references.length >= this.deps.maxAttemptsPerScene) blocked ??= "Limite de tentativas da referência UGC atingido";
+          if (current && (current.state === "submitting" || current.state === "pending")) {
+            if (current.providerJobId) unit = `reference:resume:${current.providerJobId}`;
+            else blocked ??= "Envio anterior da referência incerto e sem operation ID. Sem reenvio automático; confira o provider antes de continuar.";
+          }
+          const identityAttempts = state.references.filter(reference => reference.identityId === state.identity.id && reference.identityRevision === state.identity.revision).length;
+          if (!awaitingReview && identityAttempts >= this.deps.maxAttemptsPerScene) blocked ??= "Limite de tentativas da referência UGC atingido";
           const reference = this.ugcReferenceProvider(ctx); model = reference.descriptor.model;
           estimatedBrl = reference.estimateCost().costUsd * (await this.deps.exchangeRates.getUsdBrl()).rate;
         }
@@ -352,7 +356,8 @@ export class PipelineService {
       } else if (scene) {
         const attempts = job.scenes.find(s => s.sceneId === scene.id)!.attempts;
         const pending = job.presenterTasks?.find(t => t.sceneId === scene.id && (t.state === "pending" || t.state === "submitting"));
-        if (!pending && !job.videoTasks?.some(t => t.sceneId === scene.id && t.state === "pending") && attempts.length >= this.deps.maxAttemptsPerScene) blocked ??= "Limite de tentativas da cena atingido";
+        const pendingUgc = job.ugcVideoOperations?.findLast(operation => operation.sceneId === scene.id && operation.state !== "settled");
+        if (!pending && !pendingUgc && !job.videoTasks?.some(t => t.sceneId === scene.id && t.state === "pending") && attempts.length >= this.deps.maxAttemptsPerScene) blocked ??= "Limite de tentativas da cena atingido";
         if (stage === "avatar") {
           if (!campaign.request.presenterPresetId) blocked ??= "Selecione um avatar ao criar o projeto.";
           if (!narration) blocked ??= "Execute a narração primeiro.";
@@ -365,6 +370,8 @@ export class PipelineService {
         } else if (stage === "ugc_video") {
           if (!approvedReference(job.ugc)) blocked ??= "Nenhuma cena UGC é gerada antes de uma referência aprovada.";
           if (job.ugc?.audioStrategy === "external_lipsync" && !narration) blocked ??= "Execute a narração primeiro (lip sync).";
+          if (pendingUgc?.state === "submitting" && !pendingUgc.providerOperationId) blocked ??= "Envio UGC anterior incerto: sem operation ID, não haverá reenvio automático.";
+          if (pendingUgc?.providerOperationId) unit = `${scene.id}:resume:${pendingUgc.providerOperationId}`;
           const ugcVideo = this.ugcVideoProvider(ctx); model = ugcVideo.descriptor.model;
           estimatedBrl = ugcVideo.estimateCost(scene.estimatedGenerationSeconds).costUsd * (await this.deps.exchangeRates.getUsdBrl()).rate;
         } else {
@@ -381,8 +388,14 @@ export class PipelineService {
         if (narration?.narration?.fit?.action === "review" && !narration.narration.reviewAcceptedAt) blocked ??= "Revise e aceite a duração da narração antes do render.";
       }
     } catch (error) { blocked ??= messageOf(error); }
-    if (job.stageIntents?.some(i => i.stage === stage && i.state === "running") && !(stage === "avatar" && job.presenterTasks?.some(t => t.state === "pending" && t.providerJobId)) && !(stage === "scenes" && job.videoTasks?.some(t => t.state === "pending" && t.providerJobId))) blocked ??= "Etapa anterior interrompida com possível cobrança. Sem reenvio: confira o provider e preserve o ledger antes de uma nova execução.";
-    if (regenerate && (stage === "scenes" || stage === "avatar") && !scene) blocked ??= "Não há cenas desta etapa neste job.";
+    if (job.stageIntents?.some(i => i.stage === stage && i.state === "running")
+      && !(stage === "avatar" && job.presenterTasks?.some(t => t.state === "pending" && t.providerJobId))
+      && !(stage === "scenes" && job.videoTasks?.some(t => t.state === "pending" && t.providerJobId))
+      && !(stage === "ugc_reference" && latestReference(job.ugc)?.providerJobId && ["submitting", "pending"].includes(latestReference(job.ugc)!.state))
+      && !(stage === "ugc_video" && job.ugcVideoOperations?.some(operation => operation.state === "pending" && operation.providerOperationId))) {
+      blocked ??= "Etapa anterior interrompida com possível cobrança. Sem reenvio: confira o provider e preserve o ledger antes de uma nova execução.";
+    }
+    if (regenerate && (stage === "scenes" || stage === "avatar" || stage === "ugc_video") && !scene) blocked ??= "Não há cenas desta etapa neste job.";
     if (done) estimatedBrl = 0;
     if (mode === "mock") estimatedBrl = 0;
     if (!done && !blocked) { const budget = await this.checkJobBudget(ctx, estimatedBrl); if (budget.kind === "BUDGET_EXCEEDED") { budgetDecision = budget; blocked = `Orçamento insuficiente: total R$${budget.newEstimatedTotalBrl.toFixed(2)}; ajuste o orçamento em uma cópia ou use a decisão de orçamento existente.`; } }
@@ -391,7 +404,7 @@ export class PipelineService {
     const perScene = stage === "scenes" || stage === "avatar" || stage === "ugc_video";
     const entries = (await this.deps.ledger.list({ jobId })).filter(e => categories.includes(e.category) && (!perScene || !!e.sceneId && sceneIds.has(e.sceneId)));
     const capabilityOk = mode === "mock" || !!this.deps.hybrid?.capabilities[stage].available;
-    const attemptsUsed = stage === "narration" ? job.audioAttempts.length : stage === "ugc_reference" ? job.ugc?.references.length ?? 0 : scene ? job.scenes.find(s => s.sceneId === scene.id)?.attempts.length ?? 0 : 0;
+    const attemptsUsed = stage === "narration" ? job.audioAttempts.length : stage === "ugc_reference" ? job.ugc?.references.filter(reference => reference.identityId === job.ugc?.identity.id && reference.identityRevision === job.ugc?.identity.revision).length ?? 0 : scene ? job.scenes.find(s => s.sceneId === scene.id)?.attempts.length ?? 0 : 0;
     const attemptsOk = done || attemptsUsed < this.deps.maxAttemptsPerScene;
     const hasRealNarration = !!narration && !narration.isMock && !!narration.assetUri && !!narration.narration?.timingUri;
     const assetsOk = stage === "ugc_reference" ? !!job.ugc || !creative.scenes.some(s => isUgcPersonSource(s.visualSource)) : stage !== "scenes" || mode === "mock" || (!!scene && campaign.request.product.images.length > 0 && !blocked?.toLowerCase().includes("imagem"));
@@ -549,6 +562,9 @@ export class PipelineService {
           });
         });
         const outcome = await this.performHybridStage(jobId, stage);
+        if (outcome.kind === "WAITING_STAGE" && outcome.job.stageIntents?.some(intent => intent.stage === stage && intent.state === "running")) {
+          return this.pauseAuthorizedJob(jobId, "Operação aceita ou cobrança incerta. Retome explicitamente pelo operation ID; nenhum novo POST será feito.", stage);
+        }
         if (outcome.kind !== 'WAITING_STAGE') {
           if (outcome.kind === 'COMPLETED') {
             const completed = await this.withJobLock(jobId, async () => {
@@ -634,7 +650,7 @@ export class PipelineService {
             for (const scene of ctx.creative.scenes.filter(s => s.requiresGeneratedVideo && this.sceneStage(s) === stage && (!targetSceneId || s.id === targetSceneId))) {
               const state = job.scenes.find(s => s.sceneId === scene.id)!;
               if (!regenerate && this.matchesMode(activeAttempt(state.attempts), mode)) continue;
-              const pending = job.presenterTasks?.some(t => t.sceneId === scene.id && (t.state === "pending" || t.state === "submitting")) || job.videoTasks?.some(t => t.sceneId === scene.id && t.state === "pending");
+              const pending = job.presenterTasks?.some(t => t.sceneId === scene.id && (t.state === "pending" || t.state === "submitting")) || job.videoTasks?.some(t => t.sceneId === scene.id && t.state === "pending") || job.ugcVideoOperations?.some(operation => operation.sceneId === scene.id && operation.state !== "settled");
               if (!pending) assertAttemptsAvailable(state.attempts, this.deps.maxAttemptsPerScene);
               job = await this.stage(job, this.sceneStage(scene)); ctx = { ...ctx, job };
               const result = stage === "avatar" ? await this.generatePresenterScene(ctx, scene, !pending && state.attempts.length > 0)
@@ -891,7 +907,8 @@ export class PipelineService {
       const current = await this.getJob(jobId);
       if (!current.ugc) throw new Error("Este job não é AI UGC.");
       this.assertNoUgcScenes(current);
-      if (current.ugc.references.length >= this.deps.maxAttemptsPerScene) throw new Error("Limite de tentativas da referência UGC atingido.");
+      const attempts = current.ugc.references.filter(reference => reference.identityId === current.ugc?.identity.id && reference.identityRevision === current.ugc?.identity.revision).length;
+      if (attempts >= this.deps.maxAttemptsPerScene) throw new Error("Limite de tentativas da referência UGC atingido.");
       const next = { ...current, ugc: this.rejectOpenReferences(current.ugc), updatedAt: this.deps.clock() };
       await this.deps.store.saveJob(next);
       return next;

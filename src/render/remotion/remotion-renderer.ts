@@ -6,7 +6,7 @@ import { VERSION as REMOTION_VERSION } from "remotion";
 import { RenderManifestSchema, type RenderManifest } from "@/domain/render";
 import { COMPOSITION_ID, COMPOSITION_VERSION } from "../../../remotion/types/props";
 import { AssetResolver, type ResolvedAsset } from "../asset-resolver";
-import { buildCompositionProps } from "../composition-props";
+import { buildCompositionProps, compositionHasAudio } from "../composition-props";
 import {
   allocateRenderDir,
   FINAL_FILE,
@@ -107,6 +107,7 @@ export class RemotionRenderer implements Renderer {
       const serveUrl = await this.getBundle();
       const licenseKey = this.options.licenseKey ?? null;
       const composition = await selectComposition({ serveUrl, id: COMPOSITION_ID, inputProps: props, logLevel: "error", browserExecutable: this.options.browserExecutable ?? null });
+      const hasAudio = compositionHasAudio(props);
 
       await renderMedia({
         composition,
@@ -117,9 +118,9 @@ export class RemotionRenderer implements Renderer {
         // bt709 + range limitado: yuv420p "tv" (o padrão do Remotion sai yuvj420p full-range).
         colorSpace: "bt709",
         crf: this.options.crf ?? 20,
-        // Com narração real: trilha AAC. Sem áudio: MP4 sem trilha (como no Lote 3).
-        muted: props.audio.length === 0,
-        audioCodec: props.audio.length > 0 ? "aac" : null,
+        // Narração OU áudio nativo Veo: preservar em AAC. Sem ambos: MP4 sem trilha.
+        muted: !hasAudio,
+        audioCodec: hasAudio ? "aac" : null,
         outputLocation: partial,
         overwrite: false,
         concurrency: this.options.concurrency ?? null,
@@ -143,7 +144,7 @@ export class RemotionRenderer implements Renderer {
         renderId,
         renderedAt: new Date().toISOString(),
         renderMs,
-        output: { file: FINAL_FILE, codec: "h264", pixelFormat: "yuv420p", colorSpace: "bt709", audio: props.audio.length > 0 ? "aac" : false, sizeBytes: size },
+        output: { file: FINAL_FILE, codec: "h264", pixelFormat: "yuv420p", colorSpace: "bt709", audio: hasAudio ? "aac" : false, sizeBytes: size },
         fps: props.fps,
         width: props.width,
         height: props.height,

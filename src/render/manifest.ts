@@ -45,7 +45,7 @@ export interface BuildManifestInput {
 export function buildRenderManifest(input: BuildManifestInput): RenderManifest {
   const { plan, product, sceneVideos } = input;
   // Nunca duas vozes: fala nativa dos clipes UGC exclui uma narração real separada (D79).
-  if ((input.clipAudioSceneIds?.size ?? 0) > 0 && input.narration && input.narration.isMock === false) {
+  if ((input.clipAudioSceneIds?.size ?? 0) > 0 && input.narration) {
     throw new Error("Áudio duplicado: clipes AI UGC com fala nativa não podem ser combinados com narração separada.");
   }
   const images = product.images;
