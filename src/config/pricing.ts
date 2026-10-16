@@ -5,6 +5,7 @@ import { ELEVENLABS_MODELS, ELEVENLABS_PROVIDER } from "./tts-models";
 import { RUNWAY_PRESENTER } from "./presenters";
 import { RUNWAY_VIDEO } from "./video-models";
 import { GEMINI_UGC_REFERENCE_MODEL, GOOGLE_UGC_PROVIDER, VEO_3_1_MODELS } from "./ugc-models";
+import { KREA_UGC_PROVIDER, KREA_UGC_REFERENCE_MODEL, KREA_VEO_MODELS } from "./krea-ugc-models";
 
 export const RUNWAY_CREDITS_PER_SECOND = 5;
 export const RUNWAY_CREDIT_USD = 0.01;
@@ -110,6 +111,14 @@ export const PRICING_TABLE: readonly ProviderPricing[] = [
   { provider: GOOGLE_UGC_PROVIDER, model: `${VEO_3_1_MODELS.fast}:1080p`, unit: "per_second", priceUsd: 0.12, updatedAt: "2026-10-16", isPlaceholder: false, source: "https://ai.google.dev/gemini-api/docs/pricing — Veo 3.1 Fast 1080p" },
   { provider: GOOGLE_UGC_PROVIDER, model: VEO_3_1_MODELS.standard, unit: "per_second", priceUsd: 0.40, updatedAt: "2026-10-16", isPlaceholder: false, source: "https://ai.google.dev/gemini-api/docs/pricing — Veo 3.1 Standard 720p/1080p" },
   { provider: GOOGLE_UGC_PROVIDER, model: `${VEO_3_1_MODELS.standard}:1080p`, unit: "per_second", priceUsd: 0.40, updatedAt: "2026-10-16", isPlaceholder: false, source: "https://ai.google.dev/gemini-api/docs/pricing — Veo 3.1 Standard 720p/1080p" },
+
+  // ---- AI UGC via Krea (UGC_PROVIDER=krea). Fonte: https://api.krea.ai/openapi.json (x-krea-pricing), 2026-10-16.
+  // Preço FIXO por requisição; Veo com áudio = linear em 4/6/8s → expresso por segundo.
+  { provider: KREA_UGC_PROVIDER, model: KREA_UGC_REFERENCE_MODEL, unit: "per_generation", priceUsd: 0.08, updatedAt: "2026-10-16", isPlaceholder: false, source: "https://api.krea.ai/openapi.json — Nano Banana 2, 1K: US$0,08 por requisição" },
+  { provider: KREA_UGC_PROVIDER, model: KREA_VEO_MODELS.fast, unit: "per_second", priceUsd: 0.10, updatedAt: "2026-10-16", isPlaceholder: false, source: "https://api.krea.ai/openapi.json — Veo 3.1 Fast 720p com áudio: US$0,40/0,60/0,80 (4/6/8s)" },
+  { provider: KREA_UGC_PROVIDER, model: `${KREA_VEO_MODELS.fast}:1080p`, unit: "per_second", priceUsd: 0.12, updatedAt: "2026-10-16", isPlaceholder: false, source: "https://api.krea.ai/openapi.json — Veo 3.1 Fast 1080p com áudio: US$0,48/0,72/0,96 (4/6/8s)" },
+  { provider: KREA_UGC_PROVIDER, model: KREA_VEO_MODELS.standard, unit: "per_second", priceUsd: 0.40, updatedAt: "2026-10-16", isPlaceholder: false, source: "https://api.krea.ai/openapi.json — Veo 3.1 720p com áudio: US$1,60/2,40/3,20 (4/6/8s)" },
+  { provider: KREA_UGC_PROVIDER, model: `${KREA_VEO_MODELS.standard}:1080p`, unit: "per_second", priceUsd: 0.40, updatedAt: "2026-10-16", isPlaceholder: false, source: "https://api.krea.ai/openapi.json — Veo 3.1 1080p com áudio: US$1,60/2,40/3,20 (4/6/8s)" },
 
   // ---- Renderização local (Remotion na máquina do usuário) ----
   {

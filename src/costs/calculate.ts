@@ -19,6 +19,7 @@ import { roundBrl, roundUsd, usdToBrl } from "@/lib/money";
 import { RUNWAY_VIDEO, runwayDuration } from "@/config/video-models";
 import { RUNWAY_PRESENTER, presenterBilledSeconds } from "@/config/presenters";
 import { veoConfigForPricingModel, veoRequestedDuration } from "@/config/ugc-models";
+import { KREA_UGC_PROVIDER, kreaRequestedDuration } from "@/config/krea-ugc-models";
 import { UGC_PRESET_PLANS } from "@/config/ugc";
 import type { PricingCatalog } from "./pricing-catalog";
 
@@ -225,6 +226,8 @@ export function sceneVideoUsage(scene: Pick<ScenePlan, "estimatedGenerationSecon
 
 /** Uso faturável Veo por cena, separado da duração editorial exibida no storyboard. */
 export function ugcVideoUsage(seconds: number, pricing: ProviderPricing): Usage {
+  // Krea vende Veo em 4/6/8s: cobra a duração COMPRADA, não a editorial.
+  if (pricing.provider === KREA_UGC_PROVIDER) return { seconds: kreaRequestedDuration(seconds), generations: 1 };
   if (pricing.provider !== "google" || !pricing.model.startsWith("veo-3.1-")) return { seconds, generations: 1 };
   const config = veoConfigForPricingModel(pricing.model);
   const referenceImages = config.supportsReferenceImages ? 1 : 0; // produto original além da referência UGC aprovada

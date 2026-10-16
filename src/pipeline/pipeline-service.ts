@@ -4,6 +4,8 @@ import type { PreflightCheck } from "@/domain/readiness";
 import { withRealStageAuthorization } from "@/config/execution-policy";
 import { RUNWAY_VIDEO } from "@/config/video-models";
 import { SIMPLE_QUALITY_PRESETS, SIMPLE_UGC_QUALITY_PRESETS } from "@/config/simple-presets";
+import type { PresetQuality } from "@/config/quality-presets";
+import type { UgcPricingRefs } from "@/config/ugc-models";
 import { approvedReference, isUgcPersonSource, latestReference, UgcRequestSchema, type UgcCharacterIdentity, type UgcEnvironmentChoice, type UgcPresenterChoice } from "@/domain/ugc";
 import { resolveUgcIdentity } from "@/config/ugc";
 import { findUgcSpeechViolations, speechFitsDuration } from "@/ai/ugc-script";
@@ -120,6 +122,8 @@ export interface PipelineDeps {
   presenterProviderFactory?: (pricing: ProviderPricing) => PresenterProvider;
   presenterAudioSlicer?: AudioSlicer;
   videoChoice?: PricingRef;
+  /** AI UGC por outro provider (ex.: Krea): substitui as refs Google dos presets em projetos NOVOS. */
+  ugcChoice?: (quality: PresetQuality) => UgcPricingRefs;
   videoAssets?: VideoAssetStore;
   /** AI UGC (Lote 5.3): factories separadas do Presenter e do vídeo genérico. Padrão: mocks. */
   ugcProviders?: UgcProviderFactories;
@@ -320,7 +324,7 @@ export class PipelineService {
     const referenceDone = stage === "ugc_reference" && (!job.ugc || !!approvedReference(job.ugc));
     const done = !regenerate && (nativeSkip || referenceDone || stage !== "ugc_reference" && (stage === "narration" ? this.matchesMode(narration, mode) : stage === "render" ? job.status === "completed" && !job.renderStale && job.renders.some(r => r.status === "completed" && (mode === "mock" || !r.isMock)) : !scene));
     let model = stage === "narration" ? ctx.pricing.audio.model : stage === "render" ? ctx.pricing.rendering.model : stage === "avatar" ? RUNWAY_PRESENTER.model : stage === "ugc_reference" ? ctx.pricing.ugcReference?.model ?? "—" : stage === "ugc_video" ? ctx.pricing.ugcVideo?.model ?? "—" : ctx.pricing.video.model;
-    let provider = mode === "mock" ? "mock" : stage === "narration" ? ctx.pricing.audio.provider : stage === "render" ? "remotion" : stage === "ugc_reference" || stage === "ugc_video" ? "google" : "runway";
+    let provider = mode === "mock" ? "mock" : stage === "narration" ? ctx.pricing.audio.provider : stage === "render" ? "remotion" : stage === "ugc_reference" ? ctx.pricing.ugcReference?.provider ?? "google" : stage === "ugc_video" ? ctx.pricing.ugcVideo?.provider ?? "google" : "runway";
     let awaitingReview = false;
     let budgetDecision: BudgetExceededDecision | undefined;
     let estimatedBrl = 0; let blocked: string | undefined;
@@ -726,9 +730,10 @@ export class PipelineService {
     const planningMode = parsed.stageModes?.planning ?? "mock";
     if (!this.deps.hybrid) this.assertPlannerAvailable();
     if (this.deps.hybrid) for (const [stage, mode] of Object.entries(parsed.stageModes ?? {})) { if (mode === "real" && !this.deps.hybrid.capabilities[stage as ExecutionStage].available) throw new Error(this.deps.hybrid.capabilities[stage as ExecutionStage].reason); }
-    const resolved = parsed.quality !== "custom" && (parsed.simpleFlow || ugcMode)
+    const preset = parsed.quality !== "custom" && (parsed.simpleFlow || ugcMode)
       ? (ugcMode ? SIMPLE_UGC_QUALITY_PRESETS : SIMPLE_QUALITY_PRESETS)[parsed.quality]
       : resolveQualitySettings(parsed.quality, parsed.customSettings);
+    const resolved = ugcMode && this.deps.ugcChoice && parsed.quality !== "custom" ? { ...preset, ugc: this.deps.ugcChoice(parsed.quality) } : preset;
     // AI UGC: a estratégia de áudio é DECLARADA pelo UGCVideoProvider e fica fixa no projeto.
     const request: CampaignRequest = ugcMode
       ? {

@@ -44,6 +44,8 @@ export async function ugcHarness(options: {
   realReference?: boolean;
   /** Factories completas (ex.: providers Google reais com fetch falso). */
   ugcProviders?: PipelineDeps["ugcProviders"];
+  /** Dependências extras do serviço (ex.: ugcChoice da Krea). */
+  deps?: Partial<PipelineDeps>;
 } = {}) {
   const root = await mkdtemp(join(tmpdir(), "ugc-"));
   const config = loadAppConfig({ DATA_DIR: join(root, "data"), AUDIO_DIR: join(root, "audio"), VIDEOS_DIR: join(root, "videos"), RENDERS_DIR: join(root, "renders"), UGC_DIR: join(root, "ugc") });
@@ -71,6 +73,7 @@ export async function ugcHarness(options: {
     stageDelayMs: 0,
     ugcAssets,
     pollOptions: { maxPolls: 2, intervalMs: 0, sleep: async () => {} },
+    ...options.deps,
     ugcProviders: options.ugcProviders ?? {
       reference: (pricing, mode) => {
         const p = mode === "real" && options.realReference ? new FakeRealUgcReferenceProvider(pricing) : new MockUgcReferenceProvider(pricing);

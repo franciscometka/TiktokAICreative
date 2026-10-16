@@ -250,3 +250,11 @@ Guia: [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md).
 - [x] Intenção durável com hash dos inputs e teto aprovado; estado `uncertain` sem reenvio; custo recalculado antes do submit
 - [x] Duração real (requested/provider/actual), trilha de áudio nativo obrigatória, custo preservado em asset inválido
 - [x] Testes offline: transportes, pipeline e scripts (exatamente um POST por `--confirm`)
+
+## AI UGC via Krea (provider alternativo) ✅ (sem chamada paga)
+- [x] `UGC_PROVIDER=krea` + `KREA_API_KEY` server-side; readiness opt-in com `UGC_REAL_ALLOWED=true`
+- [x] `KreaHttpClient` (Bearer privado, sem retry, timeout, redação, download só `*.krea.ai`) + `KreaUgcError` A/B/C
+- [x] `UgcReferenceProviderKrea` (asset upload → Nano Banana 2 1K 9:16) e `UgcVideoProviderKrea` (Veo 3.1 Fast, start_image aprovado, áudio nativo, 4/6/8s)
+- [x] Preços oficiais (OpenAPI 2026-10-16); estimativa pela duração comprada; job ID persistido carrega a duração
+- [x] Google intacto; testes offline (`test/krea-fake.ts`, unidade + pipeline)
+- [ ] Validar UMA referência e UMA cena reais na Krea — aguardando instrução (confirmar formato de `result.urls` e cobrança efetiva)

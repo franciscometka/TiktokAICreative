@@ -2,6 +2,8 @@ import { createAnthropicLlmClient } from "@/ai/create-llm-client";
 import { createUgcProviderFactories } from "@/providers/ugc";
 import { LocalUgcAssetStore } from "@/storage/ugc-asset-store";
 import { googleUgcRuntime } from "@/providers/ugc/google-runtime";
+import { kreaUgcRuntime } from "@/providers/ugc/krea-runtime";
+import { kreaUgcPricingRefs } from "@/config/krea-ugc-models";
 import { LlmError } from "@/ai/llm-client";
 import { LlmCreativePlanner } from "@/ai/llm-planner";
 import { UnavailablePlanner } from "@/ai/unavailable-planner";
@@ -83,7 +85,8 @@ export function createPipelineService(
     }),
     audioAssets: new LocalAudioAssetStore(config.audioDir),
     ugcAssets: new LocalUgcAssetStore(config.ugcDir),
-    ugcProviders: createUgcProviderFactories({ mockAudioStrategy: config.ugcMockAudioStrategy, google: googleUgcRuntime(config, env) }),
+    ugcProviders: createUgcProviderFactories({ mockAudioStrategy: config.ugcMockAudioStrategy, google: googleUgcRuntime(config, env), krea: kreaUgcRuntime(config, env) }),
+    ugcChoice: config.ugc.provider === "krea" ? kreaUgcPricingRefs : undefined,
     renderer: createRenderer(config.renderer.id, {
       rendersDir: config.rendersDir,
       allowedAssetRoots: [config.uploadsDir, config.audioDir, config.videosDir, config.ugcDir],

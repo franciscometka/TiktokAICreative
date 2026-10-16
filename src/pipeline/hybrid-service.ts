@@ -1,6 +1,9 @@
 import { googleUgcReadiness } from "@/config/ugc-readiness";
 import { createUgcProviderFactories } from "@/providers/ugc";
 import { googleUgcRuntime } from "@/providers/ugc/google-runtime";
+import { kreaUgcRuntime } from "@/providers/ugc/krea-runtime";
+import { kreaUgcReadiness } from "@/config/krea-ugc-readiness";
+import { kreaUgcPricingRefs } from "@/config/krea-ugc-models";
 import type { AppConfig } from "@/config/env";
 import { readAnthropicApiKey, readElevenLabsApiKey, readRunwayApiKey, readRemotionLicenseKey } from "@/config/env";
 import { createAnthropicLlmClient } from "@/ai/create-llm-client";
@@ -20,15 +23,16 @@ import type { PipelineDeps } from "./pipeline-service";
 export function hybridCapabilities(config: AppConfig, env: Record<string, string | undefined> = process.env): StageCapabilities {
   const available = (ok: boolean, provider: string, reason: string) => ({ available: ok, provider, reason: ok ? undefined : reason });
   const browser = detectRemotionBrowser(config.renderer.browserExecutable);
-  const ugc = googleUgcReadiness(config, env);
+  const krea = config.ugc.provider === "krea";
+  const ugc = krea ? kreaUgcReadiness(config, env) : googleUgcReadiness(config, env);
   return {
     planning: available(config.llmProvider === "anthropic" && !!readAnthropicApiKey(env), "anthropic", "Configure LLM_PROVIDER=anthropic e ANTHROPIC_API_KEY no servidor."),
     narration: available(config.audioProvider === "elevenlabs" && !!readElevenLabsApiKey(env), "elevenlabs", "Configure AUDIO_PROVIDER=elevenlabs e ELEVENLABS_API_KEY no servidor."),
     scenes: available(config.videoProvider === "runway" && !!readRunwayApiKey(env), "runway", "Configure VIDEO_PROVIDER=runway e RUNWAYML_API_SECRET no servidor."),
     avatar: available(!!readRunwayApiKey(env), "runway", "Configure RUNWAYML_API_SECRET no servidor. Avatar real exige também narração real com alignment."),
     // AI UGC real (Lote 5.4): só com preflight Google completo; a chave sozinha não habilita.
-    ugc_reference: available(ugc.ready, "google", ugc.reason ?? ""),
-    ugc_video: available(ugc.ready, "google", ugc.reason ?? ""),
+    ugc_reference: available(ugc.ready, krea ? "krea" : "google", ugc.reason ?? ""),
+    ugc_video: available(ugc.ready, krea ? "krea" : "google", ugc.reason ?? ""),
     render: available(config.renderer.id === "remotion" && browser.available, "remotion", config.renderer.id !== "remotion" ? "Configure RENDERER=remotion no servidor." : browser.detail),
   };
 }
@@ -47,6 +51,7 @@ export function createHybridPipelineService(config: AppConfig, overrides: Partia
     renderer: mode => mode === "real" ? renderer : mockRenderer,
   };
   // A fábrica offline mantém o storage local e os defaults; o serviço híbrido faz o roteamento.
-  const ugcProviders = createUgcProviderFactories({ mockAudioStrategy: config.ugcMockAudioStrategy, google: googleUgcRuntime(config, env) });
-  return createOfflinePipelineService(config, { ugcProviders, ...overrides, hybrid: overrides.hybrid ?? hybrid, ids });
+  const ugcProviders = createUgcProviderFactories({ mockAudioStrategy: config.ugcMockAudioStrategy, google: googleUgcRuntime(config, env), krea: kreaUgcRuntime(config, env) });
+  const ugcChoice = config.ugc.provider === "krea" ? kreaUgcPricingRefs : undefined;
+  return createOfflinePipelineService(config, { ugcProviders, ugcChoice, ...overrides, hybrid: overrides.hybrid ?? hybrid, ids });
 }

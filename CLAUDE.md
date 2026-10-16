@@ -9,6 +9,7 @@ Custo é preocupação central; nada pago de mídia acontece sem aprovação exp
 
 ## Estado atual
 - Lote 5.3 AI UGC (D79–D85): modo `creativeMode: "ai_ugc"` com providers separados do Presenter; referência pessoa+produto versionada e APROVADA antes das cenas; identidade persistida; áudio nativo ou lip-sync, nunca duplicado. Lote 5.4 (D86–D87): transporte REAL Google (`gemini-3.1-flash-image` + Veo 3.1) implementado, DESLIGADO por padrão: exige `GOOGLE_AI_API_KEY` + `UGC_PROVIDER=google` + `UGC_REAL_ALLOWED=true`. Intenção com hash/teto antes do POST, `uncertain` sem reenvio, retomada por operation ID. Nenhuma chamada real feita. Ver `docs/AI-UGC.md`.
+- AI UGC via Krea (D88): `UGC_PROVIDER=krea` + `KREA_API_KEY` + `UGC_REAL_ALLOWED=true` (Nano Banana 2 + Veo 3.1 Fast com áudio, 4/6/8s). Arquivos `krea-*` separados; Google intacto. Sem validação paga.
 - Redesign D78: fluxo principal simplificado (produto → preset/apresentador → storyboard → teto único → pipeline automático → resultado). Novos projetos usam Econômico 15–20s, Equilibrado 20–30s e Premium 30–45s. Configuração técnica fica recolhida; campanhas antigas preservam settings. Nenhuma validação paga deste fluxo.
 - Lote 5.1: diagnóstico público sem segredos, configuração inválida com fallback seguro para MOCK, preflight local por ação, navegador Remotion detectado sem download e "Próxima etapa recomendada" no job. Protocolo completo validado só com mocks/transportes falsos; nenhuma chamada paga.
 - Prompt anterior (substituído pela 1.5.0): `campaign-plan@1.4.0` (inclui brief e valida preservação do roteiro manual; ainda sem validação paga).
@@ -130,6 +131,7 @@ Para ver a tela de processamento com o mock: `MOCK_PLANNER_DELAY_MS=20000` em `.
 - Não criar re-tentativas automáticas pagas nem loops sem limite (inclui fallbacks server-side).
 - Não apagar/editar custos (ledger append-only).
 - Não logar, serializar ou enviar ao browser a `ANTHROPIC_API_KEY` nem a `GOOGLE_AI_API_KEY`; não commitar `.env*` nem `data/`.
+- Não chamar a Krea API fora de `providers/ugc/krea-http.ts`; não enviar/logar `KREA_API_KEY`.
 - Não chamar a Gemini API fora de `providers/ugc/google-http.ts`; não habilitar AI UGC REAL só porque a chave existe.
 - Não adicionar banco externo, integração TikTok, providers de mídia reais, TTS ou render em nuvem sem instrução do lote.
 - Não chamar a ElevenLabs fora de `ElevenLabsAudioProvider`; não espalhar IDs de modelo TTS/voz fora de `config/tts-models.ts`/`config/voices.ts`; não deixar estruturas da ElevenLabs saírem do provider.

@@ -37,7 +37,7 @@ export const DEFAULT_LLM_POLICY = {
 export const LLM_PROVIDER_IDS = ["mock", "anthropic"] as const;
 export const VIDEO_PROVIDER_IDS = ["mock", "runway"] as const;
 export const AUDIO_PROVIDER_IDS = ["mock", "elevenlabs"] as const;
-export const UGC_PROVIDER_IDS = ["mock", "google"] as const;
+export const UGC_PROVIDER_IDS = ["mock", "google", "krea"] as const;
 
 const emptyToUndefined = (value: unknown) =>
   typeof value === "string" && value.trim() === "" ? undefined : value;
@@ -186,7 +186,7 @@ const CONFIG_HINTS: Record<string, string> = {
   VIDEO_PROVIDER: 'Use "mock" ou "runway" (não use RUNWAYML).',
   AUDIO_PROVIDER: 'Use "mock" ou "elevenlabs".',
   RENDERER: 'Use "mock" ou "remotion".',
-  UGC_PROVIDER: 'Use "mock" ou "google".',
+  UGC_PROVIDER: 'Use "mock", "google" ou "krea".',
   UGC_REAL_ALLOWED: 'Use "true" ou "false" (padrão false).',
 };
 
@@ -254,6 +254,11 @@ export function readRemotionLicenseKey(env: Record<string, string | undefined> =
 /** Segredo lido só no servidor; nunca entra em AppConfig. */
 export function readRunwayApiKey(env: Record<string, string | undefined> = process.env): string | undefined {
   return env.RUNWAYML_API_SECRET?.trim() || undefined;
+}
+
+/** Chave da Krea API (AI UGC via Krea). Só servidor; nunca entra em AppConfig, logs, erros ou UI. */
+export function readKreaApiKey(env: Record<string, string | undefined> = process.env): string | undefined {
+  return env.KREA_API_KEY?.trim() || undefined;
 }
 
 /** Chave da Gemini API (Google AI). Só servidor; nunca entra em AppConfig, logs, erros ou UI. */

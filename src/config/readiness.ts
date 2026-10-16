@@ -1,6 +1,7 @@
 import type { AppConfig, ConfigIssue } from "./env";
 import { readAnthropicApiKey, readElevenLabsApiKey, readGoogleAiApiKey, readRunwayApiKey } from "./env";
 import { googleUgcReadiness } from "./ugc-readiness";
+import { kreaUgcReadiness } from "./krea-ugc-readiness";
 import type { RuntimeReadiness } from "@/domain/readiness";
 import { detectRemotionBrowser } from "@/render/remotion/browser-readiness";
 
@@ -15,6 +16,7 @@ export function runtimeReadiness(
   const browser = detectRemotionBrowser(config.renderer.browserExecutable);
   const google = !!readGoogleAiApiKey(env);
   const ugc = googleUgcReadiness(config, env);
+  const krea = kreaUgcReadiness(config, env);
   const selected = {
     planning: config.llmProvider === "anthropic" && anthropic,
     narration: config.audioProvider === "elevenlabs" && elevenLabs,
@@ -30,6 +32,7 @@ export function runtimeReadiness(
       { id: "elevenlabs", label: "ElevenLabs", selected: config.audioProvider, configured: elevenLabs, detail: elevenLabs ? "Credencial presente no servidor; o segredo não é exibido." : "ELEVENLABS_API_KEY não configurada." },
       { id: "runway", label: "Runway", selected: config.videoProvider, configured: runway, detail: runway ? "Credencial presente no servidor; o segredo não é exibido." : "RUNWAYML_API_SECRET não configurado." },
       { id: "google", label: "Google AI UGC", selected: config.ugc.provider, configured: ugc.ready, detail: ugc.ready ? "Gemini/Veo prontos; REAL ainda exige aprovação por job." : google ? (ugc.reason ?? "") : "GOOGLE_AI_API_KEY não configurada." },
+      { id: "krea", label: "Krea AI UGC", selected: config.ugc.provider, configured: krea.ready, detail: krea.ready ? "Nano Banana 2/Veo 3.1 via Krea prontos; REAL ainda exige aprovação por job." : (krea.reason ?? "") },
       { id: "renderer", label: "Renderer", selected: config.renderer.id, configured: config.renderer.id === "mock" || browser.available, detail: config.renderer.id === "remotion" ? browser.detail : "Renderer MOCK selecionado; nenhum MP4 será criado." },
       { id: "browser", label: "Navegador do Remotion", selected: browser.source, configured: browser.available, detail: browser.detail },
     ],
