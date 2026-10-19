@@ -4,6 +4,8 @@ import { googleUgcReadiness } from "./ugc-readiness";
 import { kreaUgcReadiness } from "./krea-ugc-readiness";
 import type { RuntimeReadiness } from "@/domain/readiness";
 import { detectRemotionBrowser } from "@/render/remotion/browser-readiness";
+import type { PreflightCheck } from "@/domain/readiness";
+import { mocksAllowed } from "./execution-policy";
 
 export function runtimeReadiness(
   config: AppConfig,
@@ -24,7 +26,32 @@ export function runtimeReadiness(
     avatar: runway,
     render: config.renderer.id === "remotion" && browser.available,
   };
+  const allowMocks = mocksAllowed(config);
+  const group = (id: RuntimeReadiness["flow"][number]["id"], label: string, checks: PreflightCheck[]) => ({ id, label, ready: checks.every(check => check.ok), checks });
+  const mockOk = (selectedMock: boolean, name: string): PreflightCheck[] => selectedMock ? [{ id: "mock", label: "MOCK", ok: allowMocks, detail: allowMocks ? `${name}=mock permitido (ALLOW_MOCKS=true, só dev/teste).` : `${name}=mock exige ALLOW_MOCKS=true; no fluxo normal configure o provider REAL.` }] : [];
+  const ugcGroup = config.ugc.provider === "mock" ? mockOk(true, "UGC_PROVIDER") : (config.ugc.provider === "krea" ? krea : ugc).checks;
+  const flow = [
+    group("config", "Configuração", [
+      { id: "valid", label: "Variáveis válidas", ok: issues.length === 0, detail: issues.length ? `Inválidas: ${issues.map(issue => issue.variable).join(", ")}. Nenhuma geração até corrigir.` : "Todas as variáveis passaram na validação." },
+      { id: "mocks", label: "ALLOW_MOCKS", ok: true, detail: allowMocks ? "true: mocks deliberados (dev/teste)." : "false (padrão): fluxo REAL-only, sem fallback para MOCK." },
+    ]),
+    group("planner", "Planejamento (Claude)", config.llmProvider === "mock" ? mockOk(true, "LLM_PROVIDER") : [
+      { id: "provider", label: "LLM_PROVIDER=anthropic", ok: true, detail: "Claude selecionado." },
+      { id: "key", label: "Chave Anthropic", ok: anthropic, detail: anthropic ? "ANTHROPIC_API_KEY presente; o segredo não é exibido." : "ANTHROPIC_API_KEY não configurada." },
+    ]),
+    group("ugc", `AI UGC (${config.ugc.provider})`, ugcGroup),
+    group("narration", "Narração (dispensada com áudio nativo Veo/Krea)", config.audioProvider === "mock" ? mockOk(true, "AUDIO_PROVIDER") : [
+      { id: "key", label: "Chave ElevenLabs", ok: elevenLabs, detail: elevenLabs ? "ELEVENLABS_API_KEY presente." : "ELEVENLABS_API_KEY não configurada." },
+    ]),
+    group("renderer", "Render (Remotion)", config.renderer.id === "mock" ? mockOk(true, "RENDERER") : [
+      { id: "renderer", label: "RENDERER=remotion", ok: true, detail: "Render real selecionado." },
+      { id: "browser", label: "Navegador", ok: browser.available, detail: browser.detail },
+    ]),
+  ];
+  const blockingGroup = flow.find(item => !item.ready);
   return {
+    flow,
+    ...(blockingGroup ? { blocking: `${blockingGroup.label}: ${blockingGroup.checks.find(check => !check.ok)?.detail ?? "pendente"}` } : {}),
     readyForControlledRealValidation: issues.length === 0 && Object.values(selected).every(Boolean),
     issues,
     items: [

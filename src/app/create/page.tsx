@@ -89,6 +89,7 @@ export default async function CreatePage({ searchParams }: { searchParams: Promi
         planningAvailable={publicConfig.planningAvailable}
         voices={SPEAKER_PROFILES.map((v) => ({ id: v.id, name: v.name, description: v.description }))}
         audioProvider={publicConfig.audioProvider}
+        allowMocks={publicConfig.allowMocks}
       />
     </main>
   );

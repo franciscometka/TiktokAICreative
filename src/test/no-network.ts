@@ -13,3 +13,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   return realFetch(input, init);
 }) as typeof fetch;
+
+// Lote 5.5: a suíte usa mocks DELIBERADAMENTE. Testes da política desligam este override.
+import { forceMocksForTests } from "@/config/execution-policy";
+forceMocksForTests(true);

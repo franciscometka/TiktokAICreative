@@ -3,6 +3,7 @@ import type { StageCapabilities } from "@/domain/execution";
 import type { AppDeps } from "@/application/campaign-actions";
 import { loadAppConfigSafe, type AppConfig, type ConfigIssue } from "@/config/env";
 import { runtimeReadiness } from "@/config/readiness";
+import { mocksAllowed } from "@/config/execution-policy";
 import type { RuntimeReadiness } from "@/domain/readiness";
 import { RUNWAY_VIDEO } from "@/config/video-models";
 import { PRICING_TABLE } from "@/config/pricing";
@@ -37,7 +38,7 @@ export function getRuntime(): Runtime {
       config,
       configIssues,
       deps: {
-        service: createHybridPipelineService(config),
+        service: createHybridPipelineService(config, {}, process.env, configIssues),
         uploads: new LocalUploadStore(config.uploadsDir),
         rendersDir: config.rendersDir,
         audioDir: config.audioDir,
@@ -45,6 +46,7 @@ export function getRuntime(): Runtime {
         videosDir: config.videosDir,
         audioProvider: config.audioProvider,
         offlineOnly: false,
+        allowMocks: mocksAllowed(config),
       },
     };
   }
@@ -65,17 +67,21 @@ export interface PublicAppConfig {
   /** "remotion" = o render gera MP4 real; "mock" = nenhum arquivo é gerado. */
   renderer: "mock" | "remotion";
   defaultBudget: CostBudget;
+  /** Lote 5.5: false = fluxo REAL-only; a UI esconde MOCK e nunca mostra resultado simulado como novo. */
+  allowMocks: boolean;
   exchangeRate: { rate: number; source: string };
 }
 
 export function getPublicConfig(): PublicAppConfig {
   const { config, configIssues } = getRuntime();
-  const capabilities = hybridCapabilities(config);
+  const capabilities = hybridCapabilities(config, process.env, configIssues);
+  const allowMocks = mocksAllowed(config);
   return {
     stageCapabilities: capabilities,
     readiness: runtimeReadiness(config, configIssues),
     planner: config.llmProvider,
-    planningAvailable: config.llmProvider === "mock" || capabilities.planning.available,
+    planningAvailable: (config.llmProvider === "mock" && allowMocks) || capabilities.planning.available,
+    allowMocks,
     mediaIsMock: config.audioProvider === "mock" && config.videoProvider === "mock",
     audioProvider: config.audioProvider,
     videoIsMock: config.videoProvider === "mock",

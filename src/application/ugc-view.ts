@@ -31,6 +31,10 @@ export interface UgcReferenceView {
 
 export interface UgcView {
   headline: string;
+  /** Lote 5.5: há referência MOCK (histórico/simulação) que não serve para o fluxo REAL. */
+  historicalSimulation: boolean;
+  /** Oferecer "Gerar referência real" (projeto antigo MOCK no fluxo REAL-only). */
+  canGenerateReal: boolean;
   /** Status curto do que está rodando agora (null = nada em andamento). */
   progressLabel: string | null;
   person: { genderLabel: string; appearance: string; wardrobe: string; environment: UgcEnvironment; environmentLabel: string; visualStyle: string };
@@ -90,6 +94,8 @@ export function buildUgcView(input: {
   const identity = state.identity;
   return {
     headline: "Esta será a pessoa apresentando seu produto",
+    historicalSimulation: false,
+    canGenerateReal: false,
     progressLabel: !input.active ? null
       : job.currentStage === "ugc_video" ? "Gerando cena UGC..."
       : job.currentStage === "ugc_reference" || current?.state === "submitting" || current?.state === "pending" ? "Gerando apresentador com seu produto..." : null,
@@ -138,5 +144,24 @@ export function ugcSceneInfo(scene: ScenePlan, job: GenerationJob | undefined): 
     holding: person ? state.product.name : "—",
     speech: scene.narration || (state.audioStrategy === "native_speech" ? "Sem fala (fala só nas cenas UGC)" : "Sem fala"),
     action: person ? UGC_ROLE_ACTIONS[scene.visualSource as keyof typeof UGC_ROLE_ACTIONS] : scene.visualDescription,
+  };
+}
+
+/**
+ * Lote 5.5 (ALLOW_MOCKS=false): referência MOCK vira histórico. Sem imagem simulada, sem aprovar
+ * "pessoa" que não existe; oferece gerar a referência real.
+ */
+export function realOnlyUgcView(view: UgcView): UgcView {
+  const strip = (ref: UgcReferenceView | undefined) => (ref?.isMock ? { ...ref, previewUrl: null } : ref);
+  const simulated = !!view.current?.isMock || !!view.approved?.isMock;
+  return {
+    ...view,
+    current: strip(view.current),
+    approved: view.approved?.isMock ? undefined : view.approved,
+    history: view.history.map(ref => strip(ref)!),
+    awaitingApproval: view.awaitingApproval && !view.current?.isMock,
+    canApprove: view.canApprove && !view.current?.isMock,
+    historicalSimulation: simulated,
+    canGenerateReal: simulated && view.canChangeIdentity,
   };
 }

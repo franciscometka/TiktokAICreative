@@ -85,6 +85,8 @@ const EnvSchema = z.object({
   MAX_COST_PER_CREATIVE_BRL: optionalPositiveNumber,
   MAX_COST_PER_CAMPAIGN_BRL: optionalPositiveNumber,
   ALLOW_OVER_BUDGET: z.preprocess(emptyToUndefined, z.enum(["true", "false"]).default("false")),
+  /** Lote 5.5: MOCK só com opt-in explícito (dev/teste). Padrão false = fluxo normal REAL-only. */
+  ALLOW_MOCKS: z.preprocess(emptyToUndefined, z.enum(["true", "false"]).default("false")),
   MAX_ATTEMPTS_PER_SCENE: z.preprocess(
     emptyToUndefined,
     z.coerce.number().int().min(1).max(10).default(DEFAULT_MAX_ATTEMPTS_PER_SCENE),
@@ -126,6 +128,8 @@ export interface AppConfig {
   exchangeRate: ExchangeRate;
   defaultBudget: CostBudget;
   maxAttemptsPerScene: number;
+  /** false (padrão): nenhuma etapa do fluxo normal pode produzir resultado MOCK. */
+  allowMocks: boolean;
 }
 
 export class ConfigError extends Error {
@@ -178,6 +182,7 @@ export function loadAppConfig(
       allowOverBudget: e.ALLOW_OVER_BUDGET === "true",
     },
     maxAttemptsPerScene: e.MAX_ATTEMPTS_PER_SCENE,
+    allowMocks: e.ALLOW_MOCKS === "true",
   };
 }
 
@@ -187,6 +192,7 @@ const CONFIG_HINTS: Record<string, string> = {
   AUDIO_PROVIDER: 'Use "mock" ou "elevenlabs".',
   RENDERER: 'Use "mock" ou "remotion".',
   UGC_PROVIDER: 'Use "mock", "google" ou "krea".',
+  ALLOW_MOCKS: 'Use "true" (só dev/teste) ou "false" (padrão).',
   UGC_REAL_ALLOWED: 'Use "true" ou "false" (padrão false).',
 };
 

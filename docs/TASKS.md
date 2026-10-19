@@ -242,6 +242,14 @@ Guia: [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md).
 - [ ] Executar o Teste B real (1 cena Veo Fast 8s 720p 9:16 com áudio nativo) só após aprovar o Teste A
 - [ ] Confirmar no 1º uso real: formato REST de `durationSeconds`/`inlineData` do Veo, redirect do download e usage/cobrança efetivos
 
+## Lote 5.5 — REAL-only no fluxo normal ✅ (sem chamada paga)
+- [x] `ALLOW_MOCKS` (padrão false); mocks só em dev/teste explícito e na suíte (override no setup)
+- [x] Etapa MOCK bloqueada na cotação/execução; provider REAL indisponível nunca cai em MOCK
+- [x] Configuração inválida bloqueia todas as etapas e o readiness
+- [x] Readiness geral do fluxo por grupo + `blockingStage` do job
+- [x] Referência MOCK sem imagem simulada, sem aprovação; "Gerar referência real" para jobs antigos
+- [x] Wizard sem opção MOCK quando ALLOW_MOCKS=false
+
 ## Lote 5.4 — Transporte REAL Google para AI UGC ✅ (sem chamada paga)
 - [x] Config server-side `GOOGLE_AI_API_KEY`, `UGC_PROVIDER`, `UGC_REAL_ALLOWED`, `UGC_REFERENCE_MODEL`, `UGC_VIDEO_MODEL`; readiness/preflight sem segredo
 - [x] `GoogleAiHttpClient` (chave privada, sem retry, timeout, redação) + `GoogleUgcError` tipado A/B/C

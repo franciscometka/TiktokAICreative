@@ -68,8 +68,10 @@ export async function ugcHarness(options: {
   };
   const strategy = options.strategy ?? "native_speech";
   const ugcAssets = new InMemoryUgcAssetStore();
-  const build = () => createHybridPipelineService(config, {
-    hybrid,
+  /** `policy`: simula ALLOW_MOCKS=false e providers REAL indisponíveis (Lote 5.5). */
+  const build = (policy: { allowMocks?: boolean; unavailable?: readonly string[] } = {}) => createHybridPipelineService(config, {
+    hybrid: { ...hybrid, ...(policy.allowMocks === undefined ? {} : { allowMocks: policy.allowMocks }),
+      capabilities: { ...capabilities, ...Object.fromEntries((policy.unavailable ?? []).map(stage => [stage, { available: false, provider: "fake", reason: `${stage} REAL indisponível (teste)` }])) } },
     stageDelayMs: 0,
     ugcAssets,
     pollOptions: { maxPolls: 2, intervalMs: 0, sleep: async () => {} },

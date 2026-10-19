@@ -8,6 +8,7 @@ produto → análise/hooks/conceitos/roteiro/cenas (Claude) → validação + aj
 Custo é preocupação central; nada pago de mídia acontece sem aprovação explícita.
 
 ## Estado atual
+- Lote 5.5 (D90): fluxo normal REAL-only. `ALLOW_MOCKS=false` (padrão) bloqueia qualquer etapa MOCK com motivo claro; provider inválido/indisponível nunca cai em MOCK. Testes ligam mocks explicitamente (`forceMocksForTests` no setup). Jobs MOCK antigos ficam como histórico; referência MOCK não é aprovável.
 - Lote 5.3 AI UGC (D79–D85): modo `creativeMode: "ai_ugc"` com providers separados do Presenter; referência pessoa+produto versionada e APROVADA antes das cenas; identidade persistida; áudio nativo ou lip-sync, nunca duplicado. Lote 5.4 (D86–D87): transporte REAL Google (`gemini-3.1-flash-image` + Veo 3.1) implementado, DESLIGADO por padrão: exige `GOOGLE_AI_API_KEY` + `UGC_PROVIDER=google` + `UGC_REAL_ALLOWED=true`. Intenção com hash/teto antes do POST, `uncertain` sem reenvio, retomada por operation ID. Nenhuma chamada real feita. Ver `docs/AI-UGC.md`.
 - AI UGC via Krea (D88): `UGC_PROVIDER=krea` + `KREA_API_KEY` + `UGC_REAL_ALLOWED=true` (Nano Banana 2 + Veo 3.1 Fast com áudio, 4/6/8s). Arquivos `krea-*` separados; Google intacto. Sem validação paga.
 - Auditoria Krea D89: upload de asset durável antes do POST pago, retomada/reuso via `GET /assets/{id}`, marcador de envio pago antes da geração, CLI de referência seleciona Krea e download aceita somente HTTPS público revalidado. Nenhuma chamada real feita.

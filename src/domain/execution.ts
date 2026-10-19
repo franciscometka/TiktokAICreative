@@ -36,4 +36,6 @@ export interface JobQuote {
   ready: boolean;
   blocked?: string;
   stages: StageQuote[];
+  /** Readiness geral: etapa que bloqueia o fluxo agora, com motivo. */
+  blockingStage?: { stage: ExecutionStage; reason: string };
 }

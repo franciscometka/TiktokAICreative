@@ -4,7 +4,8 @@ import { googleUgcRuntime } from "@/providers/ugc/google-runtime";
 import { kreaUgcRuntime } from "@/providers/ugc/krea-runtime";
 import { kreaUgcReadiness } from "@/config/krea-ugc-readiness";
 import { kreaUgcPricingRefs } from "@/config/krea-ugc-models";
-import type { AppConfig } from "@/config/env";
+import type { AppConfig, ConfigIssue } from "@/config/env";
+import { mocksAllowed } from "@/config/execution-policy";
 import { readAnthropicApiKey, readElevenLabsApiKey, readRunwayApiKey, readRemotionLicenseKey } from "@/config/env";
 import { createAnthropicLlmClient } from "@/ai/create-llm-client";
 import { LlmCreativePlanner } from "@/ai/llm-planner";
@@ -20,8 +21,10 @@ import { detectRemotionBrowser } from "@/render/remotion/browser-readiness";
 import { createOfflinePipelineService, VersionedMockRenderer } from "./offline-service";
 import type { PipelineDeps } from "./pipeline-service";
 
-export function hybridCapabilities(config: AppConfig, env: Record<string, string | undefined> = process.env): StageCapabilities {
-  const available = (ok: boolean, provider: string, reason: string) => ({ available: ok, provider, reason: ok ? undefined : reason });
+export function hybridCapabilities(config: AppConfig, env: Record<string, string | undefined> = process.env, issues: readonly ConfigIssue[] = []): StageCapabilities {
+  // Lote 5.5: configuração inválida NÃO cai em MOCK no fluxo normal; bloqueia todas as etapas.
+  const invalid = !mocksAllowed(config) && issues.length > 0 ? `Configuração inválida: ${issues.map(issue => issue.variable).join(", ")}. Corrija .env.local; nenhuma geração até lá.` : undefined;
+  const available = (ok: boolean, provider: string, reason: string) => invalid ? { available: false, provider, reason: invalid } : ({ available: ok, provider, reason: ok ? undefined : reason });
   const browser = detectRemotionBrowser(config.renderer.browserExecutable);
   const krea = config.ugc.provider === "krea";
   const ugc = krea ? kreaUgcReadiness(config, env) : googleUgcReadiness(config, env);
@@ -37,13 +40,14 @@ export function hybridCapabilities(config: AppConfig, env: Record<string, string
   };
 }
 /** Defaults sempre MOCK. As implementações reais só são instanciadas na etapa selecionada. */
-export function createHybridPipelineService(config: AppConfig, overrides: Partial<PipelineDeps> = {}, env: Record<string, string | undefined> = process.env) {
+export function createHybridPipelineService(config: AppConfig, overrides: Partial<PipelineDeps> = {}, env: Record<string, string | undefined> = process.env, issues: readonly ConfigIssue[] = []) {
   const ids = overrides.ids ?? randomId;
   const mockPlanner = new MockCreativePlanner(ids, config.mockPlannerDelayMs);
   const mockRenderer = new VersionedMockRenderer();
   const renderer = createRenderer("remotion", { rendersDir: config.rendersDir, allowedAssetRoots: [config.uploadsDir, config.audioDir, config.videosDir, config.ugcDir], concurrency: config.renderer.concurrency, debug: config.renderer.debug, browserExecutable: config.renderer.browserExecutable, licenseKey: readRemotionLicenseKey(env) });
   const hybrid: NonNullable<PipelineDeps["hybrid"]> = {
-    capabilities: hybridCapabilities(config, env),
+    capabilities: hybridCapabilities(config, env, issues),
+    allowMocks: mocksAllowed(config),
     planner: mode => mode === "mock" ? mockPlanner : new LlmCreativePlanner(createAnthropicLlmClient({ llmPolicy: { ...config.llmPolicy, maxTransportRetries: 0 } }, env), ids, { maxValidationAttempts: 1 }),
     audio: (pricing, mode) => createAudioProviderFactory(mode === "real" ? "elevenlabs" : "mock", { elevenLabsApiKey: readElevenLabsApiKey(env), ttsTimeoutMs: config.ttsTimeoutMs })(pricing),
     video: (pricing, mode) => createVideoProviderFactory(mode === "real" ? "runway" : "mock", { apiKey: readRunwayApiKey(env), uploadsDir: config.uploadsDir })(pricing),

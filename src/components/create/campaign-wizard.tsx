@@ -65,6 +65,8 @@ function writeDraft(draft: Draft | undefined): void {
 }
 
 export interface WizardProps {
+  /** Lote 5.5: false = sem opção MOCK (fluxo REAL-only). */
+  allowMocks?: boolean;
   stageCapabilities: StageCapabilities;
   presets: PresetSummary[];
   initial: CampaignFormInput;
@@ -88,6 +90,7 @@ export function CampaignWizard({
   voices,
   audioProvider,
   stageCapabilities,
+  allowMocks = true,
 }: WizardProps) {
   const router = useRouter();
   const [form, setForm] = useState<CampaignFormInput>(initial);
@@ -370,7 +373,7 @@ export function CampaignWizard({
           <Panel className="space-y-4 p-5 sm:p-6">
             <h2 className="text-lg font-semibold tracking-tight">Modo por etapa</h2>
             <p className="mt-2 text-sm text-zinc-600">Tudo começa em MOCK. REAL só pode ser executado após revisar o custo e confirmar a etapa no projeto.</p>
-            <div className="my-4 grid gap-3 sm:grid-cols-2">{EXECUTION_STAGES.map(stage => <label className="text-sm" key={stage}>{({planning: "Roteiro / planejamento", narration: "Narração", scenes: "Cenas de vídeo", avatar: "Presenter / avatar", ugc_reference: "Referência AI UGC", ugc_video: "Cenas AI UGC", render: "Render final"})[stage]}<select className={inputClasses()} aria-label={`Modo ${stage}`} value={form.stageModes?.[stage] ?? "mock"} onChange={e => update("stageModes", { ...MOCK_STAGE_MODES, ...form.stageModes, [stage]: e.target.value as "mock" | "real" })}><option value="mock">MOCK</option><option value="real" disabled={!stageCapabilities[stage].available}>REAL · {stageCapabilities[stage].provider}</option></select>{!stageCapabilities[stage].available ? <span className="mt-1 block text-xs text-zinc-500">{stageCapabilities[stage].reason}</span> : null}</label>)}</div>
+            <div className="my-4 grid gap-3 sm:grid-cols-2">{EXECUTION_STAGES.map(stage => <label className="text-sm" key={stage}>{({planning: "Roteiro / planejamento", narration: "Narração", scenes: "Cenas de vídeo", avatar: "Presenter / avatar", ugc_reference: "Referência AI UGC", ugc_video: "Cenas AI UGC", render: "Render final"})[stage]}<select className={inputClasses()} aria-label={`Modo ${stage}`} value={form.stageModes?.[stage] ?? (allowMocks ? "mock" : "real")} onChange={e => update("stageModes", { ...MOCK_STAGE_MODES, ...form.stageModes, [stage]: e.target.value as "mock" | "real" })}>{allowMocks ? <option value="mock">MOCK</option> : null}<option value="real" disabled={!stageCapabilities[stage].available}>REAL · {stageCapabilities[stage].provider}</option></select>{!stageCapabilities[stage].available ? <span className="mt-1 block text-xs text-zinc-500">{stageCapabilities[stage].reason}</span> : null}</label>)}</div>
             <h2 className="text-lg font-semibold tracking-tight">Conceito e roteiro</h2>
             <Field id="videoConcept" label="Conceito do vídeo" error={errors.videoConcept} hint="Como apresentar o produto, para quem e qual mensagem destacar.">
               <textarea id="videoConcept" rows={3} maxLength={2000} className={inputClasses(!!errors.videoConcept)} value={form.videoConcept ?? ""} onChange={e => update("videoConcept", e.target.value)} placeholder="Ex.: Apresentador explica os detalhes e intercala fotos do produto." />

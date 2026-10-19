@@ -207,6 +207,7 @@ export async function generateUgcScene(
   const state = job.ugc;
   const reference = approvedReference(state);
   if (!state || !reference?.imageUri) throw new UgcReferenceRequiredError("Nenhuma cena UGC é gerada antes de existir uma referência aprovada.");
+  if (!provider.descriptor.isMock && reference.isMock) throw new UgcReferenceRequiredError("A referência aprovada é simulada (MOCK); gere uma referência real antes das cenas UGC.");
   if (provider.audioStrategy !== state.audioStrategy) throw new Error("O provider UGC mudou de estratégia de áudio; crie uma cópia do projeto para replanejar.");
 
   let audio: UgcVideoRequest["audio"];

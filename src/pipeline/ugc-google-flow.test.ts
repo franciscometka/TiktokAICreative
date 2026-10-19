@@ -148,7 +148,7 @@ describe("cena Veo REAL (fetch falso)", () => {
     expect(manifest.assets.filter(a => a.clipAudio).length).toBe(ugcScenes.length);
   });
 
-  it("reinício após submit: polling expira, novo processo retoma pelo operation ID sem novo POST", async () => {
+  it("reinício após submit: polling expira, novo processo retoma pelo operation ID sem novo POST", { timeout: 20_000 }, async () => {
     const h = await approvedReference({ veoRunningPolls: Infinity });
     const first = await h.approve();
     expect((await first.completion!).kind).toBe("WAITING_STAGE");

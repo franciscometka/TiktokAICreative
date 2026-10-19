@@ -5,7 +5,7 @@ import { z } from "zod";
 import {
   authorizeAndRunJob,
   approveUgcReference,
-  regenerateUgcReference,
+  regenerateUgcReference, switchJobToReal,
   updateUgcIdentity,
   regenerateStoryboardScene,
   updateStoryboardScene,
@@ -170,6 +170,12 @@ export async function regenerateUgcReferenceAction(input: unknown): Promise<Acti
   const parsed = z.object({ jobId: id }).safeParse(input);
   if (!parsed.success) return badInput();
   return regenerateUgcReference(getRuntime().deps, parsed.data);
+}
+
+export async function switchJobToRealAction(input: unknown): Promise<ActionResult<{ switched: true }>> {
+  const parsed = z.object({ jobId: id }).safeParse(input);
+  if (!parsed.success) return badInput();
+  return switchJobToReal(getRuntime().deps, parsed.data);
 }
 
 export async function updateUgcIdentityAction(input: unknown): Promise<ActionResult<{ resumed: boolean }>> {

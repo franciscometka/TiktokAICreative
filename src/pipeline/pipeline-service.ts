@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { MOCK_STAGE_MODES, type ExecutionStage, type ExecutionMode, type JobQuote, type StageCapabilities, type StageQuote } from "@/domain/execution";
+import { EXECUTION_STAGES, MOCK_STAGE_MODES, type StageModes, type ExecutionStage, type ExecutionMode, type JobQuote, type StageCapabilities, type StageQuote } from "@/domain/execution";
 import type { PreflightCheck } from "@/domain/readiness";
-import { withRealStageAuthorization } from "@/config/execution-policy";
+import { MOCK_BLOCKED, withRealStageAuthorization } from "@/config/execution-policy";
 import { RUNWAY_VIDEO } from "@/config/video-models";
 import { SIMPLE_QUALITY_PRESETS, SIMPLE_UGC_QUALITY_PRESETS } from "@/config/simple-presets";
 import type { PresetQuality } from "@/config/quality-presets";
@@ -116,6 +116,8 @@ export interface PipelineDeps {
     video: (pricing: ProviderPricing, mode: ExecutionMode) => VideoProvider;
     presenter: (pricing: ProviderPricing, mode: ExecutionMode) => PresenterProvider;
     renderer: (mode: ExecutionMode) => Renderer;
+    /** Lote 5.5: false = fluxo REAL-only (ALLOW_MOCKS=false). Ausente só em harness de teste explícito. */
+    allowMocks?: boolean;
   };
   offlineOnly?: boolean;
   stageDelayMs?: number;
@@ -221,6 +223,12 @@ export class PipelineService {
   // Execução híbrida: uma ação autoriza somente uma unidade da etapa escolhida.
   private fingerprint(value: unknown): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
   getStageCapabilities(): StageCapabilities | undefined { return this.deps.hybrid?.capabilities; }
+  /** Lote 5.5: MOCK só quando permitido; nunca substitui um provider REAL indisponível. */
+  private mocksAllowed(): boolean { return this.deps.hybrid?.allowMocks ?? true; }
+  private mockBlocked(stage: ExecutionStage): string {
+    const capability = this.deps.hybrid?.capabilities[stage];
+    return capability && !capability.available && capability.reason ? `${MOCK_BLOCKED} ${capability.reason}` : MOCK_BLOCKED;
+  }
   private assertHybridInvocation(job: GenerationJob, stage: ExecutionStage): void {
     if (job.stageModes?.[stage] === "real" && !this.hybridInvocations.has(job.id)) throw new Error("A etapa REAL exige estimativa e aprovação explícita no painel de etapas.");
   }
@@ -256,6 +264,19 @@ export class PipelineService {
     }
     await this.deps.store.saveCampaign({ ...campaign, executionMode: "hybrid", request: { ...campaign.request, stageModes: campaign.request.stageModes ?? { ...MOCK_STAGE_MODES } } });
   }
+  /**
+   * Lote 5.5: projeto antigo/MOCK passa a usar REAL nas etapas com provider configurado. Assets MOCK
+   * ficam como histórico e nunca alimentam etapas REAL (ex.: referência precisa ser recriada).
+   */
+  async switchJobToReal(jobId: string): Promise<GenerationJob> {
+    const capabilities = this.deps.hybrid?.capabilities;
+    if (!capabilities) throw new Error("Fluxo híbrido indisponível");
+    const job = await this.getJob(jobId);
+    for (const stage of EXECUTION_STAGES) {
+      if (stage !== "planning" && capabilities[stage].available && (job.stageModes?.[stage] ?? "mock") !== "real") await this.configureStage(jobId, stage, "real");
+    }
+    return this.getJob(jobId);
+  }
   async configureStage(jobId: string, stage: ExecutionStage, mode: ExecutionMode): Promise<void> {
     if (stage === "planning") throw new Error("O planejamento já produziu este job. Crie uma cópia com ajustes para mudar o roteiro sem invalidar as mídias existentes.");
     await this.withJobLock(jobId, async () => {
@@ -279,6 +300,7 @@ export class PipelineService {
     const estimatedBrl = mode === "real" ? usdToBrl(worstCaseLlmCostUsd(pricing.llm, this.toWorstCaseParams(this.toPlanningRequest(campaign.request, campaign.settings))), (await this.deps.exchangeRates.getUsdBrl()).rate) : 0;
     const entries = await this.planningEntries(campaignId);
     let blocked = mode === "real" && !this.deps.hybrid?.capabilities.planning.available ? this.deps.hybrid?.capabilities.planning.reason ?? "Claude não configurado" : campaign.status === "planned" ? "O plano já existe; crie uma cópia para replanejar." : this.isPlanningActive(campaignId) ? "Planejamento em andamento" : (campaign.planningRuns ?? 0) >= this.deps.maxAttemptsPerScene ? "Limite de tentativas de planejamento atingido" : undefined;
+    if (!blocked && mode === "mock" && campaign.status !== "planned" && !this.mocksAllowed()) blocked = this.mockBlocked("planning");
     if (!blocked && mode === "real") {
       const spent = entries.filter(entry => !entry.simulated).reduce((total, entry) => total + entry.costBrl, 0);
       try { await this.assertPlanningFitsBudget(campaign.request, campaign.settings, spent); }
@@ -321,7 +343,9 @@ export class PipelineService {
       : scenes.find(s => !this.matchesMode(activeAttempt(job.scenes.find(g => g.sceneId === s.id)?.attempts ?? []), mode));
     let unit = stage === "narration" ? "narration" : stage === "render" ? "render" : stage === "ugc_reference" ? "reference" : scene?.id ?? "done";
     const nativeSkip = stage === "narration" && this.nativeUgcSpeech(job);
-    const referenceDone = stage === "ugc_reference" && (!job.ugc || !!approvedReference(job.ugc));
+    // Em REAL, uma referência MOCK aprovada (histórico) não conta: a etapa precisa ser recriada.
+    const approvedRef = approvedReference(job.ugc);
+    const referenceDone = stage === "ugc_reference" && (!job.ugc || !!approvedRef && (mode === "mock" || !approvedRef.isMock));
     const done = !regenerate && (nativeSkip || referenceDone || stage !== "ugc_reference" && (stage === "narration" ? this.matchesMode(narration, mode) : stage === "render" ? job.status === "completed" && !job.renderStale && job.renders.some(r => r.status === "completed" && (mode === "mock" || !r.isMock)) : !scene));
     let model = stage === "narration" ? ctx.pricing.audio.model : stage === "render" ? ctx.pricing.rendering.model : stage === "avatar" ? RUNWAY_PRESENTER.model : stage === "ugc_reference" ? ctx.pricing.ugcReference?.model ?? "—" : stage === "ugc_video" ? ctx.pricing.ugcVideo?.model ?? "—" : ctx.pricing.video.model;
     let provider = mode === "mock" ? "mock" : stage === "narration" ? ctx.pricing.audio.provider : stage === "render" ? "remotion" : stage === "ugc_reference" ? ctx.pricing.ugcReference?.provider ?? "google" : stage === "ugc_video" ? ctx.pricing.ugcVideo?.provider ?? "google" : "runway";
@@ -330,6 +354,7 @@ export class PipelineService {
     let estimatedBrl = 0; let blocked: string | undefined;
     if (!this.deps.hybrid || !["hybrid", "offline"].includes(campaign.executionMode ?? "")) blocked = "Projeto anterior: crie uma cópia híbrida para continuar.";
     else if (mode === "real" && !this.deps.hybrid.capabilities[stage].available) blocked = this.deps.hybrid.capabilities[stage].reason;
+    else if (mode === "mock" && !done && !this.mocksAllowed()) blocked = this.mockBlocked(stage);
     else if (!internal && this.isJobActive(jobId)) blocked = "Etapa em andamento";
     else if (job.status === "cancelled") blocked = "Job cancelado";
     try {
@@ -338,7 +363,7 @@ export class PipelineService {
           const state = job.ugc;
           const latest = latestReference(state);
           const current = latest && latest.identityId === state.identity.id && latest.identityRevision === state.identity.revision ? latest : undefined;
-          if (current?.state === "succeeded" && current.review === "pending") {
+          if (current?.state === "succeeded" && current.review === "pending" && (mode === "mock" || !current.isMock)) {
             awaitingReview = true;
             blocked ??= "Aprove a referência: esta será a pessoa apresentando seu produto.";
           }
@@ -378,6 +403,7 @@ export class PipelineService {
           if (pending?.providerJobId) unit = `${scene.id}:resume:${pending.providerJobId}`;
         } else if (stage === "ugc_video") {
           if (!approvedReference(job.ugc)) blocked ??= "Nenhuma cena UGC é gerada antes de uma referência aprovada.";
+          else if (mode === "real" && approvedReference(job.ugc)!.isMock) blocked ??= "A referência aprovada é uma simulação (MOCK): gere uma referência real antes das cenas UGC.";
           if (job.ugc?.audioStrategy === "external_lipsync" && !narration) blocked ??= "Execute a narração primeiro (lip sync).";
           if ((pendingUgc?.state === "uncertain" || pendingUgc?.state === "submitting" && (pendingUgc.provider !== "krea" || pendingUgc.metadata?.paidSubmissionStarted === true)) && !pendingUgc.providerOperationId) {
             blocked ??= "Envio UGC anterior incerto: sem operation ID, não haverá reenvio automático.";
@@ -481,7 +507,12 @@ export class PipelineService {
       actualBrl,
       units: stages.map(({ stage, mode, unit, provider, model }) => ({ stage, mode, unit, provider, model })),
     });
-    return { jobId, token, estimatedBrl: conservativeEstimate, maximumAuthorizedBrl, actualBrl, ready: !blocked, blocked, stages };
+    // Readiness geral do job: a primeira etapa pendente que bloqueia o fluxo (ex.: MOCK desabilitado).
+    const blocker = stages.find(q => !q.done && q.blocked && !q.awaitingReview);
+    const mockStage = this.mocksAllowed() ? undefined : stages.find(q => q.mode === "mock" && !q.done);
+    if (!blocked && mockStage) blocked = `Etapa ${mockStage.stage} bloqueada: ${mockStage.blocked ?? MOCK_BLOCKED}`;
+    const blockingStage = mockStage ? { stage: mockStage.stage, reason: mockStage.blocked ?? MOCK_BLOCKED } : blocker ? { stage: blocker.stage, reason: blocker.blocked! } : undefined;
+    return { jobId, token, estimatedBrl: conservativeEstimate, maximumAuthorizedBrl, actualBrl, ready: !blocked, blocked, stages, ...(blockingStage ? { blockingStage } : {}) };
   }
 
   /**
@@ -628,6 +659,7 @@ export class PipelineService {
   private async performHybridStage(jobId: string, stage: ExecutionStage, regenerate = false, targetSceneId?: string): Promise<GenerationOutcome> {
     this.hybridInvocations.add(jobId);
     try {
+      if ((await this.getJob(jobId)).stageModes?.[stage] !== "real" && !this.mocksAllowed()) throw new Error(this.mockBlocked(stage));
       return await withRealStageAuthorization(stage, async () => {
         if (stage === "render") {
           await this.withJobLock(jobId, async () => { const job = await this.getJob(jobId); await this.deps.store.saveJob(transitionJob(job, "rendering", this.deps.clock())); });
@@ -730,6 +762,12 @@ export class PipelineService {
     const ugcMode = parsed.creativeMode === "ai_ugc";
     if (ugcMode && parsed.quality === "custom") throw new Error("AI UGC usa os presets Econômico, Equilibrado ou Premium.");
     if (ugcMode && parsed.product.images.length === 0) throw new Error("AI UGC precisa de ao menos uma foto real do produto para criar a referência pessoa + produto.");
+    if (this.deps.hybrid && !this.mocksAllowed()) {
+      // REAL-only: toda etapa com provider configurado vira REAL; etapa sem provider fica bloqueada na cotação.
+      const caps = this.deps.hybrid.capabilities;
+      parsed.stageModes = Object.fromEntries(EXECUTION_STAGES.map(stage => [stage, caps[stage].available ? "real" : parsed.stageModes?.[stage] ?? "mock"])) as StageModes;
+      if (parsed.stageModes.planning !== "real") throw new Error(this.mockBlocked("planning"));
+    }
     const planningMode = parsed.stageModes?.planning ?? "mock";
     if (!this.deps.hybrid) this.assertPlannerAvailable();
     if (this.deps.hybrid) for (const [stage, mode] of Object.entries(parsed.stageModes ?? {})) { if (mode === "real" && !this.deps.hybrid.capabilities[stage as ExecutionStage].available) throw new Error(this.deps.hybrid.capabilities[stage as ExecutionStage].reason); }
@@ -907,6 +945,7 @@ export class PipelineService {
       if (!reference || reference.state !== "succeeded") throw new Error("Referência não encontrada ou não concluída.");
       if (reference.identityId !== state.identity.id || reference.identityRevision !== state.identity.revision) throw new Error("A referência é de um apresentador/ambiente anterior; gere outra.");
       if (latestReference(state)?.id !== reference.id) throw new Error("Aprove a referência mais recente.");
+      if (reference.isMock && !this.mocksAllowed()) throw new Error("Referência simulada (MOCK) não pode ser aprovada: não existe imagem real da pessoa. Gere uma referência real.");
       const now = this.deps.clock();
       const next: GenerationJob = {
         ...current,

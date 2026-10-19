@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { approveUgcReferenceAction, regenerateUgcReferenceAction, updateUgcIdentityAction } from "@/app/actions";
+import { approveUgcReferenceAction, regenerateUgcReferenceAction, switchJobToRealAction, updateUgcIdentityAction } from "@/app/actions";
 import type { UgcView } from "@/application/ugc-view";
 import { buttonClasses, cx, Panel, Spinner } from "@/components/ui/primitives";
 
@@ -33,7 +33,7 @@ export function UgcReferencePanel({ jobId, ugc, running }: { jobId: string | und
             <img className="size-full object-cover" src={reference.previewUrl} alt="Referência: pessoa segurando o produto" />
           ) : (
             <div className="grid size-full place-items-center p-6 text-center text-sm text-zinc-500">
-              {reference?.state === "failed" ? "A referência falhou. Gere outra." : "A referência é criada no início da geração, antes de qualquer cena UGC."}
+              {ugc.historicalSimulation ? "Referência não gerada: a versão existente é uma simulação (histórico), sem imagem real da pessoa." : reference?.state === "failed" ? "A referência falhou. Gere outra." : reference?.state === "uncertain" ? "Cobrança incerta: o envio pode ter sido aceito. Nenhum reenvio automático." : "Referência ainda não gerada. Ela é criada no início da geração, antes de qualquer cena UGC."}
             </div>
           )}
           {reference?.isMock && reference.previewUrl && (
@@ -62,7 +62,12 @@ export function UgcReferencePanel({ jobId, ugc, running }: { jobId: string | und
                 {pending && <Spinner />}Aprovar esta pessoa
               </button>
             )}
-            {ugc.canRegenerate && (
+            {ugc.canGenerateReal && (
+              <button type="button" className={buttonClasses("primary", "md")} disabled={disabled} onClick={() => run("Projeto passou a usar providers REAIS. Gere o vídeo para criar a referência real.", () => switchJobToRealAction({ jobId }))}>
+                Gerar referência real
+              </button>
+            )}
+            {ugc.canRegenerate && !ugc.historicalSimulation && (
               <button type="button" className={buttonClasses("secondary", "md")} disabled={disabled} onClick={() => run("Nova referência solicitada (nova versão, novo custo dentro do teto).", () => regenerateUgcReferenceAction({ jobId }))}>
                 Gerar outra referência
               </button>

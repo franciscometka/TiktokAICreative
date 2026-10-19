@@ -1,3 +1,4 @@
+import { realOnlyUgcView } from "./ugc-view";
 import type { UgcEnvironmentChoice, UgcPresenterChoice } from "@/domain/ugc";
 import { LocalUgcAssetStore } from "@/storage/ugc-asset-store";
 import type { ExecutionStage, ExecutionMode } from "@/domain/execution";
@@ -42,6 +43,8 @@ export interface AppDeps {
   videosDir?: string;
   /** Pasta das referências AI UGC (UGC_DIR), para servir a imagem por ID. */
   ugcDir?: string;
+  /** Lote 5.5: false = fluxo REAL-only (UI sem resultado simulado). Ausente = permitido (testes). */
+  allowMocks?: boolean;
   /** Provider de narração configurado (só o id; nunca a chave). */
   audioProvider?: "mock" | "elevenlabs";
 }
@@ -124,6 +127,7 @@ export async function getCampaignView(deps: AppDeps, campaignId: string): Promis
       jobActivity,
       audioProvider: deps.audioProvider,
     });
+    if (deps.allowMocks === false) for (const creative of view.creatives) if (creative.ugc) creative.ugc = realOnlyUgcView(creative.ugc);
     const capabilities = service.getStageCapabilities();
     if (capabilities && ["hybrid", "offline"].includes(campaign.executionMode ?? "")) {
       view.stageCapabilities = capabilities;
@@ -491,6 +495,16 @@ export async function approveUgcReference(deps: AppDeps, input: { jobId: string;
 }
 
 /** "Gerar outra referência": nova versão (novo custo, dentro do teto); a anterior fica no histórico. */
+/** Lote 5.5: projeto antigo MOCK passa a usar REAL; a referência simulada vira histórico. */
+export async function switchJobToReal(deps: AppDeps, input: { jobId: string }): Promise<ActionResult<{ switched: true }>> {
+  try {
+    await deps.service.switchJobToReal(input.jobId);
+    return { ok: true, value: { switched: true } };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
 export async function regenerateUgcReference(deps: AppDeps, input: { jobId: string }): Promise<ActionResult<{ resumed: boolean }>> {
   try {
     const result = await deps.service.regenerateUgcReference(input.jobId);
