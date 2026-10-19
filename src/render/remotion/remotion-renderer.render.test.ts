@@ -130,7 +130,11 @@ describe("RemotionRenderer (render real curto)", () => {
     const draft = buildMockDraft({ product: product(), styles: ["ugc"], creativeCount: 1, settings, creativeMode: "ai_ugc", ugcAudioStrategy: "native_speech" });
     let n = 0;
     const plan = applyUgcEditorial(hydrateCampaignPlan(draft, product(), (prefix) => `${prefix}_${++n}`).creatives[0]!, { quality: "economy", finalRange: settings.finalVideoSeconds }).plan;
-    const clips = new Map(plan.scenes.filter((s) => s.edit?.role === "aroll").map((s) => [s.id, { uri: clipUri, actualSeconds: 3, generatedSeconds: 4 }]));
+    const clips = new Map(plan.scenes.filter((s) => s.edit?.role === "aroll").map((s) => [s.id, {
+      uri: clipUri, actualSeconds: 3, generatedSeconds: 4,
+      audioSilence: { source: "ffmpeg_silencedetect" as const, noiseDb: -38, minSilenceSeconds: 0.12,
+        intervals: [{ startSeconds: 0.2, endSeconds: 0.4 }, { startSeconds: 2.5, endSeconds: 2.7 }] },
+    }]));
     const manifest = buildEditedRenderManifest({ campaignId: "campaign_render_test", plan: { ...plan, id: "creative_render_v2" }, product: product(), clips, referenceImageUri: referenceUri, outputDir: ROOT.replaceAll("\\", "/") });
     const renderer = new RemotionRenderer({ rendersDir: RENDERS, allowedAssetRoots: [UPLOADS, videos], browserExecutable: process.env.RENDER_BROWSER_EXECUTABLE ?? null });
     const result = await renderer.render(manifest);
@@ -141,6 +145,11 @@ describe("RemotionRenderer (render real curto)", () => {
     const saved = JSON.parse(await readFile(result.manifestUri!, "utf8"));
     expect(saved.props.edit.visuals.some((v: { role: string }) => v.role === "broll")).toBe(true);
     expect(saved.props.edit.audio).toHaveLength(2);
+    expect(saved.props.edit.audio[0].trimBeforeFrames).toBeGreaterThan(0);
+    expect(saved.props.edit.audio[1].startFrame).toBe(saved.props.edit.audio[0].startFrame + saved.props.edit.audio[0].durationFrames);
+    expect(saved.props.edit.captions.length).toBeGreaterThan(0);
+    expect(saved.props.edit.cta.endFrame - saved.props.edit.cta.startFrame).toBe(54); // 1,8s × 30fps
+    expect(saved.props.edit.cta.endFrame).toBe(saved.props.durationInFrames);
   }, 900_000);
 
   it("recusa asset fora das pastas autorizadas sem gerar arquivo", async () => {

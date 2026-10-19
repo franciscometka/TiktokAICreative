@@ -232,8 +232,8 @@ export function referenceFidelityStatus(reference: Pick<UgcReference, "fidelity"
 }
 
 /** Só referência REAL com fidelidade APROVADA libera vídeo REAL. MOCK nunca libera REAL. */
-export function fidelityReleasesVideo(reference: Pick<UgcReference, "fidelity" | "isMock"> | undefined, mode: "mock" | "real"): boolean {
-  if (!reference || referenceFidelityStatus(reference) !== "approved") return false;
+export function fidelityReleasesVideo(reference: Pick<UgcReference, "fidelity" | "isMock" | "review"> | undefined, mode: "mock" | "real"): boolean {
+  if (!reference || reference.review !== "approved" || referenceFidelityStatus(reference) !== "approved") return false;
   return mode === "mock" || !reference.isMock;
 }
 

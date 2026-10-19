@@ -1845,7 +1845,7 @@ export class PipelineService {
           console.warn(`[vídeo] clipe rejeitado job=${ctx.job.id} cena=${scene.id} solicitado=${requested}s arquivo=${media.actualMediaDurationSeconds ?? "?"}s status=${media.status}`);
           throw new InvalidMediaError(clipRejectionMessage(media, scene.order + 1), media, stored.uri);
         }
-        return { uri: stored.uri, durationSeconds: media.actualMediaDurationSeconds ?? requested, media };
+        return { uri: stored.uri, durationSeconds: media.actualMediaDurationSeconds ?? requested, media, audioSilence: stored.audioSilence };
       },
     });
   }
@@ -1980,7 +1980,7 @@ export class PipelineService {
       description: string;
       run: (attemptId: string) => Promise<{ ref: ProviderJobRef; result: MediaResult }>;
       /** Pós-processamento DEPOIS do custo registrado (ex.: salvar a narração). Falha = tentativa falha (custo mantido). */
-      finalize?: (result: MediaResult, attemptId: string, ref: ProviderJobRef) => Promise<{ uri: string; durationSeconds: number; narration?: NarrationInfo; media?: ClipDurationCheck }>;
+      finalize?: (result: MediaResult, attemptId: string, ref: ProviderJobRef) => Promise<{ uri: string; durationSeconds: number; narration?: NarrationInfo; media?: ClipDurationCheck; audioSilence?: MediaAttempt["audioSilence"] }>;
     },
   ): Promise<{ job: GenerationJob; attempt: MediaAttempt }> {
     const { clock, ids } = this.deps;
@@ -2026,7 +2026,7 @@ export class PipelineService {
     try {
       const { ref, result } = await spec.run(attemptId);
       await recordCost(result.billedUsage);
-      let output: { uri: string; durationSeconds: number; narration?: NarrationInfo; media?: ClipDurationCheck } = {
+      let output: { uri: string; durationSeconds: number; narration?: NarrationInfo; media?: ClipDurationCheck; audioSilence?: MediaAttempt["audioSilence"] } = {
         uri: result.uri,
         durationSeconds: result.durationSeconds,
       };
@@ -2048,6 +2048,7 @@ export class PipelineService {
         durationSeconds: output.durationSeconds,
         ...(output.narration ? { narration: output.narration } : {}),
         ...(output.media ? { media: output.media } : {}),
+        ...(output.audioSilence ? { audioSilence: output.audioSilence } : {}),
       };
     } catch (error) {
       if (error instanceof InvalidMediaError) {
@@ -2115,7 +2116,8 @@ export class PipelineService {
       const active = activeAttempt(job.scenes.find(s => s.sceneId === scene.id)?.attempts ?? []);
       if (!active?.assetUri) continue;
       const actual = active.media?.actualMediaDurationSeconds ?? active.durationSeconds ?? scene.estimatedGenerationSeconds;
-      clips.set(scene.id, { uri: active.assetUri, actualSeconds: actual, generatedSeconds: active.media?.requestedDurationSeconds ?? actual });
+      clips.set(scene.id, { uri: active.assetUri, actualSeconds: actual, generatedSeconds: active.media?.requestedDurationSeconds ?? actual,
+        ...(active.audioSilence ? { audioSilence: active.audioSilence } : {}) });
     }
     return clips;
   }

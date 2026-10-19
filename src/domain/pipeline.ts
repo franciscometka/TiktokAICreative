@@ -17,6 +17,7 @@ import { CreativeReviewSchema } from "./plan-evaluation";
 import { ProductInputSchema } from "./product";
 import { GenerationQualitySchema, QualitySettingsSchema } from "./quality";
 import { RenderManifestSchema, RenderRecordSchema } from "./render";
+import { AudioSilenceAnalysisSchema } from "./edit";
 
 const nonEmpty = z.string().trim().min(1);
 
@@ -155,6 +156,8 @@ export const MediaAttemptSchema = z.object({
    * tolerância é rejeitado (tentativa "failed", nunca ativa, nunca vai ao render; custo mantido).
    */
   media: ClipDurationCheckSchema.optional(),
+  /** Pausas medidas localmente no áudio nativo; usadas pelo Editor V2 para cortes seguros. */
+  audioSilence: AudioSilenceAnalysisSchema.optional(),
   /** Arquivo de um clipe REJEITADO (guardado só para auditoria; nunca usado no render). */
   rejectedAssetUri: z.string().optional(),
   /** Só em tentativas de áudio (Lote 4+): voz, request id, versão, timing e AudioFit. */

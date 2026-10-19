@@ -1,7 +1,7 @@
 import { AbsoluteFill, Audio, Img, interpolate, OffthreadVideo, Sequence, useCurrentFrame } from "remotion";
 import { GeneratedVideoPlaceholder } from "../components/GeneratedVideoPlaceholder";
 import { enter } from "../styles/animation";
-import { CANVAS, COLORS, FONT, LAYOUT, MOTION, RADIUS, SAFE_AREA, SPACE } from "../styles/theme";
+import { CANVAS, COLORS, FONT, LAYOUT, MOTION, SAFE_AREA, SPACE } from "../styles/theme";
 import type { CreativeProps, EditAudioProps, EditProps, EditVisualProps } from "../types/props";
 
 /**
@@ -95,13 +95,13 @@ function Hook({ text, endFrame }: { text: string; endFrame: number }) {
   );
 }
 
-/** CTA pequeno sobre a apresentadora (nunca card final que substitui o fundo). */
+/** CTA editorial simples no topo: sem pill/card e longe da zona única de legenda. */
 function CtaPill({ text }: { text: string }) {
   const frame = useCurrentFrame();
   const a = enter(frame, 8, 18);
   return (
-    <div style={{ position: "absolute", left: 0, right: SAFE_AREA.right - SAFE_AREA.left, bottom: CANVAS.height - LAYOUT.captionBottom + 190, display: "flex", justifyContent: "center", opacity: a.opacity, transform: `translateY(${a.translateY}px)` }}>
-      <div style={{ backgroundColor: "rgba(255,255,255,0.94)", color: COLORS.ink, fontFamily: FONT.family, fontSize: 40, fontWeight: FONT.weights.heavy, padding: "14px 28px", borderRadius: RADIUS.pill, boxShadow: "0 8px 24px rgba(0,0,0,0.25)" }}>
+    <div style={{ position: "absolute", top: SAFE_AREA.top + 150, left: SAFE_AREA.left, right: SAFE_AREA.right, display: "flex", justifyContent: "center", opacity: a.opacity, transform: `translateY(${a.translateY}px)` }}>
+      <div style={{ color: COLORS.white, fontFamily: FONT.family, fontSize: 42, fontWeight: FONT.weights.heavy, padding: "6px 4px 8px", borderBottom: "4px solid #FFE14D", textShadow: "0 2px 8px rgba(0,0,0,0.8)" }}>
         {text}
       </div>
     </div>

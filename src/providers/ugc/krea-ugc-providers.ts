@@ -56,7 +56,7 @@ export function buildKreaVeoBody(request: UgcVideoRequest, config: KreaVeoConfig
   if (request.aspectRatio !== "9:16") throw new Error("AI UGC Krea deve permanecer em 9:16.");
   if ((request.additionalReferenceUris ?? []).length > 0) throw new Error("AI UGC Krea usa só a referência aprovada (pessoa + produto) como start_image.");
   return {
-    prompt: buildUgcVideoPrompt({ action: request.action, speech: request.speech, continuity: request.continuity, fidelity: request.fidelity }),
+    prompt: buildUgcVideoPrompt({ action: request.action, speech: request.speech, continuity: request.continuity, identity: request.identity, fidelity: request.fidelity }),
     start_image: startImageUrl,
     aspect_ratio: "9:16",
     duration: kreaRequestedDuration(request.durationSeconds),

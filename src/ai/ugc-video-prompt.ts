@@ -1,4 +1,5 @@
 import type { SceneContinuity } from "@/domain/edit";
+import type { UgcCharacterIdentity } from "@/domain/ugc";
 
 /**
  * Prompt de vídeo AI UGC (Editor V2, Lote 5.6) — compartilhado por Veo direto (Google) e Veo via
@@ -22,7 +23,8 @@ export const UGC_AVOID_LINES = [
 export interface UgcVideoPromptInput {
   action: string;
   speech: string;
-  continuity?: Pick<SceneContinuity, "entryPose" | "exitPose" | "productHand" | "productPosition" | "cameraDistance" | "eyeDirection" | "presenterPosition">;
+  continuity?: Pick<SceneContinuity, "entryPose" | "exitPose" | "productHand" | "productPosition" | "cameraPosition" | "cameraDistance" | "motionDirection" | "eyeDirection" | "presenterPosition">;
+  identity?: Pick<UgcCharacterIdentity, "appearance" | "wardrobe" | "environmentDescription">;
   /** Linhas de fidelidade do produto (textos/números/logo não mudam). */
   fidelity?: readonly string[];
 }
@@ -44,11 +46,12 @@ export function buildUgcVideoPrompt(input: UgcVideoPromptInput): string {
   const c = input.continuity;
   const parts = [
     ...UGC_REALISM_LINES,
-    c ? `Starts exactly where the previous shot ended: the person ${c.entryPose}, product in the ${c.productHand === "both" ? "both hands" : `${c.productHand} hand`}, ${c.cameraDistance.replace("_", " ")} framing, person ${c.presenterPosition.replace("_", " ")}.` : "",
+    c ? `Starts exactly where the previous shot ended: the person ${c.entryPose}, product in the ${c.productHand === "both" ? "both hands" : `${c.productHand} hand`} at ${c.productPosition.replaceAll("_", " ")}, camera ${c.cameraPosition.replaceAll("_", " ")} in ${c.cameraDistance.replaceAll("_", " ")} framing, person ${c.presenterPosition.replaceAll("_", " ")}, movement ${c.motionDirection.replaceAll("_", " ")}.` : "",
     sentence(input.action),
     c ? `Ends with the person: ${c.exitPose}.` : "",
     c ? EYES[c.eyeDirection] : "",
-    "Keep the same adult synthetic person, face, hair, wardrobe and environment as the approved reference frame, and the exact same product.",
+    input.identity ? `Keep the same adult synthetic person (${input.identity.appearance}), wardrobe (${input.identity.wardrobe}) and environment (${input.identity.environmentDescription}) as the approved reference frame, and the exact same product.`
+      : "Keep the same adult synthetic person, face, hair, wardrobe and environment as the approved reference frame, and the exact same product.",
     ...(input.fidelity ?? []),
     `The person says naturally in Brazilian Portuguese, casual and unhurried, with short pauses: "${input.speech.trim()}"`,
     ...UGC_AVOID_LINES,

@@ -58,6 +58,8 @@ export type EditTransitionName = "straight_cut" | "match_cut" | "cut_on_action" 
 
 export interface EditVisualProps {
   id: string;
+  sceneId: string;
+  audioSceneIds: string[];
   startFrame: number;
   durationFrames: number;
   role: "aroll" | "broll";

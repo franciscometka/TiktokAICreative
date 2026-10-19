@@ -20,7 +20,14 @@ export const EDIT_POLICY = {
   /** A-roll sempre aparece pelo menos isso antes/depois de um B-roll (evita flicker). */
   minArollVisibleSeconds: 1.2,
   /** B-roll dentro dessa faixa (s) — mais curto vira flicker; mais longo vira "card". */
-  broll: { minSeconds: 0.8, maxSeconds: 2.5 },
+  broll: {
+    minSeconds: 0.8,
+    maxSeconds: 2.5,
+    /** Frame estático fica curto; acima disso começa a parecer catálogo/card. */
+    staticMaxSeconds: 1.6,
+  },
+  /** Análise LOCAL do áudio nativo. Sem pausa medida, o corte visual é omitido. */
+  silence: { noiseDb: -38, minSeconds: 0.12, cutToleranceSeconds: 0.75 },
   /** Micro fades de áudio no corte (anti click/pop). Curtos para não engolir palavra. */
   audioFadeSeconds: 0.06,
   /** Punch-in sutil na junção direta entre dois A-rolls do mesmo enquadramento. */

@@ -257,13 +257,16 @@ planner (mock | Claude campaign-plan@1.6.0) → hydrate
   → reviewCampaignPlan → jobs (editPlanVersion=2)
 ugc_reference → Product Fidelity Gate (domain/fidelity: pending → approved | needs_review | rejected; humano)
 ugc_video     → prompt com continuidade + fidelidade (ai/ugc-video-prompt, usado por Krea e Google)
-render        → render/edit-plan.buildEditPlan (puro: espinha de áudio dos A-rolls com handles,
-                overlays B-roll nas junções, visuais mudos, faixas de áudio sem sobreposição,
+render        → storage/video-asset-store (silencedetect local; pausas reais persistidas)
+              → render/edit-plan.buildEditPlan (puro: handles ajustados à pausa medida,
+                fallback mantém A-roll; overlays B-roll mudos só em junções seguras,
+                faixas de áudio contínuas e sem sobreposição,
                 legendas V2, hook deliberado, CTA, usage gerado × usado)
               → render/edit-manifest (RenderManifest.edit) → composition-props (EditProps em frames)
               → remotion/compositions/EditedCreative (OffthreadVideo mudo + trimBefore; <Audio> do A-roll com fades)
 ```
 
-- `domain/edit.ts`: `SceneEdit` (só no ScenePlan hidratado; o JSON do LLM não muda), `EditPlan` e `assertValidEditPlan` (cobertura contínua, motivo de corte, nenhum áudio sobreposto, B-roll nunca fonte de áudio).
-- `config/edit-policy.ts`: handles, fades, punch-in, janela do CTA, legenda e presets editoriais (`UGC_EDITORIAL_PLANS`).
+- `domain/edit.ts`: `SceneEdit` (só no ScenePlan hidratado; o JSON do LLM não muda), `EditPlan` e `assertValidEditPlan` (cobertura contínua, motivo de corte, uma faixa por A-roll, nenhum áudio sobreposto, B-roll nunca fonte de áudio).
+- `render/audio-silence.ts`: análise FFmpeg local e determinística; sem pausa segura o corte visual permanece no A-roll.
+- `config/edit-policy.ts`: handles, tolerância de pausa, limite de B-roll estático, fades, punch-in, janela do CTA, legenda e presets editoriais (`UGC_EDITORIAL_PLANS`).
 - Compatibilidade: sem `editPlanVersion`/`manifest.edit`, tudo segue pela montagem linear do Lote 3; `external_lipsync` também.

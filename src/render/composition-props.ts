@@ -203,15 +203,19 @@ function buildEditedProps({ manifest, assets, urlFor, debug = false }: BuildProp
   const visuals: EditProps["visuals"] = edit.visuals.map((segment, index) => {
     const startFrame = frame(segment.startSeconds);
     const endFrame = index === edit.visuals.length - 1 ? total : frame(segment.endSeconds);
+    const audioTrack = segment.role === "aroll" ? edit.audio.find(track => track.sceneId === segment.audioSceneIds[0]) : undefined;
+    const synchronizedTrim = segment.role === "aroll" && audioTrack
+      ? secondsToFrames(audioTrack.sourceInSeconds, fps) + (startFrame - frame(audioTrack.startSeconds))
+      : secondsToFrames(segment.sourceInSeconds, fps);
     const resolved = assets.get(segment.uri);
     const media = segment.media === "video" ? (resolved?.kind === "file" && resolved.media === "video" ? "video" : null) : (resolved?.kind === "file" && resolved.media === "image" ? "image" : null);
     if (!media) {
       warnings.push({ sceneId: segment.sceneId, code: "generated_video_placeholder", message: `Trecho ${index + 1}: ${resolved?.kind === "mock" ? "asset simulado (mock)" : "arquivo ausente"}; usando placeholder.` });
     }
     return {
-      id: segment.id, startFrame, durationFrames: Math.max(1, endFrame - startFrame), role: segment.role,
+      id: segment.id, sceneId: segment.sceneId, audioSceneIds: segment.audioSceneIds, startFrame, durationFrames: Math.max(1, endFrame - startFrame), role: segment.role,
       kind: media ?? "placeholder", src: media ? urlFor(segment.uri) : null,
-      trimBeforeFrames: secondsToFrames(segment.sourceInSeconds, fps),
+      trimBeforeFrames: Math.max(0, synchronizedTrim),
       scale: segment.scale, crop: segment.crop ?? null, transition: segment.transition,
       placeholderLabel: media ? null : segment.role === "aroll" ? UGC_PLACEHOLDER_LABEL : `MOCK · B-ROLL${debug ? ` · ${segment.cutReason}` : ""}`,
     };

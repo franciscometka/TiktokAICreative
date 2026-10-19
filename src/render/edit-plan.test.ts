@@ -9,6 +9,7 @@ import { assertValidEditPlan, EditPlanError, EditPlanSchema, SceneEditSchema } f
 import { RenderManifestSchema } from "@/domain/render";
 import { product } from "@/test/fixtures";
 import { buildCompositionProps, compositionHasAudio } from "./composition-props";
+import { nearestSilenceCut, parseSilenceDetect } from "./audio-silence";
 import { buildEditedRenderManifest } from "./edit-manifest";
 import { buildEditPlan, captionChunks, usableWindow, type EditClip } from "./edit-plan";
 import type { ResolvedAsset } from "./asset-resolver";
@@ -24,7 +25,11 @@ function editorialPlan(quality: "economy" | "high" | "premium" = "high"): Creati
 
 /** Veo vende 8s; o arquivo real tem 8s; a edição usa só a janela entre os handles. */
 function clipsFor(plan: CreativePlan, seconds = 8): Map<string, EditClip> {
-  return new Map(plan.scenes.filter((s) => s.edit?.role === "aroll").map((s, i) => [s.id, { uri: `outputs/videos/c/${s.id}/v1/clip.mp4`, actualSeconds: seconds, generatedSeconds: 8 + i * 0 }]));
+  return new Map(plan.scenes.filter((s) => s.edit?.role === "aroll").map((s, i) => [s.id, {
+    uri: `outputs/videos/c/${s.id}/v1/clip.mp4`, actualSeconds: seconds, generatedSeconds: 8 + i * 0,
+    audioSilence: { source: "ffmpeg_silencedetect" as const, noiseDb: -38, minSilenceSeconds: 0.12,
+      intervals: [{ startSeconds: 0.2, endSeconds: 0.4 }, { startSeconds: seconds - 0.5, endSeconds: seconds - 0.3 }] },
+  }]));
 }
 
 const REFERENCE = "outputs/ugc/c/k/v1/reference.png";
@@ -85,6 +90,26 @@ describe("Editor V2 — Edit Plan", () => {
     expect(usableWindow(1.6, EDIT_POLICY.handles.aroll)).toEqual({ sourceIn: 0, sourceOut: 1.6 });
   });
 
+  it("silencedetect local: escolhe pausa próxima; sem pausa usa clipe inteiro e não inventa word timing", () => {
+    const parsed = parseSilenceDetect("[silencedetect] silence_start: 0.20\n[silencedetect] silence_end: 0.40 | silence_duration: 0.20\n[silencedetect] silence_start: 7.50\n", 8);
+    expect(parsed).toEqual([{ startSeconds: 0.2, endSeconds: 0.4 }, { startSeconds: 7.5, endSeconds: 8 }]);
+    expect(nearestSilenceCut(parsed, 0.3, 0.75)).toBeCloseTo(0.3, 6);
+    expect(usableWindow(8, EDIT_POLICY.handles.aroll, EDIT_POLICY.minUsableSeconds, { source: "ffmpeg_silencedetect", noiseDb: -38, minSilenceSeconds: 0.12, intervals: [] }))
+      .toEqual({ sourceIn: 0, sourceOut: 8 });
+  });
+
+  it("sem pausa medida perto da junção, permanece no A-roll; B-roll estático nunca passa de 1,6s", () => {
+    const plan = editorialPlan("economy");
+    const noPause = new Map([...clipsFor(plan).entries()].map(([id, clip]) => [id, { ...clip, audioSilence: { ...clip.audioSilence!, intervals: [] } }]));
+    const fallback = buildEditPlan({ plan, clips: noPause, referenceImageUri: REFERENCE });
+    expect(fallback.visuals.every(v => v.role === "aroll")).toBe(true);
+    expect(fallback.audio.every(track => track.sourceInSeconds === 0 && track.sourceOutSeconds === 8 && track.fadeInSeconds === 0 && track.fadeOutSeconds === 0)).toBe(true);
+    const longBroll = { ...plan, scenes: plan.scenes.map(scene => scene.edit?.role === "broll" ? { ...scene, duration: 2.4 } : scene) };
+    const edit = buildEditPlan({ plan: longBroll, clips: clipsFor(plan), referenceImageUri: REFERENCE });
+    const broll = edit.visuals.find(v => v.role === "broll")!;
+    expect(broll.endSeconds - broll.startSeconds).toBeLessThanOrEqual(EDIT_POLICY.broll.staticMaxSeconds);
+  });
+
   it("A-roll contínuo + B-roll overlay mudo: áudio só do A-roll, sem sobreposição, cobrindo o vídeo inteiro", () => {
     const plan = editorialPlan("high");
     const edit = buildEditPlan({ plan, clips: clipsFor(plan), referenceImageUri: REFERENCE });
@@ -97,12 +122,13 @@ describe("Editor V2 — Edit Plan", () => {
     expect(edit.audio[1]!.fadeInSeconds).toBeGreaterThan(0);
     // Visuais: todos mudos; B-roll em cima da junção (L/J cut) com áudio do A-roll.
     expect(edit.visuals.every((v) => v.muted)).toBe(true);
+    expect(edit.visuals.filter(v => v.media === "video").every(v => v.sourceInSeconds >= 0 && v.sourceOutSeconds <= clipsFor(plan).get(v.sceneId)!.actualSeconds)).toBe(true);
     const brolls = edit.visuals.filter((v) => v.role === "broll");
     expect(brolls).toHaveLength(2);
     const junction = edit.audio[0]!.endSeconds;
     expect(brolls[0]!.startSeconds).toBeLessThan(junction);
     expect(brolls[0]!.endSeconds).toBeGreaterThan(junction);
-    expect(brolls[0]).toMatchObject({ media: "image", uri: REFERENCE, cutReason: "product_reveal", audioSceneId: arolls[0]!.id });
+    expect(brolls[0]).toMatchObject({ media: "image", uri: REFERENCE, cutReason: "product_reveal", audioSceneIds: [arolls[0]!.id, arolls[1]!.id] });
     expect(edit.audio.some((a) => brolls.some((b) => b.sceneId === a.sceneId))).toBe(false);
     // A volta para o A-roll seguinte continua sincronizada: visual sourceIn = áudio sourceIn + deslocamento.
     const resumed = edit.visuals.find((v) => v.role === "aroll" && v.sceneId === arolls[1]!.id)!;
@@ -127,8 +153,16 @@ describe("Editor V2 — Edit Plan", () => {
     const plan = editorialPlan("high");
     const edit = buildEditPlan({ plan, clips: clipsFor(plan), referenceImageUri: REFERENCE });
     expect(() => assertValidEditPlan({ ...edit, audio: [...edit.audio, { ...edit.audio[0]!, startSeconds: 1, endSeconds: 8.3 }] })).toThrow(EditPlanError);
+    expect(() => assertValidEditPlan({ ...edit, audio: edit.audio.map((track, i) => i === 1 ? { ...track, startSeconds: track.startSeconds + 0.1, endSeconds: track.endSeconds + 0.1 } : track) })).toThrow(/lacuna|sobreposição/);
     const broll = edit.visuals.find((v) => v.role === "broll")!;
     expect(() => assertValidEditPlan({ ...edit, audio: [...edit.audio.slice(0, 2).map((a, i) => (i === 1 ? a : a)), { ...edit.audio[2]!, sceneId: broll.sceneId }] })).toThrow(/B-roll nunca/);
+  });
+
+  it("continua lendo o campo audioSceneId dos manifests V2 já persistidos", () => {
+    const plan = buildEditPlan({ plan: editorialPlan("economy"), clips: clipsFor(editorialPlan("economy")), referenceImageUri: REFERENCE });
+    const legacy = { ...plan, visuals: plan.visuals.map(({ audioSceneIds: _ids, ...visual }) => visual) };
+    const parsed = EditPlanSchema.parse(legacy);
+    expect(assertValidEditPlan(parsed).visuals.every(visual => visual.audioSceneIds.length >= 1)).toBe(true);
   });
 
   it("generated ≠ used: 8s gerados (cobrados), 7,3s usados; o uso nunca altera o gerado", () => {
@@ -145,6 +179,7 @@ describe("Editor V2 — Edit Plan", () => {
     const plan = editorialPlan("economy");
     const edit = buildEditPlan({ plan, clips: clipsFor(plan, 4), referenceImageUri: REFERENCE, ctaLabel: "Veja no carrinho" });
     expect(edit.cta).toMatchObject({ text: "Veja no carrinho", overPresenter: true, endSeconds: edit.durationSeconds });
+    expect(edit.cta!.endSeconds - edit.cta!.startSeconds).toBeCloseTo(1.8, 6);
     const ctaStart = edit.cta!.startSeconds;
     expect(edit.visuals.filter((v) => v.role === "broll").every((v) => v.endSeconds <= ctaStart + 1e-6)).toBe(true);
   });
@@ -159,6 +194,7 @@ describe("Editor V2 — Edit Plan", () => {
     for (let i = 1; i < edit.captions.length; i++) expect(edit.captions[i]!.startSeconds).toBeGreaterThanOrEqual(edit.captions[i - 1]!.endSeconds - 1e-6);
     const deliberate = buildEditPlan({ plan, clips: clipsFor(plan), referenceImageUri: REFERENCE, hookText: "Secador que não pesa" });
     expect(deliberate.hook).toMatchObject({ text: "Secador que não pesa" });
+    expect(edit.captions.every(c => c.timingSource === "estimated_from_script")).toBe(true);
     expect(captionChunks("Ele tem 2100W de potência e bico concentrador.", 0, 3, "s").flatMap((c) => c.emphasis)).toEqual(["2100W"]);
   });
 
@@ -199,6 +235,11 @@ describe("Editor V2 — manifest e props Remotion (fixture local)", () => {
     // Visuais contíguos até o último frame.
     for (let i = 1; i < edit.visuals.length; i++) expect(edit.visuals[i]!.startFrame).toBe(edit.visuals[i - 1]!.startFrame + edit.visuals[i - 1]!.durationFrames);
     expect(edit.visuals.at(-1)!.startFrame + edit.visuals.at(-1)!.durationFrames).toBe(props.durationInFrames);
+    for (let i = 1; i < edit.audio.length; i++) expect(edit.audio[i]!.startFrame).toBe(edit.audio[i - 1]!.startFrame + edit.audio[i - 1]!.durationFrames);
+    for (const visual of edit.visuals.filter(v => v.role === "aroll")) {
+      const track = edit.audio.find(a => a.src === visual.src && a.startFrame <= visual.startFrame && a.startFrame + a.durationFrames >= visual.startFrame)!;
+      expect(visual.trimBeforeFrames).toBe(track.trimBeforeFrames + visual.startFrame - track.startFrame);
+    }
     expect(edit.cta).toMatchObject({ text: "Veja no carrinho", endFrame: props.durationInFrames });
     expect(warnings).toEqual([]);
   });

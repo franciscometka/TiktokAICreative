@@ -6,10 +6,12 @@ import {
   EditPlanError,
   type ClipUsage,
   type EditAudioTrack,
+  type AudioSilenceAnalysis,
   type EditCaption,
   type EditPlan,
   type EditVisualSegment,
 } from "@/domain/edit";
+import { nearestSilenceCut } from "./audio-silence";
 
 /**
  * Creative Editor V2 (Lote 5.6) — função PURA: plano editorial + clipes gerados → Edit Plan.
@@ -28,6 +30,8 @@ export interface EditClip {
   actualSeconds: number;
   /** Duração GERADA/cobrada (Veo 4/6/8s). */
   generatedSeconds: number;
+  /** Pausas medidas no áudio real; ausente = análise indisponível, portanto nenhum corte automático. */
+  audioSilence?: AudioSilenceAnalysis;
 }
 
 export interface BuildEditPlanInput {
@@ -56,6 +60,7 @@ interface ArollSpan {
   sourceIn: number;
   sourceOut: number;
   generated: number;
+  audioSilence?: AudioSilenceAnalysis;
 }
 
 interface Overlay {
@@ -65,13 +70,25 @@ interface Overlay {
 }
 
 /** Janela usada de um clipe: descarta estabilização inicial e frames do fim; nunca menor que o mínimo. */
-export function usableWindow(actualSeconds: number, handles: { headSeconds: number; tailSeconds: number }, minUsable: number = EDIT_POLICY.minUsableSeconds): { sourceIn: number; sourceOut: number } {
+export function usableWindow(
+  actualSeconds: number,
+  handles: { headSeconds: number; tailSeconds: number },
+  minUsable: number = EDIT_POLICY.minUsableSeconds,
+  audioSilence?: AudioSilenceAnalysis,
+): { sourceIn: number; sourceOut: number } {
   if (!(actualSeconds > 0)) throw new EditPlanError("Clipe sem duração.");
-  const sourceIn = handles.headSeconds;
-  const sourceOut = actualSeconds - handles.tailSeconds;
+  const sourceIn = audioSilence
+    ? nearestSilenceCut(audioSilence.intervals, handles.headSeconds, EDIT_POLICY.silence.cutToleranceSeconds) ?? 0
+    : handles.headSeconds;
+  const sourceOut = audioSilence
+    ? nearestSilenceCut(audioSilence.intervals, actualSeconds - handles.tailSeconds, EDIT_POLICY.silence.cutToleranceSeconds) ?? actualSeconds
+    : actualSeconds - handles.tailSeconds;
   if (sourceOut - sourceIn < minUsable) return { sourceIn: 0, sourceOut: r3(actualSeconds) };
   return { sourceIn: r3(sourceIn), sourceOut: r3(sourceOut) };
 }
+
+const cutIsSilent = (analysis: AudioSilenceAnalysis | undefined, seconds: number) =>
+  analysis?.intervals.some(interval => interval.startSeconds - EPS <= seconds && interval.endSeconds + EPS >= seconds) ?? false;
 
 const normalize = (text: string) => text.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
 
@@ -94,7 +111,7 @@ export function captionChunks(text: string, start: number, end: number, sceneId:
   return chunks.map((chunk) => {
     const duration = ((end - start) * chunk.length) / total;
     const caption: EditCaption = {
-      text: chunk, sceneId, startSeconds: r3(cursor), endSeconds: r3(cursor + duration),
+      text: chunk, sceneId, startSeconds: r3(cursor), endSeconds: r3(cursor + duration), timingSource: "estimated_from_script",
       // Poucos termos destacados: números/especificações (ex.: "2100W").
       emphasis: (chunk.match(/\b\d[\d.,]*\s?[a-zA-Z%°"]{0,4}\b/g) ?? []).slice(0, policy.caption.maxEmphasis),
     };
@@ -115,9 +132,13 @@ export function buildEditPlan(input: BuildEditPlanInput): EditPlan {
   for (const scene of scenes.filter((s) => s.edit!.role === "aroll")) {
     const clip = input.clips.get(scene.id);
     if (!clip) throw new EditPlanError(`A-roll da cena ${scene.order + 1} sem clipe ativo.`);
-    const { sourceIn, sourceOut } = usableWindow(clip.actualSeconds, policy.handles.aroll, policy.minUsableSeconds);
+    // A-roll sem medição local fica inteiro: é mais seguro manter respiração/cauda do que cortar fala.
+    const { sourceIn, sourceOut } = clip.audioSilence
+      ? usableWindow(clip.actualSeconds, policy.handles.aroll, policy.minUsableSeconds, clip.audioSilence)
+      : { sourceIn: 0, sourceOut: r3(clip.actualSeconds) };
     const used = sourceOut - sourceIn;
-    spans.push({ scene, uri: clip.uri, start: r3(cursor), end: r3(cursor + used), sourceIn, sourceOut, generated: clip.generatedSeconds });
+    spans.push({ scene, uri: clip.uri, start: r3(cursor), end: r3(cursor + used), sourceIn, sourceOut, generated: clip.generatedSeconds,
+      ...(clip.audioSilence ? { audioSilence: clip.audioSilence } : {}) });
     cursor += used;
   }
   if (spans.length === 0) throw new EditPlanError("Sem A-roll: o vídeo precisa da apresentadora.");
@@ -132,13 +153,27 @@ export function buildEditPlan(input: BuildEditPlanInput): EditPlan {
     const before = spans[lastAroll];
     const after = spans[lastAroll + 1];
     if (!before || !after) continue; // sem junção (antes do gancho ou depois do CTA): o A-roll continua
-    let length = Math.min(Math.max(scene.duration, policy.broll.minSeconds), policy.broll.maxSeconds);
+    let length = Math.min(Math.max(scene.duration, policy.broll.minSeconds),
+      scene.edit!.brollKind === "reference_detail" || scene.edit!.brollKind === "product_photo" ? policy.broll.staticMaxSeconds : policy.broll.maxSeconds);
     const clip = scene.edit!.brollKind === "generated_context" ? input.clips.get(scene.id) : undefined;
     if (clip) {
       const window = usableWindow(clip.actualSeconds, policy.handles.broll, policy.broll.minSeconds);
       length = Math.min(length, window.sourceOut - window.sourceIn);
     }
-    const junction = before.end;
+    // Troca visual somente perto de pausa MEDIDA. Sem análise/pausa segura, permanece no A-roll.
+    if (!before.audioSilence || !after.audioSilence) continue;
+    const measuredPauses = [
+      ...before.audioSilence.intervals.map(interval => ({
+        startSeconds: before.start + Math.max(0, interval.startSeconds - before.sourceIn),
+        endSeconds: before.start + Math.min(before.end - before.start, interval.endSeconds - before.sourceIn),
+      })),
+      ...after.audioSilence.intervals.map(interval => ({
+        startSeconds: after.start + Math.max(0, interval.startSeconds - after.sourceIn),
+        endSeconds: after.start + Math.min(after.end - after.start, interval.endSeconds - after.sourceIn),
+      })),
+    ].filter(interval => interval.endSeconds > interval.startSeconds);
+    const junction = nearestSilenceCut(measuredPauses, before.end, policy.silence.cutToleranceSeconds);
+    if (junction === undefined) continue;
     const earliest = before.start + policy.minArollVisibleSeconds;
     const latest = Math.min(after.end - policy.minArollVisibleSeconds, after === spans[spans.length - 1] ? ctaStart : Infinity);
     let start = Math.max(earliest, junction - length * policy.junctionTailShare);
@@ -171,8 +206,9 @@ export function buildEditPlan(input: BuildEditPlanInput): EditPlan {
   const usage = new Map<string, ClipUsage>();
   let previousScale = 1;
   pieces.forEach((piece, index) => {
-    const audioSpan = spans.find((s) => s.start <= piece.start + EPS && s.end > piece.start + EPS) ?? spans[spans.length - 1]!;
-    const base = { id: `seg_${index + 1}`, startSeconds: r3(piece.start), endSeconds: r3(piece.end), muted: true as const, audioSceneId: audioSpan.scene.id };
+    const audioSceneIds = spans.filter(span => span.start < piece.end - EPS && span.end > piece.start + EPS).map(span => span.scene.id);
+    const base = { id: `seg_${index + 1}`, startSeconds: r3(piece.start), endSeconds: r3(piece.end), muted: true as const,
+      audioSceneId: audioSceneIds[0]!, audioSceneIds };
     if (piece.kind === "broll") {
       const edit = piece.overlay.scene.edit!;
       const length = piece.end - piece.start;
@@ -225,8 +261,8 @@ export function buildEditPlan(input: BuildEditPlanInput): EditPlan {
   const audio: EditAudioTrack[] = spans.map((span, i) => ({
     sceneId: span.scene.id, uri: span.uri, startSeconds: span.start, endSeconds: span.end,
     sourceInSeconds: span.sourceIn, sourceOutSeconds: span.sourceOut, gain: 1,
-    fadeInSeconds: i === 0 ? 0 : policy.audioFadeSeconds,
-    fadeOutSeconds: i === spans.length - 1 ? policy.audioFadeSeconds * 2 : policy.audioFadeSeconds,
+    fadeInSeconds: i > 0 && cutIsSilent(span.audioSilence, span.sourceIn) ? policy.audioFadeSeconds : 0,
+    fadeOutSeconds: cutIsSilent(span.audioSilence, span.sourceOut) ? policy.audioFadeSeconds : 0,
   }));
   for (const span of spans) usage.set(span.scene.id, { sceneId: span.scene.id, role: "aroll", generatedSeconds: span.generated, usedSeconds: r3(span.sourceOut - span.sourceIn) });
 

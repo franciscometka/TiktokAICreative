@@ -351,7 +351,8 @@ export async function generateUgcScene(
       const media = checkClipDuration({ requestedSeconds: requested, providerReportedSeconds: result.providerReportedDurationSeconds, actualSeconds: stored.inspection.durationSeconds, fileComplete: stored.inspection.complete });
       if (media.status !== "valid") throw new InvalidMediaError(clipRejectionMessage(media, scene.order + 1), media, stored.uri);
       if (consistency.clipHasAudio && !stored.inspection.hasAudioTrack) throw new InvalidMediaError(`Cena ${scene.order + 1}: o MP4 não tem trilha de áudio nativo; não será usado.`, media, stored.uri);
-      attempt = { ...base, providerJobId, ...(ref.requestId ? { requestId: ref.requestId } : {}), status: "succeeded", active: true, assetUri: stored.uri, durationSeconds: media.actualMediaDurationSeconds ?? requested, media, ugc: consistency };
+      attempt = { ...base, providerJobId, ...(ref.requestId ? { requestId: ref.requestId } : {}), status: "succeeded", active: true, assetUri: stored.uri, durationSeconds: media.actualMediaDurationSeconds ?? requested, media, ugc: consistency,
+        ...(stored.audioSilence ? { audioSilence: stored.audioSilence } : {}) };
     }
   } catch (error) {
     if (error instanceof ProviderError && error.billedUsage) await recordCost(error.billedUsage);

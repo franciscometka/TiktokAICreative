@@ -103,7 +103,8 @@ export async function generatePresenter(deps: PresenterFlowDeps, input: { campai
       actualSeconds: stored.inspection.durationSeconds, fileComplete: stored.inspection.complete });
     await deps.videoAssets.writeIntegrity?.(stored.uri, { ...media, checkedAt: deps.clock() });
     if (media.status !== "valid") throw new InvalidMediaError(clipRejectionMessage(media, scene.order + 1), media, stored.uri);
-    attempt = { ...base(), status: "succeeded", active: true, assetUri: stored.uri, durationSeconds: media.actualMediaDurationSeconds!, media };
+    attempt = { ...base(), status: "succeeded", active: true, assetUri: stored.uri, durationSeconds: media.actualMediaDurationSeconds!, media,
+      ...(stored.audioSilence ? { audioSilence: stored.audioSilence } : {}) };
     }
   } catch (error) {
     if (error instanceof ProviderError && error.billedUsage && !costRecorded) await recordCost(error.billedUsage);

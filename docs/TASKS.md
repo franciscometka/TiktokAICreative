@@ -279,6 +279,7 @@ Guia: [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md).
 - [x] Presets revisados (2/3/4 A-rolls; 1/2/3 B-rolls); cotação pelos A-rolls; "gerados · usados" no storyboard
 - [x] Compatibilidade: planos/manifests/referências antigos continuam válidos; `external_lipsync` segue linear
 - [x] Testes offline (edit plan, fidelidade, continuidade, pipeline Krea falso, compatibilidade); caso de render V2 no `npm run test:render`
+- [x] Auditoria pré-REAL D92: silêncio/energia real via FFmpeg local, corte só em pausa segura, fallback no A-roll, B-roll estático ≤1,6s, origem A/V idêntica em frames e CTA sem card
 - [ ] Rodar `npm run test:render` numa máquina com o navegador do Remotion (não instalado neste PC)
 - [ ] Validação REAL: 1 referência Krea + revisão de fidelidade; depois 1 vídeo Equilibrado completo e revisão visual (handles, L/J cut, legibilidade, CTA)
-- [ ] Futuro: verificador visual/OCR preenchendo `observedTexts`; alinhamento de fala (STT) para legendas e cortes em silêncio reais; B-roll gerado contextual via provider UGC a partir do frame aprovado
+- [ ] Futuro: verificador visual/OCR preenchendo `observedTexts`; ASR local para legendas word-level reais (cortes em silêncio já usam medição local); B-roll gerado contextual via provider UGC a partir do frame aprovado

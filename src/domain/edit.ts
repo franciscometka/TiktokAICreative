@@ -82,6 +82,21 @@ export const DetailCropSchema = z.object({
 });
 export type DetailCrop = z.infer<typeof DetailCropSchema>;
 
+/** Intervalos medidos no áudio REAL pelo `silencedetect` local; não são timestamps de palavras. */
+export const AudioSilenceIntervalSchema = z.object({
+  startSeconds: z.number().nonnegative(),
+  endSeconds: z.number().positive(),
+}).refine(interval => interval.endSeconds > interval.startSeconds, { message: "Silêncio com duração inválida." });
+export type AudioSilenceInterval = z.infer<typeof AudioSilenceIntervalSchema>;
+
+export const AudioSilenceAnalysisSchema = z.object({
+  source: z.literal("ffmpeg_silencedetect"),
+  noiseDb: z.number().max(0),
+  minSilenceSeconds: z.number().positive(),
+  intervals: z.array(AudioSilenceIntervalSchema),
+});
+export type AudioSilenceAnalysis = z.infer<typeof AudioSilenceAnalysisSchema>;
+
 /**
  * Metadado editorial da cena (só no plano hidratado; o LLM não precisa produzir). `overlay=true`
  * = o trecho é visual por cima do áudio do A-roll e NÃO soma na duração do criativo.
@@ -128,9 +143,22 @@ export const EditVisualSegmentSchema = z.object({
   /** punch-in sutil (1.0–1.12) para disfarçar junção entre clipes do mesmo enquadramento. */
   scale: z.number().min(1).max(1.12).default(1),
   crop: DetailCropSchema.optional(),
-  /** De qual A-roll vem o áudio enquanto este visual está na tela. */
-  audioSceneId: nonEmpty,
-}).refine(s => s.endSeconds > s.startSeconds && s.sourceOutSeconds > s.sourceInSeconds, { message: "Trecho com duração inválida." });
+  /** Campo legado do primeiro V2; mantido para ler manifests já persistidos. */
+  audioSceneId: nonEmpty.optional(),
+  /** A-roll(s) cujo áudio continua enquanto este visual está na tela (L/J cut pode cobrir dois). */
+  audioSceneIds: z.array(nonEmpty).min(1).optional(),
+}).superRefine((segment, ctx) => {
+  if (!(segment.endSeconds > segment.startSeconds && segment.sourceOutSeconds > segment.sourceInSeconds)) {
+    ctx.addIssue({ code: "custom", message: "Trecho com duração inválida." });
+  }
+  if (!segment.audioSceneId && !segment.audioSceneIds) {
+    ctx.addIssue({ code: "custom", message: "Trecho sem fonte de áudio." });
+  }
+}).transform(({ audioSceneId, audioSceneIds, ...segment }) => ({
+  ...segment,
+  audioSceneId: audioSceneId ?? audioSceneIds![0]!,
+  audioSceneIds: audioSceneIds ?? [audioSceneId!],
+}));
 export type EditVisualSegment = z.infer<typeof EditVisualSegmentSchema>;
 
 export const EditAudioTrackSchema = z.object({
@@ -140,7 +168,7 @@ export const EditAudioTrackSchema = z.object({
   endSeconds: z.number().positive(),
   ...window,
   /** Ganho linear por clipe (1 = original). Normalização conservadora: só quando há medida. */
-  gain: z.number().min(0.25).max(2).default(1),
+  gain: z.number().min(0.25).max(1).default(1),
   /** Micro fades (s) para evitar click/pop no corte; nunca longos a ponto de "engolir" palavra. */
   fadeInSeconds: z.number().min(0).max(0.25),
   fadeOutSeconds: z.number().min(0).max(0.25),
@@ -152,6 +180,8 @@ export const EditCaptionSchema = z.object({
   startSeconds: z.number().nonnegative(),
   endSeconds: z.number().positive(),
   sceneId: nonEmpty,
+  /** Editor V2 não possui ASR: timing proporcional ao roteiro, nunca word-level real. */
+  timingSource: z.literal("estimated_from_script").default("estimated_from_script"),
   /** Poucos termos destacados (números/especificações informadas). */
   emphasis: z.array(nonEmpty).max(2).default([]),
 });
@@ -202,12 +232,21 @@ export function assertValidEditPlan(plan: EditPlan): EditPlan {
   }
   if (Math.abs(cursor - parsed.durationSeconds) > EPS) throw new EditPlanError("Os visuais não cobrem o vídeo inteiro.");
   const audio = [...parsed.audio].sort((a, b) => a.startSeconds - b.startSeconds);
+  let audioCursor = 0;
   audio.forEach((track, i) => {
     const next = audio[i + 1];
+    if (Math.abs(track.startSeconds - audioCursor) > EPS) throw new EditPlanError("Áudio com lacuna ou sobreposição entre A-rolls.");
     if (next && next.startSeconds < track.endSeconds - EPS) throw new EditPlanError("Áudio duplicado: duas faixas tocam ao mesmo tempo.");
     if (Math.abs((track.endSeconds - track.startSeconds) - (track.sourceOutSeconds - track.sourceInSeconds)) > 1e-3) throw new EditPlanError("Faixa de áudio com janela diferente do trecho na timeline.");
+    audioCursor = track.endSeconds;
   });
+  if (audio.length > 0 && Math.abs(audioCursor - parsed.durationSeconds) > EPS) throw new EditPlanError("Áudio não cobre a duração inteira do Editor V2.");
   const brollScenes = new Set(parsed.visuals.filter(v => v.role === "broll").map(v => v.sceneId));
   if (parsed.audio.some(track => brollScenes.has(track.sceneId))) throw new EditPlanError("B-roll nunca é fonte de áudio.");
+  const audioSceneIds = new Set(audio.map(track => track.sceneId));
+  for (const visual of parsed.visuals) {
+    if (visual.audioSceneIds.some(sceneId => !audioSceneIds.has(sceneId))) throw new EditPlanError("Visual aponta para uma fonte de áudio inexistente.");
+    if (visual.role === "aroll" && (visual.audioSceneIds.length !== 1 || visual.audioSceneIds[0] !== visual.sceneId)) throw new EditPlanError("A-roll precisa usar somente o próprio áudio.");
+  }
   return parsed;
 }
