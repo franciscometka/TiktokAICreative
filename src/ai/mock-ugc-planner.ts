@@ -1,104 +1,102 @@
-import { UGC_MAX_WORDS_PER_SECOND, UGC_PRESET_PLANS, type UgcScenePlanEntry } from "@/config/ugc";
+import { EDIT_POLICY, UGC_EDITORIAL_PLANS, type EditorialPlanEntry } from "@/config/edit-policy";
+import { UGC_MAX_WORDS_PER_SECOND } from "@/config/ugc";
 import { VIDEO_STRATEGIES } from "@/config/video-strategies";
 import type { PresetQuality } from "@/config/quality-presets";
 import type { CreativePlanDraft, ScenePlanDraft } from "@/domain/creative";
 import type { ProductInput } from "@/domain/product";
 import type { QualitySettings } from "@/domain/quality";
-import { isUgcPersonSource, type UgcAudioStrategy } from "@/domain/ugc";
+import type { UgcAudioStrategy, UgcPersonSource } from "@/domain/ugc";
 import { UGC_ROLE_ACTIONS } from "./ugc-script";
 
 /**
- * Roteiro AI UGC determinístico do planner MOCK. Linguagem de creator ("Olha isso aqui…"),
- * só com fatos fornecidos (nome, benefícios/características informados) e NUNCA experiência
- * pessoal inventada. Cada fala cabe na duração da cena (≤ UGC_MAX_WORDS_PER_SECOND).
+ * Roteiro AI UGC determinístico do planner MOCK (Editor V2). Estrutura de creator:
+ *   HOOK → observação neutra → produto → detalhe/demonstração → benefício informado → CTA curto.
+ * Só fatos fornecidos (nome, benefícios/características) e NUNCA experiência pessoal inventada.
+ * A-roll = apresentadora falando (espinha de áudio); B-roll = detalhe do frame de referência,
+ * por cima do áudio (o editorial converte em overlay). Frases curtas, com folga na duração.
  */
 
-const roundHalf = (x: number) => Math.round(x * 2) / 2;
-const mid = (r: { min: number; max: number }) => (r.min + r.max) / 2;
 const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
 const stripDot = (text: string) => text.trim().replace(/[.!?]+$/, "");
 
-/** Corta na fronteira de palavra para caber na duração (nunca acrescenta conteúdo). */
+/** Corta na fronteira de palavra para caber com folga (nunca acrescenta conteúdo). */
 export function fitSpeech(text: string, durationSeconds: number): string {
-  const max = Math.max(3, Math.floor(durationSeconds * UGC_MAX_WORDS_PER_SECOND));
+  const usable = Math.max(1, durationSeconds - EDIT_POLICY.handles.aroll.headSeconds - EDIT_POLICY.handles.aroll.tailSeconds);
+  const max = Math.max(3, Math.floor(usable * EDIT_POLICY.speechFillRatio * UGC_MAX_WORDS_PER_SECOND));
   const words = text.trim().split(/\s+/);
   if (words.length <= max) return text.trim();
   return `${words.slice(0, max).join(" ").replace(/[,;:]$/, "")}.`;
 }
 
-function speechFor(entry: UgcScenePlanEntry, product: ProductInput, strategy: UgcAudioStrategy, demoDone: boolean): string {
-  const fact = product.benefits[0] ?? product.features[0];
-  switch (entry.source) {
+function speechFor(source: UgcPersonSource, product: ProductInput, arollIndex: number, arollCount: number): string {
+  const benefit = product.benefits[0];
+  const feature = product.features[0];
+  const second = product.benefits[1] ?? product.features[1];
+  switch (source) {
     case "ugc_hook":
-      return fact ? `Se você procura ${lowerFirst(stripDot(fact))}, olha isso aqui: ${product.name}.` : `Olha isso aqui: ${product.name}.`;
+      return benefit
+        ? `Se você quer ${lowerFirst(stripDot(benefit))}, repara nisso. É o ${product.name}.`
+        : `Repara nisso aqui. É o ${product.name}.`;
     case "ugc_demo":
-      return "Repara no formato e no acabamento dele de perto.";
-    case "ugc_benefit": {
-      const detail = product.benefits[demoDone ? 1 : 0] ?? product.features[0] ?? product.benefits[0];
-      return detail ? `Esse modelo chama atenção por ${lowerFirst(stripDot(detail))}.` : "Esse modelo chama atenção pelos detalhes.";
-    }
+      return feature ? `Olha de perto. ${stripDot(feature)}.` : "Olha o formato dele de perto.";
+    case "ugc_benefit":
+      return second ? `E tem mais: ${lowerFirst(stripDot(second))}.` : "Repara no acabamento dos detalhes.";
     case "ugc_cta":
-      return "Se fez sentido pra você, toca no carrinho e confere os detalhes.";
-    case "product_broll":
-      return strategy === "native_speech" ? "" : "Dá uma olhada no acabamento de perto.";
-    case "product_image":
-      return strategy === "native_speech" ? "" : product.features[0] ? `${stripDot(product.features[0])}.` : "Confere os detalhes nas fotos.";
+      // Com só dois A-rolls, o CTA também carrega o detalhe principal.
+      return arollCount <= 2 && feature
+        ? `${stripDot(feature)}. Se fez sentido, tá no carrinho.`
+        : arollIndex > 0 ? "Se fez sentido pra você, tá no carrinho." : "Confere no carrinho.";
   }
 }
 
-export function buildMockUgcCreative(
-  product: ProductInput,
-  settings: QualitySettings,
-  strategy: UgcAudioStrategy,
-): CreativePlanDraft {
-  const quality: PresetQuality = settings.quality === "custom" ? "high" : settings.quality;
-  const plan = UGC_PRESET_PLANS[quality];
-  const duration = roundHalf(mid(settings.finalVideoSeconds));
-  const durations = plan.map((e) => roundHalf(e.share * duration));
-  durations[durations.length - 1] = roundHalf(duration - durations.slice(0, -1).reduce((a, b) => a + b, 0));
-  const hasImage = product.images.length > 0;
-
-  const scenes: ScenePlanDraft[] = plan.map((entry, i) => {
-    const sceneDuration = durations[i] ?? 2;
-    const source = entry.source === "product_image" && !hasImage ? "text_card" : entry.source;
-    const generated = isUgcPersonSource(source) || source === "product_broll";
-    const narration = fitSpeech(speechFor(entry, product, strategy, i > 1), sceneDuration);
-    const person = isUgcPersonSource(source);
-    const direction = generated ? VIDEO_STRATEGIES[source as keyof typeof VIDEO_STRATEGIES].direction : undefined;
+function sceneFrom(entry: EditorialPlanEntry, product: ProductInput, arollIndex: number, arollCount: number): ScenePlanDraft {
+  if (entry.role === "broll") {
     return {
-      duration: sceneDuration,
-      narration,
-      onScreenText: source === "ugc_cta" ? "Link no carrinho" : source === "ugc_hook" ? product.name : "",
-      visualDescription: person
-        ? `A mesma pessoa da referência aprovada segura ${product.name}. ${UGC_ROLE_ACTIONS[source]}.`
-        : source === "product_broll"
-          ? `Close cinematográfico de ${product.name}, luz suave passando pela superfície.`
-          : `Foto real de ${product.name} com movimento suave.`,
-      generationPrompt: generated
-        ? `${direction?.subjectAction || "Slow cinematic close-up of the product"}. Same person and the exact product from the approved reference. Vertical 9:16.`
-        : "",
-      videoDirection: direction,
-      shotType: person ? "talking_head" : "product_detail",
-      transition: i === 0 ? undefined : "cut",
-      visualSource: source,
-      motion: generated ? "none" : "ken_burns",
-      requiresGeneratedVideo: generated,
-      estimatedGenerationSeconds: generated ? sceneDuration : 0,
+      duration: entry.seconds, narration: "", onScreenText: "",
+      visualDescription: `B-roll: ${entry.detail} (recorte do frame de referência, mesmo ambiente); o áudio da apresentadora continua.`,
+      generationPrompt: "", shotType: "product_detail", transition: "cut", visualSource: "reference_detail", motion: "none",
+      requiresGeneratedVideo: false, estimatedGenerationSeconds: 0,
     };
-  });
+  }
+  const direction = VIDEO_STRATEGIES[entry.source].direction;
+  return {
+    duration: entry.seconds,
+    narration: fitSpeech(speechFor(entry.source, product, arollIndex, arollCount), entry.seconds),
+    onScreenText: entry.source === "ugc_cta" ? EDIT_POLICY.ctaLabel : "",
+    visualDescription: `A-roll: a mesma pessoa da referência aprovada segura ${product.name}. ${UGC_ROLE_ACTIONS[entry.source]}.`,
+    generationPrompt: `${direction.subjectAction}. Same person and the exact product from the approved reference. Vertical 9:16.`,
+    videoDirection: direction,
+    shotType: "talking_head",
+    transition: arollIndex === 0 ? undefined : "cut",
+    visualSource: entry.source,
+    motion: "none",
+    requiresGeneratedVideo: true,
+    estimatedGenerationSeconds: entry.seconds,
+  };
+}
 
+export function buildMockUgcCreative(product: ProductInput, settings: QualitySettings, _strategy: UgcAudioStrategy): CreativePlanDraft {
+  const quality: PresetQuality = settings.quality === "custom" ? "high" : settings.quality;
+  const entries = UGC_EDITORIAL_PLANS[quality];
+  const arollCount = entries.filter((e) => e.role === "aroll").length;
+  let arollIndex = 0;
+  const scenes = entries.map((entry) => {
+    const scene = sceneFrom(entry, product, arollIndex, arollCount);
+    if (entry.role === "aroll") arollIndex++;
+    return scene;
+  });
   const hook = scenes[0]!.narration;
-  const cta = scenes[scenes.length - 1]!.narration || "Toca no carrinho e confere os detalhes.";
+  const cta = scenes.findLast((s) => s.visualSource === "ugc_cta")?.narration || "Confere no carrinho.";
   return {
     concept: {
       title: `AI UGC — ${product.name}`,
-      angle: "Pessoa real segurando e mostrando o produto, em tom de creator",
+      angle: "Creator mostrando o produto real em um vídeo contínuo, sem tom de comercial",
       hook,
       targetEmotion: "curiosidade",
       format: "ugc",
-      description: "Roteiro AI UGC simulado (MOCK): a mesma pessoa apresenta o produto em todas as cenas UGC.",
+      description: "Roteiro AI UGC simulado (MOCK): A-roll contínuo da mesma pessoa + B-roll de detalhe por cima do áudio.",
     },
-    duration: roundHalf(scenes.reduce((sum, s) => sum + s.duration, 0)),
+    duration: scenes.reduce((sum, s) => sum + s.duration, 0),
     hook,
     script: scenes.map((s) => s.narration).filter(Boolean).join(" "),
     scenes,

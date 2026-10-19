@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { buildUgcVideoPrompt } from "@/ai/ugc-video-prompt";
 import { costForUsage } from "@/costs/calculate";
 import {
   KREA_REFERENCE_ENDPOINT,
@@ -55,7 +56,7 @@ export function buildKreaVeoBody(request: UgcVideoRequest, config: KreaVeoConfig
   if (request.aspectRatio !== "9:16") throw new Error("AI UGC Krea deve permanecer em 9:16.");
   if ((request.additionalReferenceUris ?? []).length > 0) throw new Error("AI UGC Krea usa só a referência aprovada (pessoa + produto) como start_image.");
   return {
-    prompt: `${request.action}. Keep the same adult synthetic person, face, hair, wardrobe, environment and exact product identity. Preserve product shape, colors, logo, packaging and proportions. The person says naturally in Brazilian Portuguese: "${request.speech}"`,
+    prompt: buildUgcVideoPrompt({ action: request.action, speech: request.speech, continuity: request.continuity, fidelity: request.fidelity }),
     start_image: startImageUrl,
     aspect_ratio: "9:16",
     duration: kreaRequestedDuration(request.durationSeconds),

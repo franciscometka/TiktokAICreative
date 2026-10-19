@@ -20,6 +20,8 @@ export function sceneStrategy(source: VisualSource, hasProductImage: boolean): S
     case "ugc_hook": case "ugc_demo": case "ugc_benefit": case "ugc_cta": case "product_broll":
     case "generated_video":
       return { kind: "generated_video" };
+    // Editor V2: recorte do frame de referência; no caminho linear antigo cai na imagem do produto.
+    case "reference_detail":
     case "product_image":
       return hasProductImage
         ? { kind: "product_image" }

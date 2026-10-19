@@ -54,7 +54,7 @@ describe("AI UGC — gerar outra referência, trocar apresentador/ambiente", () 
     expect(entries.every((e) => e.simulated)).toBe(true);
     expect(h.calls.videos()).toHaveLength(0);
     // A referência v1 não pode mais ser aprovada.
-    await expect(h.service.approveUgcReference(h.jobId, h.reference.id)).rejects.toThrow(/mais recente/);
+    await expect(h.service.approveUgcReference(h.jobId, h.reference.id, { fidelityConfirmed: true })).rejects.toThrow(/mais recente/);
   });
 
   it("trocar apresentador e ambiente cria nova revisão da identidade e exige nova referência", async () => {
@@ -67,12 +67,12 @@ describe("AI UGC — gerar outra referência, trocar apresentador/ambiente", () 
     expect(job.ugc!.references[0]!.review).toBe("rejected");
     expect(job.ugc!.references[1]).toMatchObject({ identityRevision: 2, review: "pending" });
     expect(h.calls.references()[1]!.identity.gender).toBe("man");
-    await expect(h.service.approveUgcReference(h.jobId, job.ugc!.references[0]!.id)).rejects.toThrow();
+    await expect(h.service.approveUgcReference(h.jobId, job.ugc!.references[0]!.id, { fidelityConfirmed: true })).rejects.toThrow();
   });
 
   it("depois que existem cenas UGC, trocar a pessoa é recusado (consistência)", async () => {
     const h = await pausedAtReference();
-    await (await h.service.approveUgcReference(h.jobId, h.reference.id)).completion;
+    await (await h.service.approveUgcReference(h.jobId, h.reference.id, { fidelityConfirmed: true })).completion;
     await expect(h.service.updateUgcIdentity(h.jobId, { presenter: "man" })).rejects.toThrow(/cópia/);
     await expect(h.service.regenerateUgcReference(h.jobId)).rejects.toThrow(/cópia/);
   });
@@ -82,7 +82,7 @@ describe("AI UGC — retomada e incerteza", () => {
   it("reinício do processo durante a pausa: aprovar na nova instância continua e conclui", async () => {
     const h = await pausedAtReference();
     const restarted = h.build();
-    const result = await restarted.approveUgcReference(h.jobId, h.reference.id);
+    const result = await restarted.approveUgcReference(h.jobId, h.reference.id, { fidelityConfirmed: true });
     expect(result.resumed).toBe(true);
     expect((await result.completion!).kind).toBe("COMPLETED");
     expect(h.calls.references()).toHaveLength(1);
@@ -135,7 +135,7 @@ describe("AI UGC — estratégia de áudio externa (ElevenLabs + lip sync)", () 
     const h = await pausedAtReference({ strategy: "external_lipsync" });
     expect(h.job.ugc!.audioStrategy).toBe("external_lipsync");
     expect(h.calls.narrations()).toHaveLength(0); // narração vem DEPOIS da aprovação
-    await (await h.service.approveUgcReference(h.jobId, h.reference.id)).completion;
+    await (await h.service.approveUgcReference(h.jobId, h.reference.id, { fidelityConfirmed: true })).completion;
     expect(h.calls.narrations()).toHaveLength(1);
     for (const call of h.calls.videos()) {
       expect(call.audio).toBeDefined();
@@ -180,8 +180,13 @@ describe("AI UGC — storyboard na interface", () => {
     expect(hook.ugc!.who).toMatch(/mesma apresentadora/i);
     expect(hook.narration.length).toBeGreaterThan(0);
     expect(hook.ugc!.action.length).toBeGreaterThan(0);
-    const broll = creative.scenes.find((s) => s.visualSource === "product_broll");
-    expect(broll?.ugc?.who).toMatch(/só o produto/);
+    const broll = creative.scenes.find((s) => s.visualSource === "reference_detail");
+    expect(broll?.ugc?.who).toMatch(/detalhe/i);
+    expect(broll?.ugc?.speech).toMatch(/continua/);
+    // Storyboard V2: A-roll/B-roll com motivo de corte; B-roll sobre o áudio do A-roll.
+    expect(creative.ugc!.editorial.map((e) => e.roleLabel)).toEqual(["A-ROLL", "B-ROLL", "A-ROLL", "B-ROLL", "A-ROLL"]);
+    expect(creative.ugc!.editorial[1]).toMatchObject({ audioNote: "Áudio continua da apresentadora" });
+    expect(creative.ugc!.fidelity).toMatchObject({ status: "pending" });
     expect(creative.workflow?.find((w) => w.id === "ugc_reference")?.state).toBe("paused");
   });
 });
@@ -191,9 +196,12 @@ describe("AI UGC — storyboard editável antes das cenas", () => {
     const h = await ugcHarness();
     const plan = (await h.service.getCampaign(h.campaign.id)).plan!.creatives[0]!;
     const hook = plan.scenes[0]!;
-    const broll = plan.scenes.find((s) => s.visualSource === "product_broll")!;
+    const broll = plan.scenes.find((s) => s.visualSource === "reference_detail")!;
     await expect(h.service.updateStoryboardScene(h.jobId, { sceneId: hook.id, narration: "Testei por uma semana e amei.", visualDescription: "x", visualSource: "ugc_hook" })).rejects.toThrow(/não permitida/);
-    await expect(h.service.updateStoryboardScene(h.jobId, { sceneId: broll.id, narration: "Fala no B-roll", visualDescription: "x", visualSource: "product_broll" })).rejects.toThrow(/fala nativa/);
+    await expect(h.service.updateStoryboardScene(h.jobId, { sceneId: broll.id, narration: "Fala no B-roll", visualDescription: "x", visualSource: "reference_detail" })).rejects.toThrow(/fala nativa/);
+    // Editor V2: papel editorial não muda e catálogo é recusado.
+    await expect(h.service.updateStoryboardScene(h.jobId, { sceneId: broll.id, narration: "Olha aqui.", visualDescription: "x", visualSource: "ugc_demo" })).rejects.toThrow(/A-roll continua/);
+    await expect(h.service.updateStoryboardScene(h.jobId, { sceneId: broll.id, narration: "", visualDescription: "x", visualSource: "product_image" })).rejects.toThrow(/catálogo/);
     await expect(h.service.updateStoryboardScene(h.jobId, { sceneId: hook.id, narration: "Olha isso", visualDescription: "x", visualSource: "presenter" })).rejects.toThrow(/AI UGC/);
     const edited = await h.service.updateStoryboardScene(h.jobId, { sceneId: hook.id, narration: "Olha isso aqui: repara no acabamento.", visualDescription: "Segura o produto perto do rosto", visualSource: "ugc_hook" });
     expect(edited.jobAuthorization).toBeUndefined();

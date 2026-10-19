@@ -44,7 +44,7 @@ export interface UgcPlanIssue {
 /** Valida as cenas de um criativo AI UGC (estrutura, fala natural, duração, estratégia de áudio). */
 export function validateUgcScenes(scenes: readonly ScenePlanDraft[], audioStrategy: UgcAudioStrategy): UgcPlanIssue[] {
   const issues: UgcPlanIssue[] = [];
-  const allowed = new Set<string>([...UGC_PERSON_SOURCES, "product_broll", "product_image", "text_card"]);
+  const allowed = new Set<string>([...UGC_PERSON_SOURCES, "product_broll", "product_image", "text_card", "reference_detail"]);
   if (scenes[0]?.visualSource !== "ugc_hook") issues.push({ sceneIndex: 0, message: "A primeira cena do AI UGC deve ser ugc_hook (pessoa + produto falando para a câmera)." });
   if (!scenes.some((s) => s.visualSource === "ugc_cta")) issues.push({ sceneIndex: null, message: "O AI UGC precisa de uma cena ugc_cta (mesma pessoa + produto + chamada final)." });
   scenes.forEach((scene, i) => {
@@ -63,14 +63,17 @@ export function validateUgcScenes(scenes: readonly ScenePlanDraft[], audioStrate
 }
 
 /** Prompt da imagem de REFERÊNCIA: pessoa realista segurando o produto real, 9:16, sem distorcer o produto. */
-export function buildUgcReferencePrompt(identity: UgcCharacterIdentity, product: UgcProductAnchor): string {
+export function buildUgcReferencePrompt(identity: UgcCharacterIdentity, product: UgcProductAnchor, fidelityLines: readonly string[] = []): string {
+  // Editor V2: a referência é o PRIMEIRO FRAME real do vídeo, não uma peça de anúncio.
   return [
-    `Vertical 9:16 smartphone photo, ${identity.visualStyle.replace(/_/g, " ")} look.`,
+    `Candid UGC smartphone photo, vertical 9:16, ${identity.visualStyle.replace(/_/g, " ")} look, natural domestic light, natural skin texture.`,
     `${identity.appearance}, wearing a ${identity.wardrobe}, in a ${identity.environmentDescription}.`,
-    `The person holds the product from the reference image at chest height, naturally, looking at the camera.`,
+    `The person holds the product from the reference image at chest height in the right hand, relaxed and natural, looking at the camera; framed like a real video frame, not a posed ad.`,
     `The product is exactly the one in the reference photo: keep ${product.preserve.join(", ")}.`,
+    ...fidelityLines,
     `Product: ${product.name}.`,
-    `Fictional adult person, not a celebrity. No text overlays, no extra logos, no watermarks.`,
+    `Fictional synthetic adult person, not a celebrity.`,
+    `No text overlays, no slogans, no captions, no invented numbers or specifications, no changed or extra logos, no ad layout, no graphic elements, no watermarks.`,
   ].join(" ");
 }
 

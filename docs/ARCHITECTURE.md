@@ -248,3 +248,22 @@ Pré-requisito já atendido: ledger persistido em `ledger.jsonl`.
 - Render: `ManifestAsset.clipAudio` + guard de áudio duplicado; `OffthreadVideo` desmutado só em cenas com áudio próprio e o encoder preserva AAC quando a única fonte é o áudio nativo do clipe.
 - Durabilidade: referência e cena persistem intenção antes do POST; vídeo guarda `ugcVideoOperations` com operation ID, duração pedida e custo estimado. Retomada consulta/poll/download pelo ID, sem novo submit; timeout/cobrança incerta pausa.
 - UI: `application/ugc-view.ts`, `components/campaign/ugc-reference-panel.tsx`, cartões do storyboard com quem/segura/fala/faz.
+
+## Creative Editor V2 (Lote 5.6 / D91)
+
+```
+planner (mock | Claude campaign-plan@1.6.0) → hydrate
+  → ai/ugc-editorial.applyUgcEditorial   (A-roll/B-roll, overlay, cutReason, continuidade, catálogo → reference_detail)
+  → reviewCampaignPlan → jobs (editPlanVersion=2)
+ugc_reference → Product Fidelity Gate (domain/fidelity: pending → approved | needs_review | rejected; humano)
+ugc_video     → prompt com continuidade + fidelidade (ai/ugc-video-prompt, usado por Krea e Google)
+render        → render/edit-plan.buildEditPlan (puro: espinha de áudio dos A-rolls com handles,
+                overlays B-roll nas junções, visuais mudos, faixas de áudio sem sobreposição,
+                legendas V2, hook deliberado, CTA, usage gerado × usado)
+              → render/edit-manifest (RenderManifest.edit) → composition-props (EditProps em frames)
+              → remotion/compositions/EditedCreative (OffthreadVideo mudo + trimBefore; <Audio> do A-roll com fades)
+```
+
+- `domain/edit.ts`: `SceneEdit` (só no ScenePlan hidratado; o JSON do LLM não muda), `EditPlan` e `assertValidEditPlan` (cobertura contínua, motivo de corte, nenhum áudio sobreposto, B-roll nunca fonte de áudio).
+- `config/edit-policy.ts`: handles, fades, punch-in, janela do CTA, legenda e presets editoriais (`UGC_EDITORIAL_PLANS`).
+- Compatibilidade: sem `editPlanVersion`/`manifest.edit`, tudo segue pela montagem linear do Lote 3; `external_lipsync` também.

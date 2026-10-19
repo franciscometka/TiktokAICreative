@@ -8,6 +8,7 @@ import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { parseArgs } from "node:util";
 import { buildUgcReferencePrompt } from "../src/ai/ugc-script";
+import { fidelityPromptLines } from "../src/domain/fidelity";
 import { loadAppConfig } from "../src/config/env";
 import { withRealStageAuthorization } from "../src/config/execution-policy";
 import { PRICING_TABLE } from "../src/config/pricing";
@@ -86,7 +87,7 @@ async function main() {
   const id = randomId("ugcref").replace(/-/g, "").slice(0, 40).toLowerCase();
   const image = await new LocalUploadStore(config.uploadsDir).save(product.id, { bytes, size: bytes.byteLength, declaredType: mimeType });
   const anchor = productAnchor({ ...product, images: [{ id: image.id, uri: image.uri }] })!;
-  const prompt = buildUgcReferencePrompt(identity, anchor);
+  const prompt = buildUgcReferencePrompt(identity, anchor, fidelityPromptLines(anchor.fidelityConstraints ?? []));
   const now = () => new Date().toISOString();
   let intent: ValidationIntent = await intents.save({
     id, stage: "ugc_reference", model: pricing.model, status: "preparing", maxCostUsd: estimated, estimatedCostUsd: estimated,

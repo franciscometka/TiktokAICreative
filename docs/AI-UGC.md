@@ -58,3 +58,7 @@ Fonte: https://ai.google.dev/gemini-api/docs/pricing, consultada em 2026-10-16. 
 ## Falta para o real
 
 Executar o protocolo acima com instrução explícita, confirmar no primeiro uso o formato REST efetivo do Veo (`durationSeconds`, `inlineData`), o redirect de download e o usage/cobrança reais, e revisar política de pessoas/uso comercial. Ver [TASKS.md](TASKS.md).
+
+## Creative Editor V2 (Lote 5.6)
+
+UGC é editado como narrativa contínua, não concatenação de cenas independentes. A-rolls (ugc_*) formam a espinha de áudio; B-rolls `reference_detail` (recorte do frame aprovado, custo zero) cobrem as junções enquanto o áudio da apresentadora continua. A referência agora é pedida como frame real de UGC (sem texto, slogan, números inventados ou layout de anúncio) e os prompts de vídeo pedem realismo de smartphone, continuidade da cena anterior e fidelidade do produto. Antes das cenas, confirme na interface: "Verifique se produto, logo, textos e especificações continuam fiéis." Se algum texto ou número divergir (ex.: 3900 no lugar de 2100W), informe-o: a referência fica em revisão e nenhuma cena é gerada. Detalhes em D91.

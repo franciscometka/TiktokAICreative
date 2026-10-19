@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { FidelityConstraintSchema, ReferenceFidelitySchema, type FidelityStatus } from "./fidelity";
 import { ProviderDiagnosticSchema } from "./provider-diagnostic";
 
 /**
@@ -50,6 +51,8 @@ export const UgcRequestSchema = z.object({
   presenter: UgcPresenterChoiceSchema.default("auto"),
   environment: UgcEnvironmentChoiceSchema.default("auto"),
   visualStyle: UgcVisualStyleSchema.default("natural_smartphone"),
+  /** Estilo comercial EXPLÍCITO (Editor V2): só ele libera foto de catálogo como B-roll. */
+  commercialStyle: z.boolean().optional(),
   /** Preenchido pelo sistema no planejamento a partir do UGCVideoProvider escolhido. */
   audioStrategy: UgcAudioStrategySchema.optional(),
 });
@@ -103,6 +106,8 @@ export const UgcProductAnchorSchema = z.object({
   description: z.string(),
   /** O que NUNCA muda: cor, formato, logo, embalagem, proporções. */
   preserve: z.array(nonEmpty).min(1),
+  /** Editor V2: constraints de fidelidade derivadas dos dados do produto (textos, números, logo). */
+  fidelityConstraints: z.array(FidelityConstraintSchema).optional(),
 });
 export type UgcProductAnchor = z.infer<typeof UgcProductAnchorSchema>;
 
@@ -136,6 +141,8 @@ export const UgcReferenceSchema = z.object({
   actualCostUsd: z.number().nonnegative().optional(),
   error: z.string().optional(),
   diagnostic: ProviderDiagnosticSchema.optional(),
+  /** Product Fidelity Gate (Lote 5.6). Ausente em referências antigas = pendente de revisão. */
+  fidelity: ReferenceFidelitySchema.optional(),
   createdAt: nonEmpty,
   reviewedAt: z.string().optional(),
 });
@@ -217,6 +224,17 @@ export function approvedReference(state: UgcJobState | undefined): UgcReference 
   return state?.references.findLast(
     (r) => r.review === "approved" && r.state === "succeeded" && r.identityId === state.identity.id && r.identityRevision === state.identity.revision,
   );
+}
+
+/** Status de fidelidade (referências antigas sem revisão contam como pendentes). */
+export function referenceFidelityStatus(reference: Pick<UgcReference, "fidelity"> | undefined): FidelityStatus {
+  return reference?.fidelity?.status ?? "pending";
+}
+
+/** Só referência REAL com fidelidade APROVADA libera vídeo REAL. MOCK nunca libera REAL. */
+export function fidelityReleasesVideo(reference: Pick<UgcReference, "fidelity" | "isMock"> | undefined, mode: "mock" | "real"): boolean {
+  if (!reference || referenceFidelityStatus(reference) !== "approved") return false;
+  return mode === "mock" || !reference.isMock;
 }
 
 export function latestReference(state: UgcJobState | undefined): UgcReference | undefined {

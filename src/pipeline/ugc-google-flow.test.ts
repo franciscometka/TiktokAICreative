@@ -30,7 +30,7 @@ async function approvedReference(options: GoogleFakeOptions = {}) {
   const h = await googleHarness(options, true);
   expect((await h.run()).kind).toBe("WAITING_STAGE");
   const reference = (await h.job()).ugc!.references.at(-1)!;
-  return { ...h, approve: () => h.service.approveUgcReference(h.jobId, reference.id) };
+  return { ...h, approve: () => h.service.approveUgcReference(h.jobId, reference.id, { fidelityConfirmed: true }) };
 }
 
 describe("referência Gemini REAL (fetch falso)", () => {

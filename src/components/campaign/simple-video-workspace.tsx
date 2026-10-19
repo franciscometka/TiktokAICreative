@@ -9,6 +9,7 @@ import { formatBrl } from "@/lib/money";
 import { buttonClasses, cx, Notice, Panel, Spinner } from "@/components/ui/primitives";
 import { inputClasses } from "@/components/ui/field";
 import { UgcReferencePanel } from "./ugc-reference-panel";
+import type { UgcView } from "@/application/ugc-view";
 
 const SIMPLE_SOURCES: { value: VisualSource; label: string }[] = [
   { value: "presenter", label: "Apresentador" },
@@ -25,10 +26,34 @@ const UGC_SOURCES: { value: VisualSource; label: string }[] = [
   { value: "ugc_demo", label: "UGC · Demonstração" },
   { value: "ugc_benefit", label: "UGC · Benefício" },
   { value: "ugc_cta", label: "UGC · Chamada final" },
-  { value: "product_broll", label: "B-roll do produto" },
-  { value: "product_image", label: "Imagem do produto" },
-  { value: "text_card", label: "Texto" },
+  { value: "reference_detail", label: "B-roll · detalhe da referência" },
+  { value: "product_broll", label: "B-roll gerado (contexto)" },
 ];
+
+/**
+ * Storyboard V2 (AI UGC): o vídeo como UMA narrativa. A-roll = apresentadora falando; B-roll entra
+ * por cima do áudio dela, com o motivo do corte. Sem detalhe técnico (provider, frames, handles).
+ */
+function EditorialTimeline({ ugc }: { ugc: UgcView }) {
+  return (
+    <ol className="mt-5 space-y-2" aria-label="Storyboard editorial">
+      {ugc.editorial.map((item) => (
+        <li key={item.sceneId} className={cx("grid gap-1 rounded-lg border p-3 text-sm sm:grid-cols-[7rem_5.5rem_1fr]", item.roleLabel === "A-ROLL" ? "border-emerald-200 bg-emerald-50/50" : "ml-6 border-amber-200 bg-amber-50/50")}>
+          <span className="font-medium text-zinc-900 tabular">{item.range}</span>
+          <span className={cx("text-xs font-semibold tracking-wide", item.roleLabel === "A-ROLL" ? "text-emerald-800" : "text-amber-800")}>{item.roleLabel}</span>
+          <div className="space-y-0.5">
+            {item.speech ? <p className="text-zinc-900">“{item.speech}”</p> : <p className="text-zinc-700">{item.visual}</p>}
+            {item.speech && <p className="text-xs text-zinc-500">{item.visual}</p>}
+            {item.audioNote && <p className="text-xs text-zinc-500">{item.audioNote}</p>}
+            <p className="text-xs text-zinc-500">Corte: {item.cutReasonLabel} · {item.durationLabel} · {item.status}</p>
+            {item.continuity && <p className="text-xs text-zinc-400">Continuidade: {item.continuity}</p>}
+            {ugc.usage.find((u) => u.sceneId === item.sceneId) && <p className="text-xs text-zinc-500 tabular">{ugc.usage.find((u) => u.sceneId === item.sceneId)!.label}</p>}
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
 
 export function SimpleVideoWorkspace({ campaignId, creative, productImages }: { campaignId: string; creative: CreativeView; productImages: ImageView[] }) {
   const router = useRouter();
@@ -60,13 +85,15 @@ export function SimpleVideoWorkspace({ campaignId, creative, productImages }: { 
           <p className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white tabular">{creative.durationSeconds.toFixed(0)} segundos</p>
         </div>
 
-        <div className="mt-5 flex overflow-hidden rounded-full bg-zinc-200" aria-label="Timeline do storyboard">
+        {creative.ugc && creative.ugc.editorial.length > 0 && <EditorialTimeline ugc={creative.ugc} />}
+
+        {!(creative.ugc && creative.ugc.editorial.length > 0) && <div className="mt-5 flex overflow-hidden rounded-full bg-zinc-200" aria-label="Timeline do storyboard">
           {creative.scenes.map((scene, index) => (
             <div key={scene.id} className={cx("min-w-14 border-r border-white/70 px-2 py-2 text-center text-[11px] font-semibold", scene.visualSource === "presenter" || scene.ugc && scene.visualSource.startsWith("ugc_") ? "bg-emerald-300 text-emerald-950" : index % 2 ? "bg-amber-200 text-amber-950" : "bg-sky-200 text-sky-950")} style={{ flexGrow: scene.endSeconds - scene.startSeconds }}>
               {scene.number} · {(scene.endSeconds - scene.startSeconds).toFixed(0)}s
             </div>
           ))}
-        </div>
+        </div>}
 
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           {creative.scenes.map((scene, index) => (

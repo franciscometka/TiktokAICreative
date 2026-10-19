@@ -268,3 +268,17 @@ Guia: [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md).
 - [ ] Validar UMA referência real na Krea — aguardando instrução; não gerar vídeo nessa primeira validação
 - [x] Auditoria pré-REAL: CLI escolhe Krea, dry-run zero rede/escrita, asset durável/reutilizável, UUID/result.urls atuais, download HTTPS com redirects seguros, readiness de modelo/preço e janelas de crash cobertas offline
 - [ ] Executar somente UMA referência Krea real e revisar visualmente; vídeo continua bloqueado até essa aprovação
+
+## Lote 5.6 — Creative Editor V2 ✅ (sem chamada paga)
+- [x] Modelo editorial A-roll (espinha de áudio) + B-roll overlay com motivo de corte, transição discreta e continuidade encadeada (D91)
+- [x] Edit Plan puro: handles (sourceIn/sourceOut), visual × áudio separados, áudio contínuo sem duplicação, L/J cut nas junções, punch-in sutil
+- [x] Remotion `tiktok-creative@1.3.0` (`EditedCreative`): vídeo mudo com trim, áudio do A-roll com micro fades/ganho, legenda V2, CTA pequeno sobre a apresentadora
+- [x] Catálogo proibido por padrão; B-roll `reference_detail` (frame aprovado, custo zero); `commercialStyle` explícito
+- [x] Product Fidelity Gate (pending/approved/rejected/needs_review), UI de confirmação e bloqueio do vídeo
+- [x] Prompts de realismo/continuidade (Krea e Google) e `campaign-plan@1.6.0`
+- [x] Presets revisados (2/3/4 A-rolls; 1/2/3 B-rolls); cotação pelos A-rolls; "gerados · usados" no storyboard
+- [x] Compatibilidade: planos/manifests/referências antigos continuam válidos; `external_lipsync` segue linear
+- [x] Testes offline (edit plan, fidelidade, continuidade, pipeline Krea falso, compatibilidade); caso de render V2 no `npm run test:render`
+- [ ] Rodar `npm run test:render` numa máquina com o navegador do Remotion (não instalado neste PC)
+- [ ] Validação REAL: 1 referência Krea + revisão de fidelidade; depois 1 vídeo Equilibrado completo e revisão visual (handles, L/J cut, legibilidade, CTA)
+- [ ] Futuro: verificador visual/OCR preenchendo `observedTexts`; alinhamento de fala (STT) para legendas e cortes em silêncio reais; B-roll gerado contextual via provider UGC a partir do frame aprovado

@@ -165,6 +165,8 @@ export function toUserError(error: unknown): UserError {
     console.error("[render: asset corrompido]", error.message);
     return make("corrupted", "Imagem corrompida", "Uma imagem do produto não pôde ser lida. Remova e envie de novo.");
   }
+  // Product Fidelity Gate: a mensagem já é para o usuário (sem dados sensíveis).
+  if (named(error, "UgcFidelityError")) return make("invalid_state", "Fidelidade do produto", error.message);
   if (named(error, "UploadValidationError")) return make("upload", "Imagem recusada", error.message);
   if (named(error, "InvalidUploadPathError")) return make("upload", "Imagem recusada", "Referência de imagem inválida.");
 

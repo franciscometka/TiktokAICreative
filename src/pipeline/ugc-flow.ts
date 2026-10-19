@@ -6,8 +6,10 @@ import type { CostLedger } from "@/costs/ledger";
 import type { CreativePlan, ScenePlan } from "@/domain/creative";
 import { checkClipDuration, clipRejectionMessage } from "@/domain/media-integrity";
 import type { Campaign, GenerationJob, MediaAttempt } from "@/domain/pipeline";
+import { fidelityPromptLines, initialFidelity } from "@/domain/fidelity";
 import {
   approvedReference,
+  fidelityReleasesVideo,
   isUgcPersonSource,
   UgcRequestSchema,
   type UgcAudioStrategy,
@@ -37,6 +39,19 @@ import { presenterPreview } from "./presenter-flow";
 export class UgcReferenceRequiredError extends Error {
   override name = "UgcReferenceRequiredError";
 }
+/** Fidelidade do produto não confirmada ou com conflito conhecido: nada segue automaticamente. */
+export class UgcFidelityError extends Error {
+  override name = "UgcFidelityError";
+}
+
+/** Revisão humana da referência (Product Fidelity Gate). */
+export interface UgcFidelityReview {
+  fidelityConfirmed: boolean;
+  /** Textos/números divergentes vistos na imagem (ex.: "3900"). */
+  observedTexts?: string[];
+  note?: string;
+}
+
 export class UgcPendingError extends Error {
   override name = "UgcPendingError";
 }
@@ -108,7 +123,8 @@ export async function generateUgcReference(
   if (uncertain && (uncertain.state === "uncertain" || (!uncertain.providerJobId && (!provider.prepare || paidSubmissionStarted)))) {
     throw new UgcPendingError("Envio anterior da referência sem ID confirmado; possível cobrança. Nenhum novo envio será feito.");
   }
-  const prompt = buildUgcReferencePrompt(state.identity, state.product);
+  const constraints = state.product.fidelityConstraints ?? [];
+  const prompt = buildUgcReferencePrompt(state.identity, state.product, fidelityPromptLines(constraints));
   const estimatedCostUsd = provider.estimateCost().costUsd;
   if (!uncertain) assertWithinApproved(estimatedCostUsd, input.maxCostUsd);
 
@@ -133,6 +149,7 @@ export async function generateUgcReference(
       prompt,
       product: state.product,
       estimatedCostUsd,
+      fidelity: initialFidelity(constraints),
       inputHash: ugcInputHash({ stage: "ugc_reference", jobId: job.id, model: provider.descriptor.model, prompt, productImageId: state.product.imageId, identityId: state.identity.id, identityRevision: state.identity.revision }),
       ...(input.maxCostUsd === undefined ? {} : { maxApprovedCostUsd: input.maxCostUsd }),
       createdAt: deps.clock(),
@@ -208,6 +225,10 @@ export async function generateUgcScene(
   const reference = approvedReference(state);
   if (!state || !reference?.imageUri) throw new UgcReferenceRequiredError("Nenhuma cena UGC é gerada antes de existir uma referência aprovada.");
   if (!provider.descriptor.isMock && reference.isMock) throw new UgcReferenceRequiredError("A referência aprovada é simulada (MOCK); gere uma referência real antes das cenas UGC.");
+  // Product Fidelity Gate: sem revisão de fidelidade aprovada, nenhuma cena é enviada.
+  if (!fidelityReleasesVideo(reference, provider.descriptor.isMock ? "mock" : "real")) {
+    throw new UgcReferenceRequiredError("Confirme a fidelidade do produto na referência (logo, textos, números e especificações) antes de gerar as cenas.");
+  }
   if (provider.audioStrategy !== state.audioStrategy) throw new Error("O provider UGC mudou de estratégia de áudio; crie uma cópia do projeto para replanejar.");
 
   let audio: UgcVideoRequest["audio"];
@@ -224,6 +245,8 @@ export async function generateUgcScene(
     sceneId: scene.id, role: scene.visualSource, reference: { id: reference.id, version: reference.version, imageUri: reference.imageUri, approved: true },
     identity: state.identity, product: state.product, speech: scene.narration, action: scene.videoDirection?.subjectAction || UGC_ROLE_ACTIONS[scene.visualSource],
     durationSeconds: audio ? audio.endSeconds - audio.startSeconds : scene.estimatedGenerationSeconds, aspectRatio: "9:16", audio,
+    ...(scene.edit?.continuity ? { continuity: scene.edit.continuity } : {}),
+    fidelity: fidelityPromptLines(state.product.fidelityConstraints ?? []),
     ...(provider.capabilities?.supportsReferenceImages ? { additionalReferenceUris: [state.product.imageUri] } : {}),
   };
   const previous = job.scenes.find((s) => s.sceneId === scene.id)?.attempts ?? [];

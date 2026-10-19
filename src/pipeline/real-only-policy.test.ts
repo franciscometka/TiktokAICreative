@@ -90,7 +90,7 @@ describe("fluxo REAL-only no pipeline", () => {
   it("referência MOCK não pode ser aprovada (servidor e UI)", async () => {
     const h = await oldMockJob();
     const strict = h.build({ allowMocks: false });
-    await expect(strict.approveUgcReference(h.jobId, h.reference.id)).rejects.toThrow(/simulada/);
+    await expect(strict.approveUgcReference(h.jobId, h.reference.id, { fidelityConfirmed: true })).rejects.toThrow(/simulada/);
     const deps = { service: strict, uploads: new LocalUploadStore(h.config.uploadsDir), rendersDir: h.config.rendersDir, audioDir: h.config.audioDir, allowMocks: false } as AppDeps;
     const view = await getCampaignView(deps, h.campaign.id);
     if (!view.ok) throw new Error(view.error.message);
@@ -117,7 +117,7 @@ describe("fluxo REAL-only no pipeline", () => {
     expect(references.map(r => r.isMock)).toEqual([true, false]);
     expect(references[0]!.id).toBe(h.reference.id); // histórico MOCK preservado
     // A real é a que aguarda aprovação; aprovar a real é permitido.
-    const approved = await strict.approveUgcReference(h.jobId, references[1]!.id);
+    const approved = await strict.approveUgcReference(h.jobId, references[1]!.id, { fidelityConfirmed: true });
     expect(approved.job.ugc!.references[1]!.review).toBe("approved");
   });
 

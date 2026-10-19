@@ -161,13 +161,14 @@ export async function updateStoryboardSceneAction(input: unknown): Promise<Actio
 // ---------------------------------------------------------------- AI UGC (Lote 5.3)
 
 export async function approveUgcReferenceAction(input: unknown): Promise<ActionResult<{ resumed: boolean }>> {
-  const parsed = z.object({ jobId: id, referenceId: id }).safeParse(input);
+  // Product Fidelity Gate: confirmação humana explícita + textos divergentes opcionais (sem caminhos).
+  const parsed = z.object({ jobId: id, referenceId: id, fidelityConfirmed: z.boolean(), observedTexts: z.array(z.string().trim().min(1).max(80)).max(20).optional(), note: z.string().max(300).optional() }).safeParse(input);
   if (!parsed.success) return badInput();
   return approveUgcReference(getRuntime().deps, parsed.data);
 }
 
 export async function regenerateUgcReferenceAction(input: unknown): Promise<ActionResult<{ resumed: boolean }>> {
-  const parsed = z.object({ jobId: id }).safeParse(input);
+  const parsed = z.object({ jobId: id, fidelityRejection: z.object({ observedTexts: z.array(z.string().trim().min(1).max(80)).max(20).optional(), note: z.string().max(300).optional() }).optional() }).safeParse(input);
   if (!parsed.success) return badInput();
   return regenerateUgcReference(getRuntime().deps, parsed.data);
 }

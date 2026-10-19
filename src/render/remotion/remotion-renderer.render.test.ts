@@ -104,6 +104,45 @@ describe("RemotionRenderer (render real curto)", () => {
     expect(saved.props.audio[0].src).toBe(`asset:${audioUri}`);
   }, 600_000);
 
+  it("Editor V2: A-rolls contínuos (áudio do clipe) + B-roll overlay do frame de referência → MP4 com AAC", async () => {
+    // 1) Clipe-fonte REAL local (h264 + AAC) gerado pelo próprio Remotion a partir de fixtures.
+    const base = await fixture();
+    const audioUri = `${UPLOADS.replaceAll("\\", "/")}/prod_test/aroll_fixture.wav`;
+    await writeFile(audioUri, makeWav(3));
+    const source = await new RemotionRenderer({ rendersDir: RENDERS, allowedAssetRoots: [UPLOADS], browserExecutable: process.env.RENDER_BROWSER_EXECUTABLE ?? null }).render(RenderManifestSchema.parse({
+      ...base, creativeId: "creative_aroll_source", output: { ...base.output, path: `${RENDERS}/campaign_render_test/creative_aroll_source` },
+      audio: [{ kind: "narration", uri: audioUri, startSeconds: 0, durationSeconds: 3, isMock: false }],
+    }));
+    // 2) Dois A-rolls (mesmo arquivo) + referência PNG; plano editorial do mock Econômico.
+    const videos = join(ROOT, "videos");
+    await mkdir(videos, { recursive: true });
+    const clipUri = `${videos.replaceAll("\\", "/")}/aroll.mp4`;
+    await writeFile(clipUri, await readFile(source.outputUri));
+    const referenceUri = `${UPLOADS.replaceAll("\\", "/")}/prod_test/reference.png`;
+    await writeFile(referenceUri, makePng(1080, 1920));
+    const { buildMockDraft } = await import("@/ai/mock-planner");
+    const { hydrateCampaignPlan } = await import("@/ai/hydrate");
+    const { applyUgcEditorial } = await import("@/ai/ugc-editorial");
+    const { SIMPLE_UGC_QUALITY_PRESETS } = await import("@/config/simple-presets");
+    const { buildEditedRenderManifest } = await import("../edit-manifest");
+    const { product } = await import("@/test/fixtures");
+    const settings = SIMPLE_UGC_QUALITY_PRESETS.economy;
+    const draft = buildMockDraft({ product: product(), styles: ["ugc"], creativeCount: 1, settings, creativeMode: "ai_ugc", ugcAudioStrategy: "native_speech" });
+    let n = 0;
+    const plan = applyUgcEditorial(hydrateCampaignPlan(draft, product(), (prefix) => `${prefix}_${++n}`).creatives[0]!, { quality: "economy", finalRange: settings.finalVideoSeconds }).plan;
+    const clips = new Map(plan.scenes.filter((s) => s.edit?.role === "aroll").map((s) => [s.id, { uri: clipUri, actualSeconds: 3, generatedSeconds: 4 }]));
+    const manifest = buildEditedRenderManifest({ campaignId: "campaign_render_test", plan: { ...plan, id: "creative_render_v2" }, product: product(), clips, referenceImageUri: referenceUri, outputDir: ROOT.replaceAll("\\", "/") });
+    const renderer = new RemotionRenderer({ rendersDir: RENDERS, allowedAssetRoots: [UPLOADS, videos], browserExecutable: process.env.RENDER_BROWSER_EXECUTABLE ?? null });
+    const result = await renderer.render(manifest);
+    const meta = await getVideoMetadata(result.outputUri);
+    expect(meta.durationInSeconds).toBeGreaterThan(manifest.edit!.durationSeconds - 0.1);
+    expect(meta.durationInSeconds).toBeLessThan(manifest.edit!.durationSeconds + 0.1);
+    expect(meta.audioCodec).toBe("aac"); // áudio vem do A-roll (fala nativa), sem narração separada
+    const saved = JSON.parse(await readFile(result.manifestUri!, "utf8"));
+    expect(saved.props.edit.visuals.some((v: { role: string }) => v.role === "broll")).toBe(true);
+    expect(saved.props.edit.audio).toHaveLength(2);
+  }, 900_000);
+
   it("recusa asset fora das pastas autorizadas sem gerar arquivo", async () => {
     const manifest = await fixture();
     const evil = { ...manifest, assets: manifest.assets.map((a, i) => (i === 1 ? { ...a, uri: "package.json" } : a)) };

@@ -1,10 +1,14 @@
+import { previewEditorialTimeline } from "@/ai/ugc-editorial";
 import { UGC_ROLE_ACTIONS } from "@/ai/ugc-script";
+import type { CutReason } from "@/domain/edit";
+import type { FidelityConstraint, FidelityStatus } from "@/domain/fidelity";
 import { UGC_ENVIRONMENT_LABELS } from "@/config/ugc";
 import type { ScenePlan } from "@/domain/creative";
 import type { Campaign, GenerationJob } from "@/domain/pipeline";
 import {
   approvedReference,
   isUgcPersonSource,
+  referenceFidelityStatus,
   latestReference,
   UGC_ENVIRONMENTS,
   type UgcEnvironment,
@@ -56,6 +60,41 @@ export interface UgcView {
   canChangeIdentity: boolean;
   environments: { id: UgcEnvironment; label: string }[];
   attemptsUsed: number;
+  /** Product Fidelity Gate da referência atual/aprovada. */
+  fidelity?: { status: FidelityStatus; statusLabel: string; checklist: string[]; conflicts: string[] };
+  /** Referência já aprovada (ex.: projeto antigo) cuja fidelidade ainda não foi confirmada. */
+  canConfirmFidelity: boolean;
+  /** Storyboard V2: trechos A-roll/B-roll na timeline final planejada. */
+  editorial: EditorialItemView[];
+  /** Depois do render V2: segundos gerados (pagos) × usados no corte, por clipe. */
+  usage: { sceneId: string; label: string }[];
+}
+
+export interface EditorialItemView {
+  sceneId: string;
+  roleLabel: "A-ROLL" | "B-ROLL";
+  range: string;
+  durationLabel: string;
+  speech: string;
+  visual: string;
+  cutReasonLabel: string;
+  audioNote: string | null;
+  continuity: string | null;
+  status: string;
+}
+
+const CUT_REASON_LABELS: Record<CutReason, string> = {
+  opening: "Abertura", sentence_boundary: "Fim de frase", action_match: "Continua o gesto", product_reveal: "Mostra o produto",
+  detail_emphasis: "Destaca um detalhe", hand_occlusion: "Mão passa pela câmera", camera_motion: "Movimento de câmera",
+  hook_emphasis: "Reforça o gancho", cta_return: "Volta para a chamada final",
+};
+
+const FIDELITY_LABELS: Record<FidelityStatus, string> = { pending: "Aguardando revisão", approved: "Fiel ao produto", rejected: "Reprovada", needs_review: "Divergência encontrada" };
+
+const seconds = (n: number) => `${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(n)}s`;
+
+function checklistFor(constraints: readonly FidelityConstraint[]): string[] {
+  return constraints.map((c) => c.kind === "number" || c.kind === "model" ? `Texto/número exato: ${c.expected}` : c.kind === "text" ? `Nome: ${c.expected}` : c.expected);
 }
 
 export interface UgcSceneInfo {
@@ -98,6 +137,28 @@ export function buildUgcView(input: {
   const ugcScenesExist = job.scenes.some((s) => s.attempts.some((a) => a.ugc));
   const awaitingApproval = current?.state === "succeeded" && current.review === "pending";
   const identity = state.identity;
+  const reviewed = current ?? approved;
+  const constraints = reviewed?.fidelity?.constraints ?? state.product.fidelityConstraints ?? [];
+  const fidelityStatus = referenceFidelityStatus(reviewed);
+  const plan = campaign.plan?.creatives.find((c) => c.id === input.creativeId);
+  const sceneState = (sceneId: string) => {
+    const attempts = job.scenes.find((s) => s.sceneId === sceneId)?.attempts ?? [];
+    const last = attempts[attempts.length - 1];
+    return !last ? "Planejado" : last.status === "succeeded" ? "Gerado" : last.status === "failed" ? "Falhou" : "Em andamento";
+  };
+  const editorial: EditorialItemView[] = plan ? previewEditorialTimeline(plan).map((item) => ({
+    sceneId: item.sceneId,
+    roleLabel: item.role === "aroll" ? "A-ROLL" : "B-ROLL",
+    range: `${seconds(item.startSeconds)}–${seconds(item.endSeconds)}`,
+    durationLabel: seconds(item.endSeconds - item.startSeconds),
+    speech: item.speech,
+    visual: item.visual,
+    cutReasonLabel: CUT_REASON_LABELS[item.cutReason],
+    audioNote: item.role === "broll" ? "Áudio continua da apresentadora" : null,
+    continuity: item.continuity ?? null,
+    status: item.role === "broll" ? "Sem custo extra (frame da referência)" : sceneState(item.sceneId),
+  })) : [];
+  const usage = (job.manifest?.edit?.usage ?? []).map((u) => ({ sceneId: u.sceneId, label: `${seconds(u.generatedSeconds)} gerados · ${seconds(u.usedSeconds)} usados` }));
   return {
     headline: "Esta será a pessoa apresentando seu produto",
     historicalSimulation: false,
@@ -125,6 +186,10 @@ export function buildUgcView(input: {
     canChangeIdentity: !input.active && !ugcScenesExist,
     environments: UGC_ENVIRONMENTS.map((id) => ({ id, label: UGC_ENVIRONMENT_LABELS[id].label })),
     attemptsUsed: state.references.length,
+    fidelity: reviewed ? { status: fidelityStatus, statusLabel: FIDELITY_LABELS[fidelityStatus], checklist: checklistFor(constraints), conflicts: (reviewed.fidelity?.conflicts ?? []).map((c) => `esperado ${c.expected}, observado ${c.observed}`) } : undefined,
+    canConfirmFidelity: !input.active && !!approved && current?.id === approved.id && fidelityStatus !== "approved",
+    editorial,
+    usage,
   };
 }
 
@@ -144,6 +209,9 @@ export function ugcSceneInfo(scene: ScenePlan, job: GenerationJob | undefined): 
   if (!state) return undefined;
   const person = isUgcPersonSource(scene.visualSource);
   const gender = state.identity.gender === "woman" ? "A mesma apresentadora" : "O mesmo apresentador";
+  if (scene.visualSource === "reference_detail") {
+    return { role: "B-roll · detalhe", who: "Detalhe do produto na mão (frame da referência aprovada)", holding: state.product.name, speech: "Sem fala própria: o áudio da apresentadora continua", action: scene.edit?.detail ?? scene.visualDescription };
+  }
   return {
     role: ROLE_LABELS[scene.visualSource] ?? scene.visualSource,
     who: person ? `${gender} da referência (${state.identity.wardrobe})` : "Ninguém — só o produto",

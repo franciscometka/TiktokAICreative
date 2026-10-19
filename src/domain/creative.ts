@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { EDIT_PLAN_VERSION, SceneEditSchema } from "./edit";
 
 /**
  * Dois níveis de schema:
@@ -53,6 +54,8 @@ export const VISUAL_SOURCES = [
   "screenshot",
   "simple_background",
   "existing_asset",
+  /** Editor V2 (AI UGC): B-roll recortado do FRAME de referência aprovado (custo zero). */
+  "reference_detail",
 ] as const;
 export const VisualSourceSchema = z.enum(VISUAL_SOURCES);
 export type VisualSource = z.infer<typeof VisualSourceSchema>;
@@ -155,17 +158,19 @@ export const ScenePlanDraftSchema = sceneShape.superRefine(checkSceneRules);
 export type ScenePlanDraft = z.infer<typeof ScenePlanDraftSchema>;
 
 export const ScenePlanSchema = sceneShape
-  .extend({ id: nonEmpty, order: z.int().nonnegative() })
+  /** Editor V2: papel A-roll/B-roll, motivo do corte e continuidade (ausente em planos antigos). */
+  .extend({ id: nonEmpty, order: z.int().nonnegative(), edit: SceneEditSchema.optional() })
   .superRefine(checkSceneRules);
 export type ScenePlan = z.infer<typeof ScenePlanSchema>;
 
 // ---------- Creative ----------
 
 function checkDurationsMatch(
-  creative: { duration: number; scenes: { duration: number }[] },
+  creative: { duration: number; scenes: { duration: number; edit?: { overlay: boolean } }[] },
   ctx: z.RefinementCtx,
 ): void {
-  const total = creative.scenes.reduce((sum, s) => sum + s.duration, 0);
+  // B-roll overlay (Editor V2) fica por cima do áudio do A-roll e não soma na duração.
+  const total = creative.scenes.filter((s) => !s.edit?.overlay).reduce((sum, s) => sum + s.duration, 0);
   if (Math.abs(total - creative.duration) > DURATION_TOLERANCE_SECONDS) {
     ctx.addIssue({
       code: "custom",
@@ -198,6 +203,8 @@ export const CreativePlanSchema = z
     script: nonEmpty,
     scenes: z.array(ScenePlanSchema).min(1),
     callToAction: nonEmpty,
+    /** 2 = Creative Editor V2 (A-roll contínuo + B-roll overlay). Ausente = montagem linear antiga. */
+    editPlanVersion: z.literal(EDIT_PLAN_VERSION).optional(),
   })
   .superRefine((creative, ctx) => {
     checkDurationsMatch(creative, ctx);

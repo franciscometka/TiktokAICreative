@@ -14,6 +14,9 @@ export function UgcReferencePanel({ jobId, ugc, running }: { jobId: string | und
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string>();
+  const [fidelityChecked, setFidelityChecked] = useState(false);
+  const [observed, setObserved] = useState("");
+  const observedTexts = observed.split(/[,;\n]/).map((t) => t.trim()).filter(Boolean).slice(0, 20);
   const reference = ugc.current;
   const disabled = pending || running || !jobId;
 
@@ -56,10 +59,32 @@ export function UgcReferencePanel({ jobId, ugc, running }: { jobId: string | und
             <div><dt className="text-xs text-zinc-500">Ambiente</dt><dd className="mt-0.5 font-medium">{ugc.person.environmentLabel}</dd></div>
             <div><dt className="text-xs text-zinc-500">Áudio</dt><dd className="mt-0.5 font-medium">{ugc.audioStrategyLabel}</dd></div>
           </dl>
+          {ugc.fidelity && (ugc.canApprove || ugc.canConfirmFidelity || ugc.fidelity.status !== "pending") && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-4 text-sm">
+              <p className="font-medium text-zinc-900">Fidelidade do produto · <span className="text-zinc-600">{ugc.fidelity.statusLabel}</span></p>
+              <p className="mt-1 text-zinc-700">Verifique se produto, logo, textos e especificações continuam fiéis.</p>
+              <ul className="mt-2 list-disc space-y-0.5 pl-5 text-xs text-zinc-600">
+                {ugc.fidelity.checklist.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+              {ugc.fidelity.conflicts.length > 0 && <p className="mt-2 text-xs font-medium text-red-700">Divergência: {ugc.fidelity.conflicts.join("; ")}. A geração não segue automaticamente.</p>}
+              {(ugc.canApprove || ugc.canConfirmFidelity) && (
+                <div className="mt-3 space-y-2">
+                  <label className="flex items-start gap-2 text-zinc-800">
+                    <input type="checkbox" className="mt-0.5" checked={fidelityChecked} disabled={disabled} onChange={(e) => setFidelityChecked(e.target.checked)} />
+                    Conferi: o produto, o logo, os textos e os números estão iguais ao original.
+                  </label>
+                  <label className="block text-xs text-zinc-600">Algum texto ou número diferente na imagem? (opcional, ex.: 3900)
+                    <input type="text" maxLength={200} disabled={disabled} value={observed} onChange={(e) => setObserved(e.target.value)} className="mt-1 block w-full rounded-md border border-zinc-300 p-2 text-sm" />
+                  </label>
+                  <p className="text-xs text-zinc-500">A revisão é sua: o sistema ainda não lê textos da imagem automaticamente.</p>
+                </div>
+              )}
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
-            {ugc.canApprove && reference && (
-              <button type="button" className={buttonClasses("primary", "md")} disabled={disabled} onClick={() => run("Referência aprovada. A geração continua dentro do mesmo teto.", () => approveUgcReferenceAction({ jobId, referenceId: reference.id }))}>
-                {pending && <Spinner />}Aprovar esta pessoa
+            {(ugc.canApprove || ugc.canConfirmFidelity) && reference && (
+              <button type="button" className={buttonClasses("primary", "md")} disabled={disabled || !fidelityChecked} onClick={() => run("Referência aprovada com fidelidade confirmada. A geração continua dentro do mesmo teto.", () => approveUgcReferenceAction({ jobId, referenceId: reference.id, fidelityConfirmed: fidelityChecked, ...(observedTexts.length ? { observedTexts } : {}) }))}>
+                {pending && <Spinner />}{ugc.canConfirmFidelity ? "Confirmar fidelidade" : "Aprovar esta pessoa"}
               </button>
             )}
             {ugc.canGenerateReal && (
@@ -68,7 +93,7 @@ export function UgcReferencePanel({ jobId, ugc, running }: { jobId: string | und
               </button>
             )}
             {ugc.canRegenerate && !ugc.historicalSimulation && (
-              <button type="button" className={buttonClasses("secondary", "md")} disabled={disabled} onClick={() => run("Nova referência solicitada (nova versão, novo custo dentro do teto).", () => regenerateUgcReferenceAction({ jobId }))}>
+              <button type="button" className={buttonClasses("secondary", "md")} disabled={disabled} onClick={() => run("Nova referência solicitada (nova versão, novo custo dentro do teto).", () => regenerateUgcReferenceAction({ jobId, ...(observedTexts.length ? { fidelityRejection: { observedTexts } } : {}) }))}>
                 Gerar outra referência
               </button>
             )}

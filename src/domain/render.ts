@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { EditPlanSchema } from "./edit";
 import { MotionSchema, ShotTypeSchema, TransitionSchema, VisualSourceSchema } from "./creative";
 
 const nonEmpty = z.string().trim().min(1);
@@ -111,6 +112,8 @@ export const RenderManifestSchema = z.object({
   }),
   /** Avisos conhecidos na montagem (ex.: cena de IA mock). */
   warnings: z.array(RenderWarningSchema).default([]),
+  /** Creative Editor V2: edição final (A-roll contínuo + B-roll overlay). Ausente = montagem linear antiga. */
+  edit: EditPlanSchema.optional(),
 });
 export type RenderManifest = z.infer<typeof RenderManifestSchema>;
 

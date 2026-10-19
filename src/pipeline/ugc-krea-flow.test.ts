@@ -54,7 +54,7 @@ describe("AI UGC via Krea no pipeline (fetch falso)", () => {
     const h = await kreaHarness({}, true);
     expect((await h.run()).kind).toBe("WAITING_STAGE");
     const reference = (await h.job()).ugc!.references.at(-1)!;
-    const resumed = await h.service.approveUgcReference(h.jobId, reference.id);
+    const resumed = await h.service.approveUgcReference(h.jobId, reference.id, { fidelityConfirmed: true });
     const outcome = await resumed.completion!;
     expect(outcome.kind).not.toBe("FAILED");
     const job = await h.job();

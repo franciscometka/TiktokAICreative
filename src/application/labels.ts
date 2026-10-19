@@ -27,6 +27,7 @@ export const VISUAL_SOURCE_NAMES: Record<VisualSource, string> = {
   product_hero: "Produto em destaque", product_demo: "Produto em uso", lifestyle: "Contexto de uso", presenter: "Apresentador", product_ugc: "Pessoa com produto",
   ugc_hook: "UGC · Gancho", ugc_demo: "UGC · Demonstração", ugc_benefit: "UGC · Benefício", ugc_cta: "UGC · Chamada final", product_broll: "B-roll do produto",
   product_image: "Imagem do produto",
+  reference_detail: "B-roll · detalhe da referência",
   text_card: "Texto na tela",
   screenshot: "Captura de tela",
   simple_background: "Fundo simples",

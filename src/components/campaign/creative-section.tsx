@@ -15,6 +15,7 @@ const SOURCE_TONE: Record<VisualSource, Tone> = {
   simple_background: "neutral",
   screenshot: "sky",
   existing_asset: "teal",
+  reference_detail: "teal",
 };
 
 const SOURCE_BAR: Record<VisualSource, string> = {
@@ -26,6 +27,7 @@ const SOURCE_BAR: Record<VisualSource, string> = {
   simple_background: "bg-zinc-300",
   screenshot: "bg-sky-500",
   existing_asset: "bg-teal-500",
+  reference_detail: "bg-teal-300",
 };
 
 function range(scene: SceneView): string {

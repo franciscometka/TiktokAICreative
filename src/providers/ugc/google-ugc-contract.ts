@@ -4,6 +4,7 @@ import {
   type VeoModelConfig,
   veoRequestedDuration,
 } from "@/config/ugc-models";
+import { buildUgcVideoPrompt } from "@/ai/ugc-video-prompt";
 import type { UgcReferenceRequest, UgcVideoRequest } from "./ugc-providers";
 
 /** Builders puros: URIs locais ainda serão convertidas em bytes/inlineData pelo transporte futuro. */
@@ -73,7 +74,7 @@ export function buildVeoUgcVideoRequest(request: UgcVideoRequest, model: VeoMode
   return {
     provider: GOOGLE_UGC_PROVIDER,
     model: model.model,
-    prompt: `${request.action}. Keep the same adult synthetic person, face, hair, wardrobe, environment and exact product identity. Preserve product shape, colors, logo, packaging and proportions. The person says naturally in Brazilian Portuguese: "${request.speech}"`,
+    prompt: buildUgcVideoPrompt({ action: request.action, speech: request.speech, continuity: request.continuity, fidelity: request.fidelity }),
     image: {
       sourceUri: request.reference.imageUri,
       approvedReferenceId: request.reference.id,

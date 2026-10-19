@@ -4,7 +4,10 @@ import { fitSpeech } from "@/ai/mock-ugc-planner";
 import { PRICING_TABLE } from "@/config/pricing";
 import { SIMPLE_UGC_QUALITY_PRESETS } from "@/config/simple-presets";
 import { ugcVeoPreset } from "@/config/ugc-models";
-import { productAnchor, resolveUgcIdentity, suggestEnvironment, UGC_PRESET_PLANS } from "@/config/ugc";
+import { productAnchor, resolveUgcIdentity, suggestEnvironment } from "@/config/ugc";
+import { UGC_EDITORIAL_PLANS } from "@/config/edit-policy";
+import { applyUgcEditorial } from "./ugc-editorial";
+import { campaignPlanPromptV1_6_0 } from "./prompts/campaign-plan.v1_6_0";
 import { estimateCreativeCost, resolvePricing } from "@/costs/calculate";
 import { StaticPricingCatalog } from "@/costs/pricing-catalog";
 import { hydrateCampaignPlan } from "@/ai/hydrate";
@@ -22,7 +25,9 @@ const p = product();
 function ugcPlan(quality: "economy" | "high" | "premium", strategy: "native_speech" | "external_lipsync" = "native_speech") {
   const draft = buildMockDraft({ product: p, styles: ["ugc"], creativeCount: 1, settings: SIMPLE_UGC_QUALITY_PRESETS[quality], creativeMode: "ai_ugc", ugcAudioStrategy: strategy });
   let n = 0;
-  return { draft, plan: hydrateCampaignPlan(draft, p, (prefix) => `${prefix}_${++n}`).creatives[0]! };
+  const hydrated = hydrateCampaignPlan(draft, p, (prefix) => `${prefix}_${++n}`).creatives[0]!;
+  // Editor V2: o pipeline aplica o editorial (A-roll espinha + B-roll overlay) depois do planner.
+  return { draft, plan: applyUgcEditorial(hydrated, { quality, finalRange: SIMPLE_UGC_QUALITY_PRESETS[quality].finalVideoSeconds }).plan };
 }
 
 describe("roteiro AI UGC", () => {
@@ -47,27 +52,26 @@ describe("roteiro AI UGC", () => {
     const { draft } = ugcPlan(quality);
     const scenes = draft.creatives[0]!.scenes;
     expect(validateUgcScenes(scenes, "native_speech")).toEqual([]);
-    const plan = UGC_PRESET_PLANS[quality];
-    expect(scenes.map((s) => s.visualSource)).toEqual(plan.map((e) => e.source));
-    const duration = draft.creatives[0]!.duration;
+    const entries = UGC_EDITORIAL_PLANS[quality];
+    expect(scenes.map((s) => s.visualSource)).toEqual(entries.map((e) => (e.role === "aroll" ? e.source : "reference_detail")));
+    // Duração final = soma dos A-rolls (B-roll é overlay sobre o áudio).
+    const duration = ugcPlan(quality).plan.duration;
     expect(duration).toBeGreaterThanOrEqual(SIMPLE_UGC_QUALITY_PRESETS[quality].finalVideoSeconds.min);
     expect(duration).toBeLessThanOrEqual(SIMPLE_UGC_QUALITY_PRESETS[quality].finalVideoSeconds.max);
     for (const s of scenes) expect(findUgcSpeechViolations(s.narration)).toEqual([]);
   });
 
-  it("presets: Econômico usa menos UGC e mais imagem; Premium mais UGC e B-roll", () => {
-    const count = (q: "economy" | "high" | "premium", f: (s: string) => boolean) => UGC_PRESET_PLANS[q].filter((e) => f(e.source)).length;
-    expect(count("economy", isUgcPersonSource)).toBe(2);
-    expect(count("high", isUgcPersonSource)).toBe(3);
-    expect(count("premium", isUgcPersonSource)).toBe(4);
-    expect(count("economy", (s) => s === "product_image")).toBe(1);
-    expect(count("premium", (s) => s === "product_broll")).toBe(2);
+  it("presets V2: 2/3/4 A-rolls e 1/2/3 B-rolls de detalhe (sem catálogo, sem custo extra)", () => {
+    const count = (q: "economy" | "high" | "premium", role: "aroll" | "broll") => UGC_EDITORIAL_PLANS[q].filter((e) => e.role === role).length;
+    expect([count("economy", "aroll"), count("high", "aroll"), count("premium", "aroll")]).toEqual([2, 3, 4]);
+    expect([count("economy", "broll"), count("high", "broll"), count("premium", "broll")]).toEqual([1, 2, 3]);
+    for (const q of ["economy", "high", "premium"] as const) expect(UGC_EDITORIAL_PLANS[q].every((e) => e.role === "aroll" ? e.seconds <= 8 : e.kind === "reference_detail")).toBe(true);
   });
 
-  it("native_speech: B-roll e imagem sem fala; external_lipsync: podem ter fala", () => {
+  it("B-roll nunca tem fala própria (fica sobre o áudio do A-roll), em qualquer estratégia", () => {
     expect(ugcPlan("high").draft.creatives[0]!.scenes.filter((s) => !isUgcPersonSource(s.visualSource)).every((s) => !s.narration)).toBe(true);
     const lipsync = ugcPlan("high", "external_lipsync").draft.creatives[0]!.scenes;
-    expect(lipsync.some((s) => !isUgcPersonSource(s.visualSource) && s.narration)).toBe(true);
+    expect(lipsync.filter((s) => !isUgcPersonSource(s.visualSource)).every((s) => !s.narration)).toBe(true);
     expect(validateUgcScenes([{ ...lipsync[0]!, visualSource: "product_image", requiresGeneratedVideo: false, estimatedGenerationSeconds: 0, generationPrompt: "" }, ...lipsync.slice(1)], "native_speech").length).toBeGreaterThan(0);
   });
 });
@@ -80,11 +84,10 @@ describe("custos AI UGC", () => {
     const cats = estimate.breakdown.map((l) => l.category);
     expect(cats.filter((c) => c === "ugc_reference")).toHaveLength(1);
     expect(cats.filter((c) => c === "ugc_scene")).toHaveLength(3);
-    expect(cats.filter((c) => c === "broll")).toHaveLength(1);
+    // B-roll de detalhe vem do frame de referência: nenhuma linha paga de B-roll.
+    expect(cats).not.toContain("broll");
     expect(cats).not.toContain("audio");
     expect(estimate.ugcSceneCost!.usd).toBeGreaterThan(0);
-    // Preços UGC são provisórios (sem fonte oficial) e isso aparece na estimativa.
-    expect(estimate.containsPlaceholderPrices).toBe(true);
     const withVoice = estimateCreativeCost({ id: "e2", plan: ugcPlan("high", "external_lipsync").plan, settings: SIMPLE_UGC_QUALITY_PRESETS.high, pricing, incurred: { llmCost: { usd: 0, brl: 0 }, ledgerEntryIds: [], sharedAmongCreatives: 1, simulated: true }, exchangeRate: 5, createdAt: "t" });
     expect(withVoice.breakdown.some((l) => l.category === "audio")).toBe(true);
   });
@@ -110,10 +113,14 @@ describe("identidade, produto e biblioteca futura", () => {
   });
 });
 
-describe("prompt campaign-plan@1.5.0", () => {
+describe("prompt campaign-plan@1.5.0 / 1.6.0", () => {
   const input = { product: p, styles: ["ugc"] as const, creativeCount: 1, settings: SIMPLE_UGC_QUALITY_PRESETS.high };
-  it("é o ativo e inclui as regras do AI UGC", () => {
-    expect(ACTIVE_PROMPTS.campaignPlan.version).toBe("1.5.0");
+  it("1.6.0 é o ativo, mantém as regras do AI UGC e acrescenta o Editor V2", () => {
+    expect(ACTIVE_PROMPTS.campaignPlan.version).toBe("1.6.0");
+    expect(campaignPlanPromptV1_6_0.system).toMatch(/uso há meses/);
+    expect(campaignPlanPromptV1_6_0.system).toMatch(/A-ROLL/);
+    expect(campaignPlanPromptV1_6_0.system).toMatch(/reference_detail/);
+    expect(campaignPlanPromptV1_6_0.system).toMatch(/fundo branco/);
     expect(campaignPlanPromptV1_5_0.system).toMatch(/uso há meses/);
     expect(campaignPlanPromptV1_5_0.buildUserMessage({ ...input, styles: [...input.styles], creativeMode: "ai_ugc", ugcAudioStrategy: "native_speech" })).toMatch(/creativeMode=ai_ugc/);
   });

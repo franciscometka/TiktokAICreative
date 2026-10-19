@@ -5,7 +5,7 @@
  */
 
 export const COMPOSITION_ID = "TikTokCreative";
-export const COMPOSITION_VERSION = "tiktok-creative@1.2.0";
+export const COMPOSITION_VERSION = "tiktok-creative@1.3.0";
 
 /** Mesmos valores de SceneAssetKind / VisualSource / Motion / Transition do domínio. */
 export type SceneKind = "generated_video" | "product_image" | "text_card";
@@ -17,7 +17,8 @@ export type SceneVisualSource =
   | "text_card"
   | "screenshot"
   | "simple_background"
-  | "existing_asset";
+  | "existing_asset"
+  | "reference_detail";
 export type SceneMotion = "none" | "ken_burns" | "pan" | "zoom_in" | "crop";
 export type SceneTransition = "cut" | "fade" | "slide" | "zoom";
 
@@ -52,6 +53,47 @@ export interface CaptionProps {
   endFrame: number;
 }
 
+/** Creative Editor V2 (Lote 5.6): espelho serializável do Edit Plan, já em frames. */
+export type EditTransitionName = "straight_cut" | "match_cut" | "cut_on_action" | "object_wipe" | "punch_in" | "crossfade";
+
+export interface EditVisualProps {
+  id: string;
+  startFrame: number;
+  durationFrames: number;
+  role: "aroll" | "broll";
+  /** placeholder = asset simulado (mock) ou ausente; nunca parece mídia gerada. */
+  kind: "video" | "image" | "placeholder";
+  src: string | null;
+  /** Frames do início do clipe descartados (handle / continuação do A-roll). */
+  trimBeforeFrames: number;
+  /** punch-in sutil (1 = sem). */
+  scale: number;
+  /** Recorte do frame de referência (B-roll de detalhe) com push-in lento. */
+  crop: { focusX: number; focusY: number; scaleFrom: number; scaleTo: number } | null;
+  transition: EditTransitionName;
+  placeholderLabel: string | null;
+}
+
+export interface EditAudioProps {
+  src: string;
+  startFrame: number;
+  durationFrames: number;
+  trimBeforeFrames: number;
+  gain: number;
+  fadeInFrames: number;
+  fadeOutFrames: number;
+}
+
+export interface EditProps {
+  version: 2;
+  visuals: EditVisualProps[];
+  /** Áudio SEPARADO do visual: só as faixas de A-roll; todo visual é mudo. */
+  audio: EditAudioProps[];
+  captions: (CaptionProps & { emphasis: string[] })[];
+  hook: { text: string; endFrame: number } | null;
+  cta: { text: string; startFrame: number; endFrame: number } | null;
+}
+
 export interface CreativeProps {
   [key: string]: unknown;
   meta: { creativeId: string; campaignId: string | null; compositionVersion: string };
@@ -68,4 +110,6 @@ export interface CreativeProps {
   audio: { src: string; startFrame: number }[];
   /** Mostra descrições técnicas no placeholder (só para desenvolvimento). */
   debug: boolean;
+  /** Presente = Editor V2 (a composição usa o Edit Plan e ignora scenes/captions/cta lineares). */
+  edit?: EditProps;
 }

@@ -3,6 +3,7 @@ import { formatBrl } from "@/lib/money";
 import {
   COMPOSITION_VERSION,
   type CreativeProps,
+  type EditProps,
   type ImageProps,
   type SceneProps,
 } from "../../remotion/types/props";
@@ -30,8 +31,8 @@ export const OVERLAY_TIMING = {
 export const COVER_MAX_ASPECT = 0.7;
 
 /** Áudio final existe por narração separada OU por um clipe Veo explicitamente desmutado. */
-export function compositionHasAudio(props: Pick<CreativeProps, "audio" | "scenes">): boolean {
-  return props.audio.length > 0 || props.scenes.some(scene => scene.video?.muted === false);
+export function compositionHasAudio(props: Pick<CreativeProps, "audio" | "scenes" | "edit">): boolean {
+  return props.audio.length > 0 || props.scenes.some(scene => scene.video?.muted === false) || (props.edit?.audio.length ?? 0) > 0;
 }
 
 export interface BuildPropsInput {
@@ -63,6 +64,7 @@ const isRealAudio = (uri: string) => !uri.startsWith("mock://");
 
 export function buildCompositionProps({ manifest, assets, urlFor, debug = false }: BuildPropsInput): BuiltProps {
   const fps = manifest.output.fps;
+  if (manifest.edit) return buildEditedProps({ manifest, assets, urlFor, debug });
   const warnings: RenderWarning[] = [...manifest.warnings];
   const timeline = sceneTimeline(
     manifest.assets.map((a) => a.durationSeconds),
@@ -182,6 +184,79 @@ export function buildCompositionProps({ manifest, assets, urlFor, debug = false 
     },
     audio,
     debug,
+  };
+  return { props, warnings };
+}
+
+/**
+ * Creative Editor V2: Edit Plan (segundos) → props em frames. Visual e áudio SEPARADOS: todo
+ * visual é mudo; o áudio vem só das faixas de A-roll (fala nativa), com trim e micro fades.
+ * Asset mock/ausente vira placeholder explícito (visual) ou silêncio com aviso (áudio).
+ */
+function buildEditedProps({ manifest, assets, urlFor, debug = false }: BuildPropsInput): BuiltProps {
+  const edit = manifest.edit!;
+  const fps = manifest.output.fps;
+  const total = totalFrames(edit.durationSeconds, fps);
+  const warnings: RenderWarning[] = [...manifest.warnings];
+  const frame = (seconds: number) => Math.min(total, secondsToFrames(seconds, fps));
+
+  const visuals: EditProps["visuals"] = edit.visuals.map((segment, index) => {
+    const startFrame = frame(segment.startSeconds);
+    const endFrame = index === edit.visuals.length - 1 ? total : frame(segment.endSeconds);
+    const resolved = assets.get(segment.uri);
+    const media = segment.media === "video" ? (resolved?.kind === "file" && resolved.media === "video" ? "video" : null) : (resolved?.kind === "file" && resolved.media === "image" ? "image" : null);
+    if (!media) {
+      warnings.push({ sceneId: segment.sceneId, code: "generated_video_placeholder", message: `Trecho ${index + 1}: ${resolved?.kind === "mock" ? "asset simulado (mock)" : "arquivo ausente"}; usando placeholder.` });
+    }
+    return {
+      id: segment.id, startFrame, durationFrames: Math.max(1, endFrame - startFrame), role: segment.role,
+      kind: media ?? "placeholder", src: media ? urlFor(segment.uri) : null,
+      trimBeforeFrames: secondsToFrames(segment.sourceInSeconds, fps),
+      scale: segment.scale, crop: segment.crop ?? null, transition: segment.transition,
+      placeholderLabel: media ? null : segment.role === "aroll" ? UGC_PLACEHOLDER_LABEL : `MOCK · B-ROLL${debug ? ` · ${segment.cutReason}` : ""}`,
+    };
+  });
+
+  const audio: EditProps["audio"] = edit.audio.flatMap((track) => {
+    const resolved = assets.get(track.uri);
+    if (!(resolved?.kind === "file" && resolved.media === "video")) return [];
+    const startFrame = frame(track.startSeconds);
+    return [{
+      src: urlFor(track.uri), startFrame, durationFrames: Math.max(1, frame(track.endSeconds) - startFrame),
+      trimBeforeFrames: secondsToFrames(track.sourceInSeconds, fps), gain: track.gain,
+      fadeInFrames: secondsToFrames(track.fadeInSeconds, fps), fadeOutFrames: secondsToFrames(track.fadeOutSeconds, fps),
+    }];
+  });
+  if (audio.length < edit.audio.length) {
+    warnings.push({ sceneId: null, code: "audio_unavailable", message: audio.length === 0 ? "A-rolls sem arquivo real (mock): vídeo renderizado sem som." : "Parte dos A-rolls sem arquivo real: trechos sem som." });
+  }
+
+  const captions = edit.captions
+    .map((c) => ({ text: c.text, startFrame: frame(c.startSeconds), endFrame: frame(c.endSeconds), emphasis: c.emphasis }))
+    .filter((c) => c.endFrame > c.startFrame);
+
+  const props: CreativeProps = {
+    meta: { creativeId: manifest.creativeId, campaignId: manifest.campaignId ?? null, compositionVersion: COMPOSITION_VERSION },
+    fps,
+    width: manifest.output.width,
+    height: manifest.output.height,
+    durationInFrames: total,
+    // Campos lineares vazios: a composição V2 usa só `edit`.
+    scenes: [],
+    captions: [],
+    hook: null,
+    cta: { text: edit.cta?.text ?? manifest.overlays.callToAction, startFrame: frame(edit.cta?.startSeconds ?? edit.durationSeconds) },
+    product: { name: manifest.overlays.productName, priceLabel: null, benefit: null },
+    audio: [],
+    debug,
+    edit: {
+      version: 2,
+      visuals,
+      audio,
+      captions,
+      hook: edit.hook ? { text: edit.hook.text, endFrame: frame(edit.hook.endSeconds) } : null,
+      cta: edit.cta ? { text: edit.cta.text, startFrame: frame(edit.cta.startSeconds), endFrame: total } : null,
+    },
   };
   return { props, warnings };
 }

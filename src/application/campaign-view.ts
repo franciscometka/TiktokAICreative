@@ -1,6 +1,7 @@
 import type { JobQuote, StageQuote, StageCapabilities } from "@/domain/execution";
 import { jobWorkflow, type RecommendedAction, type WorkflowStep } from "./job-workflow";
 import { buildUgcView, ugcSceneInfo, type UgcSceneInfo, type UgcView } from "./ugc-view";
+import { previewEditorialTimeline } from "@/ai/ugc-editorial";
 import { isUgcPersonSource } from "@/domain/ugc";
 import { presenterSceneViews, type PresenterSceneView } from "./presenter-view";
 import { claudeModelName } from "@/config/llm-models";
@@ -240,9 +241,13 @@ const PENDING_FUTURE: readonly JobStatus[] = ["planned", "cost_estimated", "awai
 
 function sceneViews(creative: CreativePlan, campaignId: string, job: GenerationJob | undefined): SceneView[] {
   let cursor = 0;
+  // Editor V2: B-roll é overlay sobre a junção (não soma); a posição vem da prévia editorial.
+  const editorial = new Map(creative.editPlanVersion === 2 ? previewEditorialTimeline(creative).map((item) => [item.sceneId, item]) : []);
   return creative.scenes.map((scene) => {
-    const start = cursor;
-    cursor += scene.duration;
+    const planned = editorial.get(scene.id);
+    const start = planned?.startSeconds ?? cursor;
+    if (!scene.edit?.overlay) cursor += scene.duration;
+    const end = planned?.endSeconds ?? cursor;
     const attempt = activeAttempt(job?.scenes.find((state) => state.sceneId === scene.id)?.attempts ?? []);
     const version = attempt?.assetUri?.replaceAll("\\", "/").match(/\/(v\d+)\/clip\.mp4$/)?.[1];
     const latest = job?.scenes.find((state) => state.sceneId === scene.id)?.attempts.at(-1);
@@ -250,7 +255,7 @@ function sceneViews(creative: CreativePlan, campaignId: string, job: GenerationJ
       id: scene.id,
       number: scene.order + 1,
       startSeconds: start,
-      endSeconds: cursor,
+      endSeconds: end,
       visualSource: scene.visualSource,
       visualSourceLabel: VISUAL_SOURCE_NAMES[scene.visualSource],
       isGenerated: scene.requiresGeneratedVideo,

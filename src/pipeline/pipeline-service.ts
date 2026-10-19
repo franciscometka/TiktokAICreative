@@ -6,13 +6,14 @@ import { RUNWAY_VIDEO } from "@/config/video-models";
 import { SIMPLE_QUALITY_PRESETS, SIMPLE_UGC_QUALITY_PRESETS } from "@/config/simple-presets";
 import type { PresetQuality } from "@/config/quality-presets";
 import type { UgcPricingRefs } from "@/config/ugc-models";
-import { approvedReference, isUgcPersonSource, latestReference, UgcRequestSchema, type UgcCharacterIdentity, type UgcEnvironmentChoice, type UgcPresenterChoice } from "@/domain/ugc";
+import { approvedReference, fidelityReleasesVideo, isUgcPersonSource, latestReference, UgcRequestSchema, type UgcCharacterIdentity, type UgcEnvironmentChoice, type UgcPresenterChoice } from "@/domain/ugc";
 import { resolveUgcIdentity } from "@/config/ugc";
 import { findUgcSpeechViolations, speechFitsDuration } from "@/ai/ugc-script";
 import { createUgcProviderFactories, type UgcProviderFactories } from "@/providers/ugc";
 import type { UgcReferenceProvider, UgcVideoProvider } from "@/providers/ugc/ugc-providers";
 import type { UgcAssetStore } from "@/storage/ugc-asset-store";
-import { generateUgcReference, generateUgcScene, initialUgcState, UgcCostChangedError, UgcPendingError, type UgcFlowDeps } from "./ugc-flow";
+import { generateUgcReference, generateUgcScene, initialUgcState, UgcCostChangedError, UgcFidelityError, UgcPendingError, type UgcFidelityReview, type UgcFlowDeps } from "./ugc-flow";
+import { decideFidelity, initialFidelity } from "@/domain/fidelity";
 import { generatePresenter, presenterPreview, PresenterPendingError, type PresenterFlowDeps } from "./presenter-flow";
 import type { PresenterProvider } from "@/providers/presenter/presenter-provider";
 import { readFile } from "node:fs/promises";
@@ -22,6 +23,7 @@ import { presenterBilledSeconds } from "@/config/presenters";
 import { RUNWAY_PRESENTER } from "@/config/presenters";
 import { alignedPresenterPlan, slicePresenterAudio, type AudioSlicer } from "@/speech/presenter-audio";
 import { scenePromptFor } from "@/ai/video-prompt";
+import { applyUgcEditorial } from "@/ai/ugc-editorial";
 import type { GeneratedVisualSource } from "@/domain/creative";
 import {
   PlanningError,
@@ -83,6 +85,8 @@ import { checkClipDuration, clipRejectionMessage, type ClipDurationCheck } from 
 import type { VideoProviderFactory } from "@/providers/video";
 import type { VideoProvider } from "@/providers/video/video-provider";
 import { buildRenderManifest } from "@/render/manifest";
+import { buildEditedRenderManifest } from "@/render/edit-manifest";
+import type { EditClip } from "@/render/edit-plan";
 import type { RenderProgress, Renderer, RenderResult } from "@/render/renderer";
 import type { RenderManifest, RenderRecord } from "@/domain/render";
 import type { LlmCallLog } from "@/storage/llm-call-log";
@@ -404,6 +408,7 @@ export class PipelineService {
         } else if (stage === "ugc_video") {
           if (!approvedReference(job.ugc)) blocked ??= "Nenhuma cena UGC é gerada antes de uma referência aprovada.";
           else if (mode === "real" && approvedReference(job.ugc)!.isMock) blocked ??= "A referência aprovada é uma simulação (MOCK): gere uma referência real antes das cenas UGC.";
+          else if (!fidelityReleasesVideo(approvedReference(job.ugc), mode)) blocked ??= "Verifique se produto, logo, textos e especificações continuam fiéis e confirme a fidelidade da referência.";
           if (job.ugc?.audioStrategy === "external_lipsync" && !narration) blocked ??= "Execute a narração primeiro (lip sync).";
           if ((pendingUgc?.state === "uncertain" || pendingUgc?.state === "submitting" && (pendingUgc.provider !== "krea" || pendingUgc.metadata?.paidSubmissionStarted === true)) && !pendingUgc.providerOperationId) {
             blocked ??= "Envio UGC anterior incerto: sem operation ID, não haverá reenvio automático.";
@@ -877,7 +882,7 @@ export class PipelineService {
       const ugcMode = ctx.campaign.request.creativeMode === 'ai_ugc';
       const ugcSource = isUgcPersonSource(input.visualSource) || input.visualSource === 'product_broll';
       if (!ugcMode && ugcSource) throw new Error('Cenas AI UGC só existem em projetos AI UGC.');
-      if (ugcMode && !ugcSource && !['product_image', 'text_card'].includes(input.visualSource)) throw new Error('No AI UGC use cenas UGC, B-roll, imagem do produto ou texto.');
+      if (ugcMode && !ugcSource && !['product_image', 'text_card', 'reference_detail'].includes(input.visualSource)) throw new Error('No AI UGC use cenas UGC, B-roll, imagem do produto ou texto.');
       if (ugcMode) {
         const speech = input.narration.trim();
         if (this.nativeUgcSpeech(ctx.job) && !isUgcPersonSource(input.visualSource) && speech) throw new Error('Com fala nativa do vídeo, só as cenas UGC têm fala; deixe a fala desta cena vazia.');
@@ -888,6 +893,11 @@ export class PipelineService {
       if (input.visualSource === 'presenter' && !ctx.campaign.request.presenterPresetId) throw new Error('Escolha um apresentador antes de transformar a cena em apresentação.');
       const scene = ctx.creative.scenes.find(item => item.id === input.sceneId);
       if (!scene) throw new Error('Cena não encontrada.');
+      if (ctx.creative.editPlanVersion === 2) {
+        // Editor V2: o papel editorial não muda na edição (A-roll = fala; B-roll = detalhe sem fala).
+        if ((scene.edit?.role === 'aroll') !== isUgcPersonSource(input.visualSource)) throw new Error('No Editor V2 o A-roll continua A-roll (pessoa falando) e o B-roll continua B-roll (detalhe por cima do áudio).');
+        if (['product_image', 'text_card'].includes(input.visualSource) && ctx.campaign.request.ugc?.commercialStyle !== true) throw new Error('B-roll de catálogo (foto em fundo branco/card) não é usado no UGC; escolha detalhe da referência ou B-roll gerado.');
+      }
       if (ugcMode && !speechFitsDuration(input.narration, scene.duration)) throw new Error(`Fala longa demais para ${scene.duration}s de cena.`);
       const nextScene = ScenePlanSchema.parse({
         ...scene,
@@ -897,7 +907,8 @@ export class PipelineService {
         requiresGeneratedVideo: generated,
         estimatedGenerationSeconds: generated ? (isUgcPersonSource(input.visualSource) ? scene.duration : Math.min(scene.duration, Math.max(2, scene.estimatedGenerationSeconds || scene.duration))) : 0,
         generationPrompt: generated ? (scene.generationPrompt.trim() || `Natural product video. ${input.visualDescription.trim()}`) : '',
-        motion: input.visualSource === 'presenter' || isUgcPersonSource(input.visualSource) ? 'none' : generated ? scene.motion : scene.motion === 'none' ? 'ken_burns' : scene.motion,
+        motion: input.visualSource === 'presenter' || isUgcPersonSource(input.visualSource) || input.visualSource === 'reference_detail' ? 'none' : generated ? scene.motion : scene.motion === 'none' ? 'ken_burns' : scene.motion,
+        ...(scene.edit?.role === 'broll' ? { edit: { ...scene.edit, brollKind: input.visualSource === 'product_broll' ? 'generated_context' : input.visualSource === 'product_image' ? 'product_photo' : 'reference_detail' } } : {}),
       });
       const updatedCreative = {
         ...ctx.creative,
@@ -935,7 +946,8 @@ export class PipelineService {
    * "Esta será a pessoa apresentando seu produto": aprova a referência mais recente da identidade
    * atual. Se o job estava pausado nessa decisão, continua sob a MESMA autorização (teto e ledger).
    */
-  async approveUgcReference(jobId: string, referenceId: string): Promise<{ job: GenerationJob; resumed: boolean; completion?: Promise<GenerationOutcome> }> {
+  async approveUgcReference(jobId: string, referenceId: string, review: UgcFidelityReview = { fidelityConfirmed: false }): Promise<{ job: GenerationJob; resumed: boolean; completion?: Promise<GenerationOutcome> }> {
+    let fidelityError: string | undefined;
     const job = await this.withJobLock(jobId, async () => {
       this.assertJobIdle(jobId);
       const current = await this.getJob(jobId);
@@ -946,20 +958,31 @@ export class PipelineService {
       if (reference.identityId !== state.identity.id || reference.identityRevision !== state.identity.revision) throw new Error("A referência é de um apresentador/ambiente anterior; gere outra.");
       if (latestReference(state)?.id !== reference.id) throw new Error("Aprove a referência mais recente.");
       if (reference.isMock && !this.mocksAllowed()) throw new Error("Referência simulada (MOCK) não pode ser aprovada: não existe imagem real da pessoa. Gere uma referência real.");
+      // Product Fidelity Gate: aprovar exige revisão humana explícita de produto/logo/textos/números.
+      if (!review.fidelityConfirmed) throw new UgcFidelityError("Verifique se produto, logo, textos e especificações continuam fiéis e confirme antes de aprovar.");
       const now = this.deps.clock();
+      const fidelity = decideFidelity(reference.fidelity ?? initialFidelity(state.product.fidelityConstraints ?? []), { confirmed: true, observedTexts: review.observedTexts, note: review.note, reviewedAt: now });
+      if (fidelity.status !== "approved") {
+        // Conflito conhecido (ex.: esperado 2100W, observado 3900): registra e NÃO segue automaticamente.
+        const blocked: GenerationJob = { ...current, ugc: { ...state, references: state.references.map(r => r.id === reference.id ? { ...r, fidelity } : r) }, updatedAt: now };
+        await this.deps.store.saveJob(blocked);
+        fidelityError = `Fidelidade em revisão: ${fidelity.conflicts.map(c => `esperado ${c.expected}, observado ${c.observed}`).join("; ")}. Gere outra referência.`;
+        return blocked;
+      }
       const next: GenerationJob = {
         ...current,
-        ugc: { ...state, references: state.references.map(r => r.id === reference.id ? { ...r, review: "approved" as const, reviewedAt: now } : r.review === "approved" ? { ...r, review: "rejected" as const, reviewedAt: now } : r) },
+        ugc: { ...state, references: state.references.map(r => r.id === reference.id ? { ...r, review: "approved" as const, fidelity, reviewedAt: now } : r.review === "approved" ? { ...r, review: "rejected" as const, reviewedAt: now } : r) },
         updatedAt: now,
       };
       await this.deps.store.saveJob(next);
       return next;
     });
+    if (fidelityError) throw new UgcFidelityError(fidelityError);
     return this.resumeAfterUgcDecision(job);
   }
 
   /** "Gerar outra referência": rejeita a atual; a próxima é gerada dentro do teto (nova versão, novo custo). */
-  async regenerateUgcReference(jobId: string): Promise<{ job: GenerationJob; resumed: boolean; completion?: Promise<GenerationOutcome> }> {
+  async regenerateUgcReference(jobId: string, fidelityRejection?: { observedTexts?: string[]; note?: string }): Promise<{ job: GenerationJob; resumed: boolean; completion?: Promise<GenerationOutcome> }> {
     const job = await this.withJobLock(jobId, async () => {
       this.assertJobIdle(jobId);
       const current = await this.getJob(jobId);
@@ -967,7 +990,14 @@ export class PipelineService {
       this.assertNoUgcScenes(current);
       const attempts = current.ugc.references.filter(reference => reference.identityId === current.ugc?.identity.id && reference.identityRevision === current.ugc?.identity.revision).length;
       if (attempts >= this.deps.maxAttemptsPerScene) throw new Error("Limite de tentativas da referência UGC atingido.");
-      const next = { ...current, ugc: this.rejectOpenReferences(current.ugc), updatedAt: this.deps.clock() };
+      let ugc = current.ugc;
+      const latest = latestReference(ugc);
+      if (fidelityRejection && latest?.state === "succeeded") {
+        // Reprovação por fidelidade fica registrada na versão rejeitada (auditoria do problema).
+        const fidelity = decideFidelity(latest.fidelity ?? initialFidelity(ugc.product.fidelityConstraints ?? []), { confirmed: false, ...fidelityRejection, reviewedAt: this.deps.clock() });
+        ugc = { ...ugc, references: ugc.references.map(r => r.id === latest.id ? { ...r, fidelity } : r) };
+      }
+      const next = { ...current, ugc: this.rejectOpenReferences(ugc), updatedAt: this.deps.clock() };
       await this.deps.store.saveJob(next);
       return next;
     });
@@ -1115,7 +1145,17 @@ export class PipelineService {
           return { ...creative, scenes: creative.scenes.map(s => s.id === first?.id ? { ...s, visualSource: "presenter" as const, motion: "none" as const } : s) };
         }),
       } : outcome.result.plan;
-      const review = reviewCampaignPlan(selectedPlan, settings, pricing, rate);
+      // Editor V2 (Lote 5.6): AI UGC vira narrativa contínua — A-roll como espinha de áudio e
+      // B-roll overlay — antes de revisar custo. Determinístico, sem nova chamada paga.
+      // external_lipsync (narração contínua ElevenLabs) continua na montagem linear; V2 = fala nativa.
+      const editorialPlan = started.request.creativeMode === "ai_ugc" && started.request.ugc?.audioStrategy !== "external_lipsync" ? {
+        ...selectedPlan, creatives: selectedPlan.creatives.map(creative => applyUgcEditorial(creative, {
+          commercialStyle: started.request.ugc?.commercialStyle === true,
+          finalRange: settings.finalVideoSeconds,
+          ...(settings.quality === "custom" ? {} : { quality: settings.quality }),
+        }).plan),
+      } : selectedPlan;
+      const review = reviewCampaignPlan(editorialPlan, settings, pricing, rate);
       const ugcState = started.request.creativeMode === "ai_ugc" ? () => initialUgcState(started, this.deps.ids, started.request.ugc?.audioStrategy ?? "native_speech") : undefined;
       const jobs = review.plan.creatives.map((creative) => ({ ...this.newJob(campaign.id, creative), ...(this.deps.hybrid ? { stageModes: started.request.stageModes ?? { ...MOCK_STAGE_MODES } } : {}), ...(ugcState ? { ugc: ugcState() } : {}) }));
       for (const job of jobs) await store.saveJob(job);
@@ -1733,7 +1773,16 @@ export class PipelineService {
   }
   private videoRequest(ctx: JobContext, scene: ScenePlan) {
     return { sceneId: scene.id, visualSource: scene.visualSource, prompt: scenePromptFor(scene, scene.visualSource as GeneratedVisualSource), durationSeconds: scene.estimatedGenerationSeconds,
-      aspectRatio: "9:16" as const, referenceImageUris: ctx.campaign.request.product.images.map((i) => i.uri) };
+      aspectRatio: "9:16" as const, referenceImageUris: this.brollReferenceUris(ctx, scene) };
+  }
+
+  /**
+   * Imagens de entrada do vídeo genérico. O provider genérico (Runway) só lê UPLOADS_DIR; por isso
+   * o B-roll gerado ainda parte da foto do produto, com prompt contextual (mão, mesmo ambiente).
+   * Os presets do Editor V2 preferem `reference_detail` (frame aprovado, custo zero).
+   */
+  private brollReferenceUris(ctx: JobContext, _scene: ScenePlan): string[] {
+    return ctx.campaign.request.product.images.map((i) => i.uri);
   }
 
   private async generateSceneVideo(
@@ -2057,6 +2106,21 @@ export class PipelineService {
   }
 
   /**
+   * Clipes ativos para o Editor V2: duração REAL medida (janela de edição) e duração GERADA
+   * (a cobrada). A edição nunca muda o billing; só escolhe a janela usada.
+   */
+  private editClips(job: GenerationJob, creative: CreativePlan): Map<string, EditClip> {
+    const clips = new Map<string, EditClip>();
+    for (const scene of creative.scenes) {
+      const active = activeAttempt(job.scenes.find(s => s.sceneId === scene.id)?.attempts ?? []);
+      if (!active?.assetUri) continue;
+      const actual = active.media?.actualMediaDurationSeconds ?? active.durationSeconds ?? scene.estimatedGenerationSeconds;
+      clips.set(scene.id, { uri: active.assetUri, actualSeconds: actual, generatedSeconds: active.media?.requestedDurationSeconds ?? actual });
+    }
+    return clips;
+  }
+
+  /**
    * Render em três passos para não segurar o lock da campanha durante minutos:
    * 1. (lock) monta o manifest e registra o RenderRecord "rendering";
    * 2. (sem lock) renderer.render() — Remotion local, sem custo de API;
@@ -2084,7 +2148,15 @@ export class PipelineService {
       try {
         const timing = timingUri ? await this.deps.audioAssets.readTiming(timingUri) : undefined;
         job = await this.stage(job, "render");
-        manifest = buildRenderManifest({
+        manifest = ctx.creative.editPlanVersion === 2 ? buildEditedRenderManifest({
+          // Editor V2: edição contínua (A-roll = espinha de áudio, B-roll overlay mudo, handles).
+          campaignId: ctx.campaign.id,
+          plan: ctx.creative,
+          product: ctx.campaign.request.product,
+          clips: this.editClips(job, ctx.creative),
+          referenceImageUri: approvedReference(job.ugc)?.imageUri,
+          outputDir: this.deps.outputDir,
+        }) : buildRenderManifest({
           campaignId: ctx.campaign.id,
           plan: ctx.creative.scenes.some(s => s.visualSource === "presenter") && timing && narration?.durationSeconds ? alignedPresenterPlan(ctx.creative, timing, narration.durationSeconds) : ctx.creative,
           product: ctx.campaign.request.product,

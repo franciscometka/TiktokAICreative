@@ -20,7 +20,7 @@ import { RUNWAY_VIDEO, runwayDuration } from "@/config/video-models";
 import { RUNWAY_PRESENTER, presenterBilledSeconds } from "@/config/presenters";
 import { veoConfigForPricingModel, veoRequestedDuration } from "@/config/ugc-models";
 import { KREA_UGC_PROVIDER, kreaRequestedDuration } from "@/config/krea-ugc-models";
-import { UGC_PRESET_PLANS } from "@/config/ugc";
+import { UGC_EDITORIAL_PLANS } from "@/config/edit-policy";
 import type { PricingCatalog } from "./pricing-catalog";
 
 /**
@@ -368,17 +368,12 @@ export function estimatePresetRange(
     let videoUsd: number;
     let audioUsd: number;
     if (settings.ugc && pricing.ugcReference && pricing.ugcVideo && settings.quality !== "custom") {
-      const plan = UGC_PRESET_PLANS[settings.quality];
-      const generatedShare = plan.filter(entry => entry.source !== "product_image").reduce((sum, entry) => sum + entry.share, 0);
-      const scale = generatedShare > 0 ? genSeconds / (finalSeconds * generatedShare) : 1;
-      const ugcUsd = plan.filter(entry => isUgcPersonSource(entry.source)).reduce((sum, entry) => {
-        const editorial = Math.max(0.5, entry.share * finalSeconds * scale);
-        return sum + costForUsage(pricing.ugcVideo!, ugcVideoUsage(editorial, pricing.ugcVideo!)).costUsd;
-      }, 0);
-      const brollSeconds = plan.filter(entry => entry.source === "product_broll").reduce((sum, entry) => sum + entry.share * finalSeconds * scale, 0);
-      videoUsd = costForUsage(pricing.ugcReference, { generations: 1 }).costUsd
-        + ugcUsd
-        + costForUsage(pricing.video, { seconds: brollSeconds, generations: Math.max(1, plan.filter(entry => entry.source === "product_broll").length) }).costUsd;
+      // Editor V2: só os A-rolls são gerados; B-roll é recorte do frame de referência (custo zero).
+      const arolls = UGC_EDITORIAL_PLANS[settings.quality].filter(entry => entry.role === "aroll");
+      const planned = arolls.reduce((sum, entry) => sum + entry.seconds, 0);
+      const scale = planned > 0 ? Math.max(1, genSeconds / planned) : 1;
+      const ugcUsd = arolls.reduce((sum, entry) => sum + costForUsage(pricing.ugcVideo!, ugcVideoUsage(Math.min(8, entry.seconds * scale), pricing.ugcVideo!)).costUsd, 0);
+      videoUsd = costForUsage(pricing.ugcReference, { generations: 1 }).costUsd + ugcUsd;
       audioUsd = 0; // Veo 3.1: áudio nativo; ElevenLabs não entra no teto.
     } else {
       videoUsd = costForUsage(pricing.video, {

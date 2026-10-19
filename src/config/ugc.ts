@@ -1,4 +1,5 @@
 import type { ProductInput } from "@/domain/product";
+import { deriveFidelityConstraints } from "@/domain/fidelity";
 import type { PresetQuality } from "./quality-presets";
 import {
   UgcCharacterIdentitySchema,
@@ -98,6 +99,7 @@ export function productAnchor(product: ProductInput): UgcProductAnchor | undefin
     name: product.name,
     description: product.description,
     preserve: ["exact product shape and proportions", "original colors", "logo and printed text", "packaging and label", "real size relative to the hands"],
+    fidelityConstraints: deriveFidelityConstraints(product),
   };
 }
 

@@ -26,7 +26,7 @@ describe("AI UGC — pipeline MOCK completo, offline", () => {
     expect(h.calls.references()).toHaveLength(1);
     expect(h.calls.videos()).toHaveLength(0);
 
-    const approved = await h.service.approveUgcReference(h.jobId, job.ugc!.references[0]!.id);
+    const approved = await h.service.approveUgcReference(h.jobId, job.ugc!.references[0]!.id, { fidelityConfirmed: true });
     expect(approved.resumed).toBe(true);
     expect((await approved.completion!).kind).toBe("COMPLETED");
     job = await h.service.getJob(h.jobId);

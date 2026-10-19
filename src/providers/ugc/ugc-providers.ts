@@ -1,3 +1,4 @@
+import type { SceneContinuity } from "@/domain/edit";
 import type { UgcAudioStrategy, UgcCharacterIdentity, UgcPersonSource, UgcProductAnchor } from "@/domain/ugc";
 import type { CostQuote, MediaResult, ProviderDescriptor, ProviderJobRef, ProviderJobStatus } from "../types";
 
@@ -65,6 +66,10 @@ export interface UgcVideoRequest {
   additionalReferenceUris?: readonly string[];
   /** Ajuda a consistência quando suportado, mas NÃO garante determinismo. */
   seed?: number;
+  /** Editor V2: como a cena anterior termina e como esta deve começar/terminar. */
+  continuity?: SceneContinuity;
+  /** Editor V2: linhas de fidelidade do produto (textos/números/logo não mudam). */
+  fidelity?: readonly string[];
   /** external_lipsync: trecho da narração ElevenLabs (bytes WAV) + janela no áudio contínuo. */
   audio?: { data: Uint8Array; startSeconds: number; endSeconds: number; narrationVersion: string };
 }

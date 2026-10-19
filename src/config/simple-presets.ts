@@ -32,20 +32,23 @@ export const SIMPLE_QUALITY_PRESETS: Record<PresetQuality, QualitySettings> = {
 export const SIMPLE_UGC_QUALITY_PRESETS: Record<PresetQuality, QualitySettings> = {
   economy: {
     ...SIMPLE_QUALITY_PRESETS.economy,
-    description: "15–20s · 2 cenas UGC (gancho e chamada) + imagem do produto.",
-    generatedVideoSeconds: { min: 6, max: 13 },
+    description: "15–20s · 2 A-rolls contínuos + 1 B-roll de detalhe (sem custo extra).",
+    generatedVideoSeconds: { min: 12, max: 16 },
+    finalVideoSeconds: { min: 15, max: 20 },
     ugc: UGC_PRICING_REFS.economy,
   },
   high: {
     ...SIMPLE_QUALITY_PRESETS.high,
-    description: "20–30s · 3 cenas UGC + B-roll do produto + imagem.",
-    generatedVideoSeconds: { min: 14, max: 27 },
+    description: "20–30s · 3 A-rolls + 2 B-rolls de detalhe; melhor relação qualidade/custo.",
+    generatedVideoSeconds: { min: 18, max: 24 },
+    finalVideoSeconds: { min: 20, max: 30 },
     ugc: UGC_PRICING_REFS.high,
   },
   premium: {
     ...SIMPLE_QUALITY_PRESETS.premium,
-    description: "30–45s · 4 cenas UGC + 2 B-rolls, modelos superiores quando configurados.",
-    generatedVideoSeconds: { min: 28, max: 45 },
+    description: "25–40s · 4 A-rolls + 3 B-rolls de detalhe, mais variação visual.",
+    generatedVideoSeconds: { min: 24, max: 32 },
+    finalVideoSeconds: { min: 25, max: 40 },
     ugc: UGC_PRICING_REFS.premium,
   },
 };

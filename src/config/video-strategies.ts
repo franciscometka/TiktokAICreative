@@ -49,7 +49,8 @@ export const VIDEO_STRATEGIES: Readonly<Record<GeneratedVisualSource, SceneStrat
     direction: { framing: "person_medium", camera: "locked", subjectAction: "the person holds the product toward the camera and smiles while speaking", ambientMotion: "", pacing: "steady" },
   },
   product_broll: {
-    direction: { framing: "product_detail", camera: "slow_dolly_in", subjectAction: "", ambientMotion: "soft light glides across the surface", pacing: "calm" },
+    // Editor V2: B-roll CONTEXTUAL (mão, mesma bancada/ambiente da referência), nunca catálogo em fundo branco.
+    direction: { framing: "in_context", camera: "handheld", subjectAction: "a hand slowly turns the product, showing a physical detail, in the same home environment as the reference", ambientMotion: "natural domestic light, real countertop", pacing: "steady" },
   },
 };
 
