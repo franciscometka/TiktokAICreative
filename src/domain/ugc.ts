@@ -197,6 +197,22 @@ export const UgcVideoOperationSchema = z.object({
 });
 export type UgcVideoOperation = z.infer<typeof UgcVideoOperationSchema>;
 
+/**
+ * Rótulo exibido de cada referência (Lote 5.5). REAL: v1, v2… pela ordem de criação entre as
+ * REAIS (inclui tentativas falhas/incertas); MOCK: "Simulação" fora dessa numeração. A versão
+ * técnica (`version`, pasta em disco) e o ID não mudam; nada é renomeado.
+ */
+export function ugcReferenceLabels(references: readonly Pick<UgcReference, "id" | "isMock">[]): Map<string, string> {
+  const labels = new Map<string, string>();
+  let real = 0;
+  let mock = 0;
+  for (const reference of references) {
+    if (reference.isMock) { mock++; labels.set(reference.id, mock === 1 ? "Simulação" : `Simulação ${mock}`); }
+    else labels.set(reference.id, `v${++real}`);
+  }
+  return labels;
+}
+
 export function approvedReference(state: UgcJobState | undefined): UgcReference | undefined {
   return state?.references.findLast(
     (r) => r.review === "approved" && r.state === "succeeded" && r.identityId === state.identity.id && r.identityRevision === state.identity.revision,

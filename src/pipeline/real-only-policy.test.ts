@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { getCampaignView, type AppDeps } from "@/application/campaign-actions";
 import { realOnlyUgcView } from "@/application/ugc-view";
+import { ugcReferenceLabels } from "@/domain/ugc";
 import { loadAppConfig, loadAppConfigSafe } from "@/config/env";
 import { forceMocksForTests, mocksAllowed } from "@/config/execution-policy";
 import { runtimeReadiness } from "@/config/readiness";
@@ -124,5 +125,41 @@ describe("fluxo REAL-only no pipeline", () => {
     const h = await ugcHarness();
     expect((await h.run()).kind).toBe("WAITING_STAGE");
     expect(h.calls.references()).toHaveLength(1);
+  });
+});
+
+describe("numeração exibida das referências (Lote 5.5)", () => {
+  const labels = async (h: Awaited<ReturnType<typeof oldMockJob>>, service = h.build({ allowMocks: false })) => {
+    const deps = { service, uploads: new LocalUploadStore(h.config.uploadsDir), rendersDir: h.config.rendersDir, audioDir: h.config.audioDir, allowMocks: false } as AppDeps;
+    const view = await getCampaignView(deps, h.campaign.id);
+    if (!view.ok) throw new Error(view.error.message);
+    return view.value.creatives[0]!.ugc!;
+  };
+
+  it("regra pura: MOCK fora da numeração; REAL v1, v2… inclusive tentativas sem arquivo", () => {
+    const map = ugcReferenceLabels([{ id: "m1", isMock: true }, { id: "r1", isMock: false }, { id: "m2", isMock: true }, { id: "r2", isMock: false }]);
+    expect([...map.values()]).toEqual(["Simulação", "v1", "Simulação 2", "v2"]);
+  });
+
+  it("MOCK antigo + primeira REAL = Simulação + v1; regeneração = v2; restart preserva; histórico do mais novo ao mais antigo", async () => {
+    const h = await oldMockJob();
+    const strict = h.build({ allowMocks: false });
+    await strict.switchJobToReal(h.jobId);
+    await (await strict.authorizeAndRunJob(h.jobId, (await strict.quoteJob(h.jobId)).token)).completion;
+    let ugc = await labels(h, strict);
+    expect(ugc.current?.label).toBe("v1");
+    expect(ugc.history.map(ref => ref.label)).toEqual(["v1", "Simulação"]);
+
+    await (await strict.regenerateUgcReference(h.jobId)).completion;
+    ugc = await labels(h, strict);
+    expect(ugc.current?.label).toBe("v2");
+    expect(ugc.history.map(ref => ref.label)).toEqual(["v2", "v1", "Simulação"]);
+    const ids = (await strict.getJob(h.jobId)).ugc!.references.map(ref => ref.id);
+    expect(ugc.history.map(ref => ref.id)).toEqual([...ids].reverse());
+    expect(new Set(ugc.history.map(ref => ref.label)).size).toBe(3);
+
+    // Reinício do processo: a numeração vem do histórico persistido, não da memória.
+    const restarted = await labels(h, h.build({ allowMocks: false }));
+    expect(restarted.history.map(ref => [ref.id, ref.label])).toEqual(ugc.history.map(ref => [ref.id, ref.label]));
   });
 });

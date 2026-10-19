@@ -9,6 +9,7 @@ import {
   UGC_ENVIRONMENTS,
   type UgcEnvironment,
   type UgcReference,
+  ugcReferenceLabels,
 } from "@/domain/ugc";
 
 /**
@@ -19,7 +20,10 @@ import {
 
 export interface UgcReferenceView {
   id: string;
+  /** Versão técnica (pasta em disco / rota). Não exibir: use `label`. */
   version: string;
+  /** Rótulo exibido: "v1", "v2"… para REAIS; "Simulação" para MOCK histórico. */
+  label: string;
   state: UgcReference["state"];
   review: UgcReference["review"];
   isMock: boolean;
@@ -76,9 +80,11 @@ export function buildUgcView(input: {
   const { campaign, job } = input;
   const state = job?.ugc;
   if (campaign.request.creativeMode !== "ai_ugc" || !state || !job) return undefined;
+  const labels = ugcReferenceLabels(state.references);
   const toView = (r: UgcReference): UgcReferenceView => ({
     id: r.id,
     version: r.version,
+    label: labels.get(r.id) ?? r.version,
     state: r.state,
     review: r.review,
     isMock: r.isMock,

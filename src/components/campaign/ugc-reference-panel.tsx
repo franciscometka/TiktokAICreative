@@ -41,7 +41,7 @@ export function UgcReferencePanel({ jobId, ugc, running }: { jobId: string | und
               MOCK · referência simulada — mostra a foto do produto, não uma pessoa gerada
             </span>
           )}
-          {reference && <span className="absolute right-3 bottom-3 rounded-full bg-white/90 px-2.5 py-1 text-xs font-semibold text-zinc-900">{reference.version} · {reference.review === "approved" ? "Aprovada" : reference.review === "rejected" ? "Descartada" : reference.state === "succeeded" ? "Aguardando aprovação" : reference.state}</span>}
+          {reference && <span className="absolute right-3 bottom-3 rounded-full bg-white/90 px-2.5 py-1 text-xs font-semibold text-zinc-900">{reference.label} · {reference.review === "approved" ? "Aprovada" : reference.review === "rejected" ? "Descartada" : reference.state === "succeeded" ? "Aguardando aprovação" : reference.state}</span>}
         </div>
         <div className="space-y-5 p-6">
           <div>
