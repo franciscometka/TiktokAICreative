@@ -4,7 +4,7 @@ import { PRESET_ORDER, QUALITY_PRESETS } from "@/config/quality-presets";
 import { evaluatePlanAgainstPreset } from "@/costs/plan-evaluation";
 import { resolvePricing } from "@/costs/calculate";
 import { CampaignPlanDraftSchema } from "@/domain/campaign";
-import { generatedVideoSeconds } from "@/domain/creative";
+import { generatedVideoSeconds, requiresGeneratedVideoForVisualSource } from "@/domain/creative";
 import { sequentialIds } from "@/lib/ids";
 import { ScriptedLlm, response } from "@/test/fake-llm";
 import { catalog, product } from "@/test/fixtures";
@@ -63,6 +63,29 @@ describe("LlmCreativePlanner (LLM isolado por mock)", () => {
     const result = await new LlmCreativePlanner(llm, sequentialIds(), { maxValidationAttempts: 2 }).plan(req);
     expect(result.calls.map((c) => c.outcome)).toEqual(["schema_mismatch", "valid"]);
     expect(llm.requests[1]?.messages[0]?.content).toContain("Esperado exatamente 2 criativo(s)");
+  });
+
+  it("normaliza requiresGeneratedVideo contraditório nas cenas 1 e 3 sem nova chamada", async () => {
+    const req = request({ creativeCount: 1 });
+    const draft = buildMockDraft(req);
+    const scenes = draft.creatives[0]!.scenes.map((scene, index) =>
+      index === 1 || index === 3 ? { ...scene, requiresGeneratedVideo: !scene.requiresGeneratedVideo } : scene);
+    const llm = new ScriptedLlm([response(JSON.stringify({ ...draft, creatives: [{ ...draft.creatives[0]!, scenes }] }))]);
+    const result = await new LlmCreativePlanner(llm, sequentialIds(), { maxValidationAttempts: 2 }).plan(req);
+    expect(llm.requests).toHaveLength(1);
+    expect(result.calls).toHaveLength(1);
+    expect(result.calls[0]?.outcome).toBe("valid");
+    expect(result.plan.creatives[0]!.scenes.every(scene => scene.requiresGeneratedVideo === requiresGeneratedVideoForVisualSource(scene.visualSource))).toBe(true);
+  });
+
+  it("erro criativo não derivável continua usando repair", async () => {
+    const req = request({ creativeCount: 1 });
+    const invalid = buildMockDraft(req);
+    invalid.creatives[0]!.scenes[0]!.visualDescription = "";
+    const llm = new ScriptedLlm([response(JSON.stringify(invalid)), response(validJson(req))]);
+    const result = await new LlmCreativePlanner(llm, sequentialIds(), { maxValidationAttempts: 2 }).plan(req);
+    expect(llm.requests).toHaveLength(2);
+    expect(result.calls.map(call => call.outcome)).toEqual(["schema_mismatch", "valid"]);
   });
 
   it("estilo fora dos permitidos é rejeitado", async () => {

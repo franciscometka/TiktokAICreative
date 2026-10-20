@@ -252,7 +252,7 @@ Pré-requisito já atendido: ledger persistido em `ledger.jsonl`.
 ## Creative Editor V2 (Lote 5.6 / D91)
 
 ```
-planner (mock | Claude campaign-plan@1.6.0) → hydrate
+planner (mock | Claude campaign-plan@1.6.1) → JSON parse → normalização de campos derivados → validação → hydrate
   → ai/ugc-editorial.applyUgcEditorial   (A-roll/B-roll, overlay, cutReason, continuidade, catálogo → reference_detail)
   → reviewCampaignPlan → jobs (editPlanVersion=2)
 ugc_reference → Product Fidelity Gate (domain/fidelity: pending → approved | needs_review | rejected; humano)

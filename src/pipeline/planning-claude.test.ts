@@ -65,7 +65,7 @@ describe("planejamento com Claude (API isolada por mock)", () => {
       outcome: "valid",
       usage: USAGE,
       promptId: "campaign-plan",
-      promptVersion: "1.6.0",
+      promptVersion: "1.6.1",
     });
     expect(call?.costUsd).toBeCloseTo(0.2102, 6);
     expect(entries.every((e) => e.llmCallId === call?.id)).toBe(true);
@@ -94,6 +94,21 @@ describe("planejamento com Claude (API isolada por mock)", () => {
     expect(calls.map((c) => c.outcome)).toEqual(["schema_mismatch", "valid"]);
     expect(calls[0]?.errorSummary).toContain("schema");
     expect((await ledger.list({ jobId: null })).reduce((a, e) => a + e.costUsd, 0)).toBeCloseTo(2 * 0.2102, 6);
+  });
+
+  it("inconsistência derivável não cria segunda chamada nem segunda cobrança Anthropic", async () => {
+    const req = planningRequest();
+    const draft = buildMockDraft(req);
+    const scenes = draft.creatives[0]!.scenes.map((scene, index) =>
+      index === 1 || index === 3 ? { ...scene, requiresGeneratedVideo: !scene.requiresGeneratedVideo } : scene);
+    const { service, ledger, llmCallLog, llm } = claudeHarness([
+      response(JSON.stringify({ ...draft, creatives: [{ ...draft.creatives[0]!, scenes }] }), { usage: USAGE }),
+    ]);
+    const campaign = await service.planCampaign(campaignRequest({ creativeCount: 1 }));
+    expect(campaign.status).toBe("planned");
+    expect(llm.requests).toHaveLength(1);
+    expect(await llmCallLog.list({ campaignId: campaign.id })).toHaveLength(1);
+    expect((await ledger.list({ campaignId: campaign.id })).filter(entry => entry.operation === "campaign_plan")).toHaveLength(3);
   });
 
   it("falha do planejamento: campanha failed, mas custo das tentativas fica no ledger", async () => {

@@ -275,7 +275,7 @@ Guia: [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md).
 - [x] Remotion `tiktok-creative@1.3.0` (`EditedCreative`): vídeo mudo com trim, áudio do A-roll com micro fades/ganho, legenda V2, CTA pequeno sobre a apresentadora
 - [x] Catálogo proibido por padrão; B-roll `reference_detail` (frame aprovado, custo zero); `commercialStyle` explícito
 - [x] Product Fidelity Gate (pending/approved/rejected/needs_review), UI de confirmação e bloqueio do vídeo
-- [x] Prompts de realismo/continuidade (Krea e Google) e `campaign-plan@1.6.0`
+- [x] Prompts de realismo/continuidade (Krea e Google); `campaign-plan@1.6.1` normaliza `requiresGeneratedVideo` a partir de `visualSource` antes da validação (D93)
 - [x] Presets revisados (2/3/4 A-rolls; 1/2/3 B-rolls); cotação pelos A-rolls; "gerados · usados" no storyboard
 - [x] Compatibilidade: planos/manifests/referências antigos continuam válidos; `external_lipsync` segue linear
 - [x] Testes offline (edit plan, fidelidade, continuidade, pipeline Krea falso, compatibilidade); caso de render V2 no `npm run test:render`

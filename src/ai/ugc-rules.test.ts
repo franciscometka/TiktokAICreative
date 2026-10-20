@@ -113,14 +113,15 @@ describe("identidade, produto e biblioteca futura", () => {
   });
 });
 
-describe("prompt campaign-plan@1.5.0 / 1.6.0", () => {
+describe("prompt campaign-plan@1.5.0 / 1.6.x", () => {
   const input = { product: p, styles: ["ugc"] as const, creativeCount: 1, settings: SIMPLE_UGC_QUALITY_PRESETS.high };
-  it("1.6.0 é o ativo, mantém as regras do AI UGC e acrescenta o Editor V2", () => {
-    expect(ACTIVE_PROMPTS.campaignPlan.version).toBe("1.6.0");
+  it("1.6.1 é o ativo, mantém o Editor V2 e explicita os campos derivados", () => {
+    expect(ACTIVE_PROMPTS.campaignPlan.version).toBe("1.6.1");
     expect(campaignPlanPromptV1_6_0.system).toMatch(/uso há meses/);
     expect(campaignPlanPromptV1_6_0.system).toMatch(/A-ROLL/);
     expect(campaignPlanPromptV1_6_0.system).toMatch(/reference_detail/);
     expect(campaignPlanPromptV1_6_0.system).toMatch(/fundo branco/);
+    expect(ACTIVE_PROMPTS.campaignPlan.system).toMatch(/requiresGeneratedVideo=true para/);
     expect(campaignPlanPromptV1_5_0.system).toMatch(/uso há meses/);
     expect(campaignPlanPromptV1_5_0.buildUserMessage({ ...input, styles: [...input.styles], creativeMode: "ai_ugc", ugcAudioStrategy: "native_speech" })).toMatch(/creativeMode=ai_ugc/);
   });

@@ -61,8 +61,13 @@ export const VisualSourceSchema = z.enum(VISUAL_SOURCES);
 export type VisualSource = z.infer<typeof VisualSourceSchema>;
 
 export type GeneratedVisualSource = (typeof GENERATED_VISUAL_SOURCES)[number];
+/** Única regra canônica para decidir se uma fonte visual exige geração paga de vídeo. */
+export function requiresGeneratedVideoForVisualSource(source: VisualSource): boolean {
+  return (GENERATED_VISUAL_SOURCES as readonly VisualSource[]).includes(source);
+}
+
 export function isGeneratedSource(source: VisualSource): source is GeneratedVisualSource {
-  return (GENERATED_VISUAL_SOURCES as readonly string[]).includes(source);
+  return requiresGeneratedVideoForVisualSource(source);
 }
 export const VideoDirectionSchema = z.object({
   framing: z.enum(["full_product", "product_detail", "in_context", "person_medium"]),
@@ -116,7 +121,7 @@ const sceneShape = z.object({
 type SceneLike = z.infer<typeof sceneShape>;
 
 function checkSceneRules(scene: SceneLike, ctx: z.RefinementCtx): void {
-  if (scene.requiresGeneratedVideo !== isGeneratedSource(scene.visualSource)) {
+  if (scene.requiresGeneratedVideo !== requiresGeneratedVideoForVisualSource(scene.visualSource)) {
     ctx.addIssue({
       code: "custom",
       path: ["visualSource"],

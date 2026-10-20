@@ -40,7 +40,7 @@ describe("qualidade visual portada sem substituir Lote 5", () => {
     expect(f.calls).toHaveLength(0);
   });
   it("prompt ativo mantém honestidade e pede direção sem zoom padrão", () => {
-    expect(ACTIVE_PROMPTS.campaignPlan.version).toBe("1.6.0");
+    expect(ACTIVE_PROMPTS.campaignPlan.version).toBe("1.6.1");
     expect(ACTIVE_PROMPTS.campaignPlan.system).toContain("Não use slow push-in");
     expect(ACTIVE_PROMPTS.campaignPlan.system).toContain("Sem experiência inventada");
   });

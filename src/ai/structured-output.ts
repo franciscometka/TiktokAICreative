@@ -7,8 +7,9 @@ import type { PromptDefinition } from "./prompts/types";
 
 /**
  * Validação de saídas estruturadas do LLM.
- * Fluxo: resposta → JSON.parse → Zod → (sucesso | erro tipado).
- * NUNCA "consertar" JSON com regex. NUNCA aceitar resposta inválida em silêncio.
+ * Fluxo: resposta → JSON.parse → normalização determinística opcional → Zod → (sucesso | erro tipado).
+ * NUNCA "consertar" JSON com regex. Só campos 100% derivados podem usar normalização; todo o
+ * restante continua sujeito ao schema e a repair.
  */
 
 export interface ValidationIssue {
@@ -21,7 +22,7 @@ export type StructuredOutputError =
   | { kind: "invalid_json"; message: string }
   | { kind: "schema_mismatch"; issues: ValidationIssue[] };
 
-export function parseStructuredOutput<T>(text: string, schema: z.ZodType<T>): Result<T, StructuredOutputError> {
+export function parseStructuredOutput<T>(text: string, schema: z.ZodType<T>, normalize?: (value: unknown) => unknown): Result<T, StructuredOutputError> {
   if (text.trim() === "") return err({ kind: "empty_response" });
   let json: unknown;
   try {
@@ -29,7 +30,7 @@ export function parseStructuredOutput<T>(text: string, schema: z.ZodType<T>): Re
   } catch (e) {
     return err({ kind: "invalid_json", message: e instanceof Error ? e.message : String(e) });
   }
-  const parsed = schema.safeParse(json);
+  const parsed = schema.safeParse(normalize ? normalize(json) : json);
   if (!parsed.success) {
     return err({
       kind: "schema_mismatch",
@@ -165,7 +166,7 @@ export async function runStructuredPrompt<TInput, TOutput>(
       return err({ kind: "stopped", stopReason: response.stopReason, calls });
     }
 
-    const parsed = parseStructuredOutput(response.text, validation);
+    const parsed = parseStructuredOutput(response.text, validation, prompt.normalizeParsedOutput);
     if (parsed.ok) {
       calls.push({ ...base, outcome: "valid" });
       return ok({ data: parsed.value, calls });
