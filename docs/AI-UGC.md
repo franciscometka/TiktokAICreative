@@ -2,6 +2,17 @@
 
 Modo "AI UGC" (Lote 5.3): foto real do produto → pessoa sintética segurando/apresentando o produto → storyboard → vídeo falado → cenas complementares → render. MOCK por padrão; transporte REAL Google implementado no Lote 5.4 e DESLIGADO até opt-in explícito (D79–D87). Nenhuma chamada real foi executada.
 
+## Presenter Only (Lote 5.7, padrão)
+
+Por enquanto, o modo AI UGC prioriza Presenter Only. B-roll gerado/estático permanece disponível arquiteturalmente, mas não participa dos presets padrão.
+
+- O vídeo inteiro é a apresentadora falando e segurando o produto: 5 trechos (Econômico ~32s, Equilibrado ~36s) ou 6 (Premium ~40s), cada um até 8s gerados.
+- Roteiro de TikTok brasileiro (75–95 palavras): hook → produto → 2–3 detalhes reais → demonstração → fechamento → CTA natural ("Se você curtiu esse modelo, dá uma olhada no carrinho…").
+- Cortes só entre trechos da própria apresentadora, em pausa medida; depois da última palavra ficam 0,8–1,2s de cena natural.
+- Legenda única (Caption V3) centralizada, sem inclinação, até 2 linhas; sem hook textual, banner ou card.
+- Render final AAC 48 kHz estéreo com validação pós-render.
+- B-roll (Editor V2) só com `ugc.brollEnabled=true`. Ver D94.
+
 ## Fluxo na interface
 1. `/create` → Tipo de vídeo **AI UGC**; envie ao menos uma foto do produto.
 2. Escolha preset (Econômico/Equilibrado/Premium), apresentador (automático/mulher/homem) e ambiente.

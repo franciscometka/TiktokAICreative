@@ -35,12 +35,19 @@ const UGC_SOURCES: { value: VisualSource; label: string }[] = [
  * por cima do áudio dela, com o motivo do corte. Sem detalhe técnico (provider, frames, handles).
  */
 function EditorialTimeline({ ugc }: { ugc: UgcView }) {
+  const summary = ugc.durationSummary;
   return (
+    <>
+    {summary && (
+      <p className="mt-5 text-sm text-zinc-600 tabular" aria-label="Resumo Presenter Only">
+        Presenter Only · {summary.clips} trechos da apresentadora · {summary.generatedSeconds}s gerados (cobrados) · ~{summary.estimatedUsedSeconds}s usados no vídeo{summary.costLabel ? ` · cenas ${summary.costLabel}` : ""}
+      </p>
+    )}
     <ol className="mt-5 space-y-2" aria-label="Storyboard editorial">
       {ugc.editorial.map((item) => (
-        <li key={item.sceneId} className={cx("grid gap-1 rounded-lg border p-3 text-sm sm:grid-cols-[7rem_5.5rem_1fr]", item.roleLabel === "A-ROLL" ? "border-emerald-200 bg-emerald-50/50" : "ml-6 border-amber-200 bg-amber-50/50")}>
+        <li key={item.sceneId} className={cx("grid gap-1 rounded-lg border p-3 text-sm sm:grid-cols-[7rem_9rem_1fr]", item.roleLabel !== "B-ROLL" ? "border-emerald-200 bg-emerald-50/50" : "ml-6 border-amber-200 bg-amber-50/50")}>
           <span className="font-medium text-zinc-900 tabular">{item.range}</span>
-          <span className={cx("text-xs font-semibold tracking-wide", item.roleLabel === "A-ROLL" ? "text-emerald-800" : "text-amber-800")}>{item.roleLabel}</span>
+          <span className={cx("text-xs font-semibold tracking-wide", item.roleLabel !== "B-ROLL" ? "text-emerald-800" : "text-amber-800")}>{item.roleLabel}</span>
           <div className="space-y-0.5">
             {item.speech ? <p className="text-zinc-900">“{item.speech}”</p> : <p className="text-zinc-700">{item.visual}</p>}
             {item.speech && <p className="text-xs text-zinc-500">{item.visual}</p>}
@@ -52,6 +59,7 @@ function EditorialTimeline({ ugc }: { ugc: UgcView }) {
         </li>
       ))}
     </ol>
+    </>
   );
 }
 

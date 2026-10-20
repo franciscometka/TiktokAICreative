@@ -13,10 +13,14 @@ export const UGC_REALISM_LINES = [
   "Natural domestic light, natural skin texture with pores, no beauty filter.",
   "Small posture changes, natural breathing, relaxed shoulders; expression varies naturally while talking.",
   "The person glances briefly at the product and back to the camera; gestures are slightly imperfect and not perfectly synchronized with the words.",
+  // Lote 5.7 (Presenter Only): mais realismo de celular e continuidade entre trechos.
+  "Phone camera look: slight handheld sway, tiny focus breathing, small natural imperfections; lighting consistent with the previous shots of the same room.",
+  "Relaxed posture and natural hands (not perfect or exaggerated); the product is not always perfectly centered.",
+  "Speech starts after a brief natural breath and ends on a complete sentence, followed by a short silent pause.",
 ] as const;
 
 export const UGC_AVOID_LINES = [
-  "Avoid: commercial studio look, presenter or avatar look, constant smile, stiff catalog pose, perfectly locked camera, overly smooth skin, robotic or over-synchronized movements, product perfectly centered the whole time.",
+  "Avoid: commercial studio look, corporate presenter or avatar look, constant smile, stiff catalog pose, perfectly locked camera, plastic or overly smooth skin, exaggeratedly perfect hands, robotic or over-synchronized movements, product perfectly centered the whole time.",
   "No on-screen text, captions, subtitles, logos, watermarks or graphic elements added to the video.",
 ] as const;
 
@@ -27,6 +31,8 @@ export interface UgcVideoPromptInput {
   identity?: Pick<UgcCharacterIdentity, "appearance" | "wardrobe" | "environmentDescription">;
   /** Linhas de fidelidade do produto (textos/números/logo não mudam). */
   fidelity?: readonly string[];
+  /** Último trecho: depois da última palavra, ~1s de cena natural sem fala (nunca corta na sílaba). */
+  finalTail?: boolean;
 }
 
 const sentence = (text: string) => {
@@ -54,6 +60,7 @@ export function buildUgcVideoPrompt(input: UgcVideoPromptInput): string {
       : "Keep the same adult synthetic person, face, hair, wardrobe and environment as the approved reference frame, and the exact same product.",
     ...(input.fidelity ?? []),
     `The person says naturally in Brazilian Portuguese, casual and unhurried, with short pauses: "${input.speech.trim()}"`,
+    input.finalTail ? "After the last word, the person stays in frame for about one second without speaking, still holding the product and looking at the camera with a relaxed expression." : "",
     ...UGC_AVOID_LINES,
   ];
   return parts.filter(Boolean).join(" ");

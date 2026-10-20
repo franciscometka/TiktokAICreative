@@ -23,7 +23,7 @@ const catalog = new StaticPricingCatalog(PRICING_TABLE);
 const p = product();
 
 function ugcPlan(quality: "economy" | "high" | "premium", strategy: "native_speech" | "external_lipsync" = "native_speech") {
-  const draft = buildMockDraft({ product: p, styles: ["ugc"], creativeCount: 1, settings: SIMPLE_UGC_QUALITY_PRESETS[quality], creativeMode: "ai_ugc", ugcAudioStrategy: strategy });
+  const draft = buildMockDraft({ product: p, styles: ["ugc"], creativeCount: 1, settings: SIMPLE_UGC_QUALITY_PRESETS[quality], creativeMode: "ai_ugc", ugcAudioStrategy: strategy, ugcPresenterOnly: false });
   let n = 0;
   const hydrated = hydrateCampaignPlan(draft, p, (prefix) => `${prefix}_${++n}`).creatives[0]!;
   // Editor V2: o pipeline aplica o editorial (A-roll espinha + B-roll overlay) depois do planner.
@@ -56,8 +56,9 @@ describe("roteiro AI UGC", () => {
     expect(scenes.map((s) => s.visualSource)).toEqual(entries.map((e) => (e.role === "aroll" ? e.source : "reference_detail")));
     // Duração final = soma dos A-rolls (B-roll é overlay sobre o áudio).
     const duration = ugcPlan(quality).plan.duration;
-    expect(duration).toBeGreaterThanOrEqual(SIMPLE_UGC_QUALITY_PRESETS[quality].finalVideoSeconds.min);
-    expect(duration).toBeLessThanOrEqual(SIMPLE_UGC_QUALITY_PRESETS[quality].finalVideoSeconds.max);
+    // V2 (opt-in): espinha = soma dos A-rolls, cada um ≤ 8s (Veo). Os presets padrão agora são Presenter Only.
+    expect(duration).toBeLessThanOrEqual(entries.filter((e) => e.role === "aroll").length * 8);
+    expect(duration).toBeGreaterThan(0);
     for (const s of scenes) expect(findUgcSpeechViolations(s.narration)).toEqual([]);
   });
 
@@ -116,7 +117,7 @@ describe("identidade, produto e biblioteca futura", () => {
 describe("prompt campaign-plan@1.5.0 / 1.6.x", () => {
   const input = { product: p, styles: ["ugc"] as const, creativeCount: 1, settings: SIMPLE_UGC_QUALITY_PRESETS.high };
   it("1.6.1 é o ativo, mantém o Editor V2 e explicita os campos derivados", () => {
-    expect(ACTIVE_PROMPTS.campaignPlan.version).toBe("1.6.1");
+    expect(ACTIVE_PROMPTS.campaignPlan.version).toBe("1.7.0");
     expect(campaignPlanPromptV1_6_0.system).toMatch(/uso há meses/);
     expect(campaignPlanPromptV1_6_0.system).toMatch(/A-ROLL/);
     expect(campaignPlanPromptV1_6_0.system).toMatch(/reference_detail/);

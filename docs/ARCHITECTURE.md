@@ -249,6 +249,12 @@ Pré-requisito já atendido: ledger persistido em `ledger.jsonl`.
 - Durabilidade: referência e cena persistem intenção antes do POST; vídeo guarda `ugcVideoOperations` com operation ID, duração pedida e custo estimado. Retomada consulta/poll/download pelo ID, sem novo submit; timeout/cobrança incerta pausa.
 - UI: `application/ugc-view.ts`, `components/campaign/ugc-reference-panel.tsx`, cartões do storyboard com quem/segura/fala/faz.
 
+## Presenter Only (Lote 5.7 / D94)
+- Plano: `ai/ugc-presenter-only.ts` (`applyPresenterOnly`, `previewPresenterTimeline`), presets `UGC_PRESENTER_PLANS` e `PRESENTER_POLICY` em `config/edit-policy.ts`; prompt `campaign-plan@1.7.0`; `validatePresenterScript` em `ai/ugc-script.ts`.
+- Edição: `render/presenter-edit-plan.ts` (`buildPresenterEditPlan`, `presenterWindow`, `captionPhrases`/`captionLines`, `auditEditTimeline`), escolhido por `editPlanVersion: 3` em `render/edit-manifest.ts`.
+- Remotion: `remotion/components/CaptionV3.tsx` (legenda única, âncora fixa) usada por `EditedCreative` (V2 e V3); `tiktok-creative@1.4.0`.
+- Validação pós-render: `render/remotion/media-probe.ts` (ffprobe local) no `RemotionRenderer`, registrada em `mediaCheck`.
+
 ## Creative Editor V2 (Lote 5.6 / D91)
 
 ```

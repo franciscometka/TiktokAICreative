@@ -32,23 +32,23 @@ export const SIMPLE_QUALITY_PRESETS: Record<PresetQuality, QualitySettings> = {
 export const SIMPLE_UGC_QUALITY_PRESETS: Record<PresetQuality, QualitySettings> = {
   economy: {
     ...SIMPLE_QUALITY_PRESETS.economy,
-    description: "15–20s · 2 A-rolls contínuos + 1 B-roll de detalhe (sem custo extra).",
-    generatedVideoSeconds: { min: 12, max: 16 },
-    finalVideoSeconds: { min: 15, max: 20 },
+    description: "~32s · Presenter Only: 5 trechos da apresentadora falando o vídeo inteiro.",
+    generatedVideoSeconds: { min: 30, max: 40 },
+    finalVideoSeconds: { min: 30, max: 34 },
     ugc: UGC_PRICING_REFS.economy,
   },
   high: {
     ...SIMPLE_QUALITY_PRESETS.high,
-    description: "20–30s · 3 A-rolls + 2 B-rolls de detalhe; melhor relação qualidade/custo.",
-    generatedVideoSeconds: { min: 18, max: 24 },
-    finalVideoSeconds: { min: 20, max: 30 },
+    description: "~36s · Presenter Only: 5 trechos com prompts mais detalhados e maior margem editorial.",
+    generatedVideoSeconds: { min: 32, max: 40 },
+    finalVideoSeconds: { min: 32, max: 38 },
     ugc: UGC_PRICING_REFS.high,
   },
   premium: {
     ...SIMPLE_QUALITY_PRESETS.premium,
-    description: "25–40s · 4 A-rolls + 3 B-rolls de detalhe, mais variação visual.",
-    generatedVideoSeconds: { min: 24, max: 32 },
-    finalVideoSeconds: { min: 25, max: 40 },
+    description: "~40s · Presenter Only: 6 trechos e a configuração de maior qualidade.",
+    generatedVideoSeconds: { min: 36, max: 48 },
+    finalVideoSeconds: { min: 36, max: 42 },
     ugc: UGC_PRICING_REFS.premium,
   },
 };

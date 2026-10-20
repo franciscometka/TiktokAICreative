@@ -18,6 +18,8 @@ export interface PlanningRequest {
   /** AI UGC (Lote 5.3): roteiro de creator com cenas ugc_* e estratégia de áudio do provider. */
   creativeMode?: CreativeMode;
   ugcAudioStrategy?: UgcAudioStrategy;
+  /** Lote 5.7: AI UGC só com a apresentadora (padrão). false = Editor V2 com B-roll (opt-in). */
+  ugcPresenterOnly?: boolean;
   settings: QualitySettings;
 }
 

@@ -9,6 +9,7 @@ import {
 } from "../../remotion/types/props";
 import type { ResolvedAsset } from "./asset-resolver";
 import { sceneTimeline, secondsToFrames, totalFrames } from "./timeline";
+import { captionLines } from "./presenter-edit-plan";
 
 /**
  * Função PURA: RenderManifest + assets resolvidos → props da composição Remotion.
@@ -236,7 +237,7 @@ function buildEditedProps({ manifest, assets, urlFor, debug = false }: BuildProp
   }
 
   const captions = edit.captions
-    .map((c) => ({ text: c.text, startFrame: frame(c.startSeconds), endFrame: frame(c.endSeconds), emphasis: c.emphasis }))
+    .map((c) => ({ text: c.text, lines: captionLines(c.text), startFrame: frame(c.startSeconds), endFrame: frame(c.endSeconds), emphasis: c.emphasis }))
     .filter((c) => c.endFrame > c.startFrame);
 
   const props: CreativeProps = {
@@ -254,7 +255,7 @@ function buildEditedProps({ manifest, assets, urlFor, debug = false }: BuildProp
     audio: [],
     debug,
     edit: {
-      version: 2,
+      version: edit.version,
       visuals,
       audio,
       captions,

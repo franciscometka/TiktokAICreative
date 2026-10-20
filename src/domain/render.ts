@@ -63,6 +63,8 @@ export const RENDER_WARNING_CODES = [
   "asset_not_provided",
   "asset_file_missing",
   "audio_unavailable",
+  /** Lote 5.7: aviso editorial do Edit Plan V3 (duração abaixo da meta, cauda não medida…). */
+  "edit_plan",
   /** Narração real sem timing confiável: legendas estimadas (fallback do Lote 3). */
   "captions_estimated",
   /** Fala real mais longa que o plano: o fim do vídeo foi estendido (sem cortar fala). */

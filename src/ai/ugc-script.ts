@@ -1,4 +1,6 @@
 import { UGC_MAX_WORDS_PER_SECOND } from "@/config/ugc";
+import { PRESENTER_POLICY } from "@/config/edit-policy";
+const PRESENTER_WORDS = PRESENTER_POLICY.words;
 import type { ScenePlanDraft } from "@/domain/creative";
 import { isUgcPersonSource, UGC_PERSON_SOURCES, type UgcAudioStrategy, type UgcCharacterIdentity, type UgcProductAnchor } from "@/domain/ugc";
 
@@ -21,6 +23,11 @@ const FORBIDDEN: readonly { pattern: RegExp; reason: string }[] = [
   { pattern: /\b(depoimento|meus?\s+clientes?\s+(amaram|aprovaram))\b/i, reason: "depoimento/prova social inventados" },
   { pattern: /conhe[çc]a\s+(este|esse)\s+(incr[íi]vel|maravilhoso)/i, reason: "jargão publicitário (\"Conheça este incrível…\")" },
   { pattern: /\b(revolucion[áa]rio|imperd[íi]vel|incr[íi]vel\s+produto)\b/i, reason: "jargão publicitário" },
+  // Lote 5.7: exagero, pressão e falsa urgência.
+  { pattern: /voc[êe]\s+precisa\s+(disso|desse|dessa|ter)/i, reason: "pressão de venda (\"você precisa disso\")" },
+  { pattern: /\bcorra\b/i, reason: "falsa urgência (\"corra\")" },
+  { pattern: /[úu]ltimas\s+unidades|s[óo]\s+hoje|antes\s+que\s+acabe/i, reason: "falsa urgência (\"últimas unidades\")" },
+  { pattern: /\b(eu\s+)?uso\s+h[áa]\s+meses\b/i, reason: "experiência pessoal inventada (\"uso há meses\")" },
 ];
 
 export function findUgcSpeechViolations(text: string): string[] {
@@ -84,3 +91,17 @@ export const UGC_ROLE_ACTIONS: Record<(typeof UGC_PERSON_SOURCES)[number], strin
   ugc_benefit: "Aponta um detalhe do produto enquanto explica",
   ugc_cta: "Mostra o produto para a câmera e faz a chamada final",
 };
+
+/**
+ * Presenter Only (Lote 5.7): roteiro completo de 5–6 trechos da apresentadora, ~75–95 palavras
+ * para 32–40s (tolerância de ±10 para não desperdiçar uma tentativa paga por uma palavra).
+ */
+export function validatePresenterScript(scenes: readonly Pick<ScenePlanDraft, "visualSource" | "narration">[]): string[] {
+  const issues: string[] = [];
+  const presenter = scenes.filter((s) => isUgcPersonSource(s.visualSource));
+  if (presenter.length < 5 || presenter.length > 6) issues.push(`Presenter Only planeja 5 ou 6 trechos da apresentadora (recebido ${presenter.length}).`);
+  const words = countWords(presenter.map((s) => s.narration).join(" "));
+  if (words < PRESENTER_WORDS.min - 10 || words > PRESENTER_WORDS.max + 10) issues.push(`Roteiro com ${words} palavras; o alvo é ${PRESENTER_WORDS.min}–${PRESENTER_WORDS.max} para 32–40s.`);
+  if (presenter[presenter.length - 1]?.visualSource !== "ugc_cta") issues.push("O último trecho é o fechamento com CTA falado (ugc_cta).");
+  return issues;
+}

@@ -18,6 +18,8 @@ export interface CampaignPlanPromptInput {
   /** Lote 5.3 (campaign-plan@1.5.0+). */
   creativeMode?: "standard" | "ai_ugc";
   ugcAudioStrategy?: "native_speech" | "external_lipsync";
+  /** Lote 5.7 (campaign-plan@1.7.0+): false = Editor V2 com B-roll (opt-in); ausente/true = Presenter Only. */
+  ugcPresenterOnly?: boolean;
   settings: QualitySettings;
 }
 

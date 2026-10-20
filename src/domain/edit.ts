@@ -13,6 +13,14 @@ import { z } from "zod";
 const nonEmpty = z.string().trim().min(1);
 
 export const EDIT_PLAN_VERSION = 2 as const;
+/**
+ * Lote 5.7 — Presenter Only: AI UGC padrão = só A-rolls da apresentadora, sem B-roll/imagem/card,
+ * timeline quantizada em frames, cauda final natural e legenda mapeada às pausas medidas.
+ * V2 continua lido/renderizável; B-roll segue disponível só com opt-in explícito.
+ */
+export const PRESENTER_EDIT_PLAN_VERSION = 3 as const;
+export const EditPlanVersionSchema = z.union([z.literal(EDIT_PLAN_VERSION), z.literal(PRESENTER_EDIT_PLAN_VERSION)]);
+export type EditPlanVersion = z.infer<typeof EditPlanVersionSchema>;
 
 export const EDIT_ROLES = ["aroll", "broll"] as const;
 export const EditRoleSchema = z.enum(EDIT_ROLES);
@@ -25,6 +33,7 @@ export type EditRole = z.infer<typeof EditRoleSchema>;
 export const CUT_REASONS = [
   "opening",
   "sentence_boundary",
+  "natural_pause",
   "action_match",
   "product_reveal",
   "detail_emphasis",
@@ -102,7 +111,7 @@ export type AudioSilenceAnalysis = z.infer<typeof AudioSilenceAnalysisSchema>;
  * = o trecho é visual por cima do áudio do A-roll e NÃO soma na duração do criativo.
  */
 export const SceneEditSchema = z.object({
-  version: z.literal(EDIT_PLAN_VERSION),
+  version: EditPlanVersionSchema,
   role: EditRoleSchema,
   overlay: z.boolean(),
   cutReason: CutReasonSchema,
@@ -113,6 +122,8 @@ export const SceneEditSchema = z.object({
   crop: DetailCropSchema.optional(),
   /** Rótulo curto do que o B-roll mostra (ex.: "close nos botões"). */
   detail: z.string().max(120).optional(),
+  /** Presenter Only: último trecho (fechamento + CTA falado + cauda natural). */
+  finalTail: z.boolean().optional(),
 }).superRefine((edit, ctx) => {
   if (edit.role === "broll" && !edit.overlay) ctx.addIssue({ code: "custom", path: ["overlay"], message: "B-roll é sempre overlay sobre o áudio do A-roll." });
   if (edit.role === "aroll" && edit.overlay) ctx.addIssue({ code: "custom", path: ["overlay"], message: "A-roll é a espinha do vídeo, nunca overlay." });
@@ -147,6 +158,11 @@ export const EditVisualSegmentSchema = z.object({
   audioSceneId: nonEmpty.optional(),
   /** A-roll(s) cujo áudio continua enquanto este visual está na tela (L/J cut pode cobrir dois). */
   audioSceneIds: z.array(nonEmpty).min(1).optional(),
+  /** V3: fala do trecho, pausas medidas (tempo do CLIPE) e cauda natural do último trecho. */
+  speech: z.string().optional(),
+  pauseBoundaries: z.array(AudioSilenceIntervalSchema).optional(),
+  continuity: SceneContinuitySchema.optional(),
+  finalTailSeconds: z.number().nonnegative().optional(),
 }).superRefine((segment, ctx) => {
   if (!(segment.endSeconds > segment.startSeconds && segment.sourceOutSeconds > segment.sourceInSeconds)) {
     ctx.addIssue({ code: "custom", message: "Trecho com duração inválida." });
@@ -180,8 +196,11 @@ export const EditCaptionSchema = z.object({
   startSeconds: z.number().nonnegative(),
   endSeconds: z.number().positive(),
   sceneId: nonEmpty,
-  /** Editor V2 não possui ASR: timing proporcional ao roteiro, nunca word-level real. */
-  timingSource: z.literal("estimated_from_script").default("estimated_from_script"),
+  /**
+   * Sem ASR: nunca word-level real. V2 = proporcional ao roteiro; V3 = frases do roteiro mapeadas
+   * aos intervalos de FALA medidos (entre pausas), trocando de legenda preferencialmente na pausa.
+   */
+  timingSource: z.enum(["estimated_from_script", "mapped_to_audio_pauses"]).default("estimated_from_script"),
   /** Poucos termos destacados (números/especificações informadas). */
   emphasis: z.array(nonEmpty).max(2).default([]),
 });
@@ -197,7 +216,13 @@ export const ClipUsageSchema = z.object({
 export type ClipUsage = z.infer<typeof ClipUsageSchema>;
 
 export const EditPlanSchema = z.object({
-  version: z.literal(EDIT_PLAN_VERSION),
+  version: EditPlanVersionSchema,
+  /** V3: fps da quantização (todos os tempos são múltiplos de 1/fps). */
+  fps: z.int().positive().optional(),
+  /** V3: segundos de vídeo natural depois da última palavra (≥ minTail quando medido). */
+  finalTailSeconds: z.number().nonnegative().optional(),
+  /** V3: avisos editoriais verificáveis (ex.: duração abaixo da meta, cauda sem medição). */
+  warnings: z.array(z.string()).optional(),
   durationSeconds: z.number().positive(),
   visuals: z.array(EditVisualSegmentSchema).min(1),
   audio: z.array(EditAudioTrackSchema),
@@ -241,6 +266,17 @@ export function assertValidEditPlan(plan: EditPlan): EditPlan {
     audioCursor = track.endSeconds;
   });
   if (audio.length > 0 && Math.abs(audioCursor - parsed.durationSeconds) > EPS) throw new EditPlanError("Áudio não cobre a duração inteira do Editor V2.");
+  if (parsed.version === PRESENTER_EDIT_PLAN_VERSION) {
+    // Presenter Only: 100% da duração visual é vídeo da apresentadora.
+    const stray = parsed.visuals.find(visual => visual.role !== "aroll" || visual.media !== "video");
+    if (stray) throw new EditPlanError("Presenter Only: nenhum B-roll, imagem estática ou card entra na timeline.");
+    if (parsed.audio.length !== parsed.visuals.length) throw new EditPlanError("Presenter Only: uma faixa de áudio por trecho da apresentadora.");
+    const fps = parsed.fps ?? 30;
+    const offGrid = (x: number) => Math.abs(x * fps - Math.round(x * fps)) > 1e-3;
+    if ([...parsed.visuals.flatMap(v => [v.startSeconds, v.endSeconds]), ...parsed.audio.flatMap(a => [a.startSeconds, a.endSeconds])].some(offGrid)) {
+      throw new EditPlanError("Presenter Only: tempos fora da grade de frames (risco de travada por arredondamento).");
+    }
+  }
   const brollScenes = new Set(parsed.visuals.filter(v => v.role === "broll").map(v => v.sceneId));
   if (parsed.audio.some(track => brollScenes.has(track.sceneId))) throw new EditPlanError("B-roll nunca é fonte de áudio.");
   const audioSceneIds = new Set(audio.map(track => track.sceneId));

@@ -1,4 +1,4 @@
-import { EDIT_POLICY, UGC_EDITORIAL_PLANS, type EditorialPlanEntry } from "@/config/edit-policy";
+import { EDIT_POLICY, UGC_EDITORIAL_PLANS, UGC_PRESENTER_PLANS, type EditorialPlanEntry, type PresenterPlanEntry } from "@/config/edit-policy";
 import { UGC_MAX_WORDS_PER_SECOND } from "@/config/ugc";
 import { VIDEO_STRATEGIES } from "@/config/video-strategies";
 import type { PresetQuality } from "@/config/quality-presets";
@@ -75,8 +75,63 @@ function sceneFrom(entry: EditorialPlanEntry, product: ProductInput, arollIndex:
   };
 }
 
-export function buildMockUgcCreative(product: ProductInput, settings: QualitySettings, _strategy: UgcAudioStrategy): CreativePlanDraft {
+/**
+ * Presenter Only (Lote 5.7): fala de creator brasileiro em 5–6 trechos (hook → produto → detalhes
+ * → demonstração → fechamento + CTA natural). Só fatos fornecidos; nada de experiência inventada.
+ */
+function presenterSpeech(entry: PresenterPlanEntry, product: ProductInput, detailIndex: number): string {
+  const facts = [...product.features, ...product.benefits].map(stripDot).filter(Boolean);
+  const benefit = product.benefits[0] ? lowerFirst(stripDot(product.benefits[0])) : undefined;
+  switch (entry.beat) {
+    case "hook":
+      return benefit ? `Se você está procurando ${benefit}, olha esse modelo aqui. Esse é o ${product.name}.` : `Olha esse modelo aqui que eu quero mostrar pra vocês. Esse é o ${product.name}.`;
+    case "intro":
+      return "Deixa eu mostrar ele de pertinho. Repara no formato e no tamanho dele na mão.";
+    case "details": {
+      const fact = facts[detailIndex];
+      const next = facts[detailIndex + 1];
+      if (!fact) return "Repara no acabamento dele, nos detalhes e em como ele é na mão.";
+      return next ? `Um detalhe que chama atenção: ${lowerFirst(fact)}. E também ${lowerFirst(next)}.` : `Um detalhe que chama atenção: ${lowerFirst(fact)}. Dá pra ver bem aqui.`;
+    }
+    case "demo":
+      return "Olha aqui de lado, girando devagar, pra vocês verem os detalhes de perto, sem pressa.";
+    case "closing_cta":
+      return "Então é isso. Se você curtiu esse modelo, dá uma olhada no carrinho e confere os detalhes.";
+  }
+}
+
+function buildMockPresenterCreative(product: ProductInput, quality: PresetQuality): CreativePlanDraft {
+  let detailIndex = 0;
+  const scenes: ScenePlanDraft[] = UGC_PRESENTER_PLANS[quality].map((entry, i) => {
+    const speech = fitSpeech(presenterSpeech(entry, product, detailIndex), entry.seconds);
+    if (entry.beat === "details") detailIndex += 2;
+    const direction = VIDEO_STRATEGIES[entry.source].direction;
+    return {
+      duration: entry.seconds, narration: speech, onScreenText: entry.beat === "closing_cta" ? EDIT_POLICY.ctaLabel : "",
+      visualDescription: `Apresentadora (mesma pessoa da referência aprovada) segura ${product.name}. ${UGC_ROLE_ACTIONS[entry.source]}.`,
+      generationPrompt: `${direction.subjectAction}. Same person and the exact product from the approved reference. Vertical 9:16.`,
+      videoDirection: direction, shotType: "talking_head", transition: i === 0 ? undefined : "cut",
+      visualSource: entry.source, motion: "none", requiresGeneratedVideo: true, estimatedGenerationSeconds: entry.seconds,
+    };
+  });
+  const hook = scenes[0]!.narration;
+  return {
+    concept: {
+      title: `AI UGC — ${product.name}`, angle: "Creator mostrando o produto real do começo ao fim, sem tom de comercial",
+      hook, targetEmotion: "curiosidade", format: "ugc",
+      description: "Roteiro AI UGC simulado (MOCK): Presenter Only — a mesma apresentadora o vídeo inteiro.",
+    },
+    duration: scenes.reduce((sum, s) => sum + s.duration, 0),
+    hook,
+    script: scenes.map((s) => s.narration).join(" "),
+    scenes,
+    callToAction: scenes[scenes.length - 1]!.narration,
+  };
+}
+
+export function buildMockUgcCreative(product: ProductInput, settings: QualitySettings, _strategy: UgcAudioStrategy, presenterOnly = true): CreativePlanDraft {
   const quality: PresetQuality = settings.quality === "custom" ? "high" : settings.quality;
+  if (presenterOnly) return buildMockPresenterCreative(product, quality);
   const entries = UGC_EDITORIAL_PLANS[quality];
   const arollCount = entries.filter((e) => e.role === "aroll").length;
   let arollIndex = 0;

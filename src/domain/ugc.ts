@@ -53,6 +53,8 @@ export const UgcRequestSchema = z.object({
   visualStyle: UgcVisualStyleSchema.default("natural_smartphone"),
   /** Estilo comercial EXPLÍCITO (Editor V2): só ele libera foto de catálogo como B-roll. */
   commercialStyle: z.boolean().optional(),
+  /** Lote 5.7: B-roll (Editor V2) só com opt-in explícito; padrão = Presenter Only. */
+  brollEnabled: z.boolean().optional(),
   /** Preenchido pelo sistema no planejamento a partir do UGCVideoProvider escolhido. */
   audioStrategy: UgcAudioStrategySchema.optional(),
 });

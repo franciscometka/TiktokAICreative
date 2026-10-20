@@ -1,8 +1,9 @@
 import { AbsoluteFill, Audio, Img, interpolate, OffthreadVideo, Sequence, useCurrentFrame } from "remotion";
 import { GeneratedVideoPlaceholder } from "../components/GeneratedVideoPlaceholder";
+import { CaptionV3 } from "../components/CaptionV3";
 import { enter } from "../styles/animation";
-import { CANVAS, COLORS, FONT, LAYOUT, MOTION, SAFE_AREA, SPACE } from "../styles/theme";
-import type { CreativeProps, EditAudioProps, EditProps, EditVisualProps } from "../types/props";
+import { COLORS, FONT, MOTION, SAFE_AREA, SPACE } from "../styles/theme";
+import type { CreativeProps, EditAudioProps, EditVisualProps } from "../types/props";
 
 /**
  * Creative Editor V2 (Lote 5.6): UM vídeo contínuo. A-roll é a base; B-roll entra por cima do
@@ -56,33 +57,6 @@ function AudioTrack({ track }: { track: EditAudioProps }) {
   return <Audio src={track.src} trimBefore={track.trimBeforeFrames} volume={volume} />;
 }
 
-function emphasize(text: string, emphasis: readonly string[]) {
-  if (emphasis.length === 0) return text;
-  const pattern = new RegExp(`(${emphasis.map((e) => e.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "g");
-  return text.split(pattern).map((part, i) => (emphasis.includes(part) ? <span key={i} style={{ color: "#FFE14D" }}>{part}</span> : part));
-}
-
-/** Legenda V2: UMA zona, até 2 linhas, texto com contorno (sem barra gigante), dentro da safe area. */
-function Captions({ captions }: { captions: EditProps["captions"] }) {
-  const frame = useCurrentFrame();
-  const current = captions.find((c) => frame >= c.startFrame && frame < c.endFrame);
-  if (!current) return null;
-  const opacity = interpolate(frame - current.startFrame, [0, 3], [0, 1], clamp);
-  return (
-    <div style={{ position: "absolute", left: SAFE_AREA.left, right: SAFE_AREA.right, bottom: CANVAS.height - LAYOUT.captionBottom, display: "flex", justifyContent: "center", opacity }}>
-      <div
-        style={{
-          color: COLORS.white, fontFamily: FONT.family, fontSize: 52, lineHeight: 1.16, fontWeight: FONT.weights.heavy, letterSpacing: -0.3,
-          textAlign: "center", textShadow: "0 0 3px #000, 0 2px 4px rgba(0,0,0,0.85), 0 0 14px rgba(0,0,0,0.45)",
-          display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", overflowWrap: "break-word",
-        }}
-      >
-        {emphasize(current.text, current.emphasis)}
-      </div>
-    </div>
-  );
-}
-
 /** Hook textual deliberado: pequeno, no topo, separado da legenda falada. */
 function Hook({ text, endFrame }: { text: string; endFrame: number }) {
   const frame = useCurrentFrame();
@@ -99,9 +73,10 @@ function Hook({ text, endFrame }: { text: string; endFrame: number }) {
 function CtaPill({ text }: { text: string }) {
   const frame = useCurrentFrame();
   const a = enter(frame, 8, 18);
+  // Lote 5.7: CTA pequeno, só opacidade (sem deslocamento), margens simétricas.
   return (
-    <div style={{ position: "absolute", top: SAFE_AREA.top + 150, left: SAFE_AREA.left, right: SAFE_AREA.right, display: "flex", justifyContent: "center", opacity: a.opacity, transform: `translateY(${a.translateY}px)` }}>
-      <div style={{ color: COLORS.white, fontFamily: FONT.family, fontSize: 42, fontWeight: FONT.weights.heavy, padding: "6px 4px 8px", borderBottom: "4px solid #FFE14D", textShadow: "0 2px 8px rgba(0,0,0,0.8)" }}>
+    <div style={{ position: "absolute", top: SAFE_AREA.top + 150, left: SAFE_AREA.right, right: SAFE_AREA.right, display: "flex", justifyContent: "center", opacity: a.opacity }}>
+      <div style={{ color: COLORS.white, fontFamily: FONT.family, fontSize: 38, fontWeight: FONT.weights.heavy, padding: "6px 4px 8px", borderBottom: "4px solid #FFE14D", textShadow: "0 2px 8px rgba(0,0,0,0.8)" }}>
         {text}
       </div>
     </div>
@@ -127,7 +102,8 @@ export function EditedCreative(props: CreativeProps) {
           <Hook text={edit.hook.text} endFrame={edit.hook.endFrame} />
         </Sequence>
       )}
-      <Captions captions={edit.captions} />
+      {/* Caption V3 (Lote 5.7) para V2 e V3: âncora única, sem transform/rotação. */}
+      <CaptionV3 captions={edit.captions} />
       {edit.cta && (
         <Sequence from={edit.cta.startFrame} durationInFrames={Math.max(1, edit.cta.endFrame - edit.cta.startFrame)} name="CTA">
           <CtaPill text={edit.cta.text} />

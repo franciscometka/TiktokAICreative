@@ -24,6 +24,7 @@ import { RUNWAY_PRESENTER } from "@/config/presenters";
 import { alignedPresenterPlan, slicePresenterAudio, type AudioSlicer } from "@/speech/presenter-audio";
 import { scenePromptFor } from "@/ai/video-prompt";
 import { applyUgcEditorial } from "@/ai/ugc-editorial";
+import { applyPresenterOnly } from "@/ai/ugc-presenter-only";
 import type { GeneratedVisualSource } from "@/domain/creative";
 import {
   PlanningError,
@@ -893,6 +894,7 @@ export class PipelineService {
       if (input.visualSource === 'presenter' && !ctx.campaign.request.presenterPresetId) throw new Error('Escolha um apresentador antes de transformar a cena em apresentação.');
       const scene = ctx.creative.scenes.find(item => item.id === input.sceneId);
       if (!scene) throw new Error('Cena não encontrada.');
+      if (ctx.creative.editPlanVersion === 3 && !isUgcPersonSource(input.visualSource)) throw new Error('Presenter Only: todo trecho é a apresentadora falando (sem B-roll, foto ou card).');
       if (ctx.creative.editPlanVersion === 2) {
         // Editor V2: o papel editorial não muda na edição (A-roll = fala; B-roll = detalhe sem fala).
         if ((scene.edit?.role === 'aroll') !== isUgcPersonSource(input.visualSource)) throw new Error('No Editor V2 o A-roll continua A-roll (pessoa falando) e o B-roll continua B-roll (detalhe por cima do áudio).');
@@ -1148,8 +1150,10 @@ export class PipelineService {
       // Editor V2 (Lote 5.6): AI UGC vira narrativa contínua — A-roll como espinha de áudio e
       // B-roll overlay — antes de revisar custo. Determinístico, sem nova chamada paga.
       // external_lipsync (narração contínua ElevenLabs) continua na montagem linear; V2 = fala nativa.
+      // Lote 5.7: padrão = Presenter Only (só a apresentadora); B-roll (V2) só com brollEnabled.
+      const presenterOnly = started.request.ugc?.brollEnabled !== true;
       const editorialPlan = started.request.creativeMode === "ai_ugc" && started.request.ugc?.audioStrategy !== "external_lipsync" ? {
-        ...selectedPlan, creatives: selectedPlan.creatives.map(creative => applyUgcEditorial(creative, {
+        ...selectedPlan, creatives: selectedPlan.creatives.map(creative => presenterOnly ? applyPresenterOnly(creative, { minFinalSeconds: settings.finalVideoSeconds.min }).plan : applyUgcEditorial(creative, {
           commercialStyle: started.request.ugc?.commercialStyle === true,
           finalRange: settings.finalVideoSeconds,
           ...(settings.quality === "custom" ? {} : { quality: settings.quality }),
@@ -1179,6 +1183,7 @@ export class PipelineService {
       presenterPresetId: request.presenterPresetId,
       projectName: request.projectName, videoConcept: request.videoConcept, scriptMode: request.scriptMode, script: request.script,
       creativeMode: request.creativeMode, ugcAudioStrategy: request.ugc?.audioStrategy,
+      ...(request.creativeMode === "ai_ugc" ? { ugcPresenterOnly: request.ugc?.brollEnabled !== true } : {}),
       styles: request.styles,
       creativeCount: request.creativeCount,
       settings,
@@ -2150,7 +2155,7 @@ export class PipelineService {
       try {
         const timing = timingUri ? await this.deps.audioAssets.readTiming(timingUri) : undefined;
         job = await this.stage(job, "render");
-        manifest = ctx.creative.editPlanVersion === 2 ? buildEditedRenderManifest({
+        manifest = ctx.creative.editPlanVersion === 2 || ctx.creative.editPlanVersion === 3 ? buildEditedRenderManifest({
           // Editor V2: edição contínua (A-roll = espinha de áudio, B-roll overlay mudo, handles).
           campaignId: ctx.campaign.id,
           plan: ctx.creative,

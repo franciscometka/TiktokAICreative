@@ -87,7 +87,7 @@ export function buildMockDraft(request: PlanningRequest): CampaignPlanDraft {
   const { product, styles, creativeCount, settings } = request;
   const creatives = Array.from({ length: creativeCount }, (_, i) =>
     request.creativeMode === "ai_ugc"
-      ? buildMockUgcCreative(product, settings, request.ugcAudioStrategy ?? "native_speech")
+      ? buildMockUgcCreative(product, settings, request.ugcAudioStrategy ?? "native_speech", request.ugcPresenterOnly !== false)
       : applyBrief(buildCreative(product, styles[i % styles.length] ?? "ugc", settings), request),
   );
   const hooks: HookDraft[] = Array.from({ length: hookCountFor(creativeCount) }, (_, i) => {

@@ -165,8 +165,8 @@ describe("AI UGC × Presenter — rotas separadas", () => {
 });
 
 describe("AI UGC — storyboard na interface", () => {
-  it("mostra quem aparece, o que segura, o que fala e o que faz, e o painel de aprovação", async () => {
-    const h = await pausedAtReference();
+  it("V2 opt-in (brollEnabled): mostra quem aparece, o que segura, o que fala e o que faz, e o painel de aprovação", async () => {
+    const h = await pausedAtReference({ request: { ugc: { presenter: "woman", environment: "auto", visualStyle: "natural_smartphone", brollEnabled: true } } });
     const uploads = new LocalUploadStore(await mkdtemp(join(tmpdir(), "ugc-up-")));
     const deps: AppDeps = { service: h.service, uploads, rendersDir: h.config.rendersDir, audioDir: h.config.audioDir };
     const result = await getCampaignView(deps, h.campaign.id);
@@ -192,8 +192,8 @@ describe("AI UGC — storyboard na interface", () => {
 });
 
 describe("AI UGC — storyboard editável antes das cenas", () => {
-  it("valida tipo, fala nativa e frases proibidas; edição invalida a autorização", async () => {
-    const h = await ugcHarness();
+  it("V2 opt-in (brollEnabled): valida tipo, fala nativa e frases proibidas; edição invalida a autorização", async () => {
+    const h = await ugcHarness({ request: { ugc: { presenter: "woman", environment: "auto", visualStyle: "natural_smartphone", brollEnabled: true } } });
     const plan = (await h.service.getCampaign(h.campaign.id)).plan!.creatives[0]!;
     const hook = plan.scenes[0]!;
     const broll = plan.scenes.find((s) => s.visualSource === "reference_detail")!;

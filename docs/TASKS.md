@@ -269,6 +269,16 @@ Guia: [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md).
 - [x] Auditoria pré-REAL: CLI escolhe Krea, dry-run zero rede/escrita, asset durável/reutilizável, UUID/result.urls atuais, download HTTPS com redirects seguros, readiness de modelo/preço e janelas de crash cobertas offline
 - [ ] Executar somente UMA referência Krea real e revisar visualmente; vídeo continua bloqueado até essa aprovação
 
+## Lote 5.7 — Presenter Only UGC ✅ (sem chamada paga)
+- [x] Presenter Only como padrão AI UGC (só A-rolls; B-roll V2 só com `brollEnabled`)
+- [x] Presets ~32/~36/~40s (5/5/6 trechos), nunca < 30s
+- [x] Roteiro campaign-plan@1.7.0 (75–95 palavras, estrutura A–F, CTA natural, proibições)
+- [x] Edit Plan V3 em frames, handles adaptativos, cauda final 0,8–1,2s, cutReason/continuidade por trecho
+- [x] Caption V3 (âncora fixa simétrica, sem transform, ≤ 2 linhas) + timing mapeado às pausas
+- [x] Validação pós-render (AAC 48 kHz estéreo, duração) + auditoria da timeline
+- [x] Storyboard "Trecho N · Apresentadora", resumo gerado × usado × custo
+- [ ] Validar com UMA geração REAL (5 trechos) a percepção de travada e a cauda final
+
 ## Lote 5.6 — Creative Editor V2 ✅ (sem chamada paga)
 - [x] Modelo editorial A-roll (espinha de áudio) + B-roll overlay com motivo de corte, transição discreta e continuidade encadeada (D91)
 - [x] Edit Plan puro: handles (sourceIn/sourceOut), visual × áudio separados, áudio contínuo sem duplicação, L/J cut nas junções, punch-in sutil

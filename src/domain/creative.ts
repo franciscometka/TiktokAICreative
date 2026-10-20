@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { EDIT_PLAN_VERSION, SceneEditSchema } from "./edit";
+import { EditPlanVersionSchema, SceneEditSchema } from "./edit";
 
 /**
  * Dois níveis de schema:
@@ -209,7 +209,7 @@ export const CreativePlanSchema = z
     scenes: z.array(ScenePlanSchema).min(1),
     callToAction: nonEmpty,
     /** 2 = Creative Editor V2 (A-roll contínuo + B-roll overlay). Ausente = montagem linear antiga. */
-    editPlanVersion: z.literal(EDIT_PLAN_VERSION).optional(),
+    editPlanVersion: EditPlanVersionSchema.optional(),
   })
   .superRefine((creative, ctx) => {
     checkDurationsMatch(creative, ctx);

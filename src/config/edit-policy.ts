@@ -43,6 +43,72 @@ export const EDIT_POLICY = {
   speechFillRatio: 0.82,
 } as const;
 
+/**
+ * Lote 5.7 — Presenter Only (padrão AI UGC). Valores centralizados e conservadores.
+ * Meta final 32–40s; nunca planejar < 30s. Tempos quantizados em frames (`fps`) para não acumular
+ * erro de arredondamento entre clipes (causa das "travadas" de áudio nas junções).
+ */
+export const PRESENTER_POLICY = {
+  fps: 30,
+  /** Áudio do render final: 48 kHz, estéreo, AAC (Remotion re-amostra todas as fontes para isso). */
+  audio: { sampleRate: 48_000, channels: 2, codec: "aac" },
+  minFinalSeconds: 30,
+  targetFinalSeconds: { min: 32, max: 40 },
+  /** Fala do roteiro: ~75–95 palavras para 32–40s; frases curtas. */
+  words: { min: 75, max: 95 },
+  /** Fechamento + CTA falado ocupa os últimos ~4–6s; depois da última palavra, 0,8–1,2s de vídeo. */
+  ctaSpeechSeconds: { min: 4, max: 6 },
+  finalTail: { minSeconds: 0.8, maxSeconds: 1.2 },
+  /**
+   * Handles ADAPTATIVOS: com pausa medida no início/fim do clipe, corta dentro da pausa deixando
+   * respiro; sem pausa (fala encostada na borda), não corta nada (nunca corta fala válida).
+   */
+  handles: { keepLeadSilenceSeconds: 0.12, keepTrailSilenceSeconds: 0.18 },
+  /** Sem análise de áudio: clipe inteiro (não esticamos nem cortamos às cegas). */
+  /** Punch-in alternado entre A-rolls do mesmo enquadramento (esconde o jump cut). */
+  punchInScale: 1.05,
+  /** CTA textual pequeno e opcional no fim, junto da apresentadora. */
+  ctaOverlaySeconds: 2.4,
+  caption: { maxLines: 2, maxCharsPerLine: 24, maxEmphasis: 1, minSeconds: 0.6 },
+} as const;
+
+export interface PresenterPlanEntry {
+  source: UgcPersonSource;
+  /** Duração editorial planejada (≤ 8s; o Veo gera 8s e a edição usa a janela com fala). */
+  seconds: number;
+  /** Papel na estrutura do roteiro (A–F do Lote 5.7). */
+  beat: "hook" | "intro" | "details" | "demo" | "closing_cta";
+}
+
+/**
+ * Presets Presenter Only: só A-rolls da apresentadora; nenhum B-roll nos presets padrão.
+ * Econômico ~32s (5 trechos) · Equilibrado ~36s (5) · Premium ~40s (6).
+ */
+export const UGC_PRESENTER_PLANS: Record<PresetQuality, readonly PresenterPlanEntry[]> = {
+  economy: [
+    { source: "ugc_hook", seconds: 6.4, beat: "hook" },
+    { source: "ugc_demo", seconds: 6.4, beat: "intro" },
+    { source: "ugc_benefit", seconds: 6.4, beat: "details" },
+    { source: "ugc_demo", seconds: 6.4, beat: "demo" },
+    { source: "ugc_cta", seconds: 6.6, beat: "closing_cta" },
+  ],
+  high: [
+    { source: "ugc_hook", seconds: 7.2, beat: "hook" },
+    { source: "ugc_demo", seconds: 7.2, beat: "intro" },
+    { source: "ugc_benefit", seconds: 7.2, beat: "details" },
+    { source: "ugc_demo", seconds: 7.2, beat: "demo" },
+    { source: "ugc_cta", seconds: 7.4, beat: "closing_cta" },
+  ],
+  premium: [
+    { source: "ugc_hook", seconds: 6.6, beat: "hook" },
+    { source: "ugc_demo", seconds: 6.6, beat: "intro" },
+    { source: "ugc_benefit", seconds: 6.6, beat: "details" },
+    { source: "ugc_benefit", seconds: 6.6, beat: "details" },
+    { source: "ugc_demo", seconds: 6.6, beat: "demo" },
+    { source: "ugc_cta", seconds: 7.0, beat: "closing_cta" },
+  ],
+};
+
 export interface ArollPlanEntry {
   role: "aroll";
   source: UgcPersonSource;

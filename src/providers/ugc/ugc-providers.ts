@@ -68,6 +68,8 @@ export interface UgcVideoRequest {
   seed?: number;
   /** Editor V2: como a cena anterior termina e como esta deve começar/terminar. */
   continuity?: SceneContinuity;
+  /** Lote 5.7: último trecho (CTA falado) — pede ~1s de cena natural, sem fala, depois da última palavra. */
+  finalTail?: boolean;
   /** Editor V2: linhas de fidelidade do produto (textos/números/logo não mudam). */
   fidelity?: readonly string[];
   /** external_lipsync: trecho da narração ElevenLabs (bytes WAV) + janela no áudio contínuo. */

@@ -1,3 +1,5 @@
+import { previewPresenterTimeline } from "@/ai/ugc-presenter-only";
+import { veoRequestedDuration } from "@/config/ugc-models";
 import { previewEditorialTimeline } from "@/ai/ugc-editorial";
 import { UGC_ROLE_ACTIONS } from "@/ai/ugc-script";
 import type { CutReason } from "@/domain/edit";
@@ -38,6 +40,8 @@ export interface UgcReferenceView {
 }
 
 export interface UgcView {
+  /** Lote 5.7: resumo Presenter Only para a cotação (gerado × usado × custo das cenas). */
+  durationSummary?: { clips: number; generatedSeconds: number; estimatedUsedSeconds: number; costLabel: string | null };
   headline: string;
   /** Lote 5.5: há referência MOCK (histórico/simulação) que não serve para o fluxo REAL. */
   historicalSimulation: boolean;
@@ -72,7 +76,8 @@ export interface UgcView {
 
 export interface EditorialItemView {
   sceneId: string;
-  roleLabel: "A-ROLL" | "B-ROLL";
+  /** V2: "A-ROLL"/"B-ROLL"; V3 (Presenter Only): "Trecho N · Apresentadora". */
+  roleLabel: string;
   range: string;
   durationLabel: string;
   speech: string;
@@ -84,7 +89,7 @@ export interface EditorialItemView {
 }
 
 const CUT_REASON_LABELS: Record<CutReason, string> = {
-  opening: "Abertura", sentence_boundary: "Fim de frase", action_match: "Continua o gesto", product_reveal: "Mostra o produto",
+  opening: "Abertura", sentence_boundary: "Fim de frase", natural_pause: "Pausa natural", action_match: "Continua o gesto", product_reveal: "Mostra o produto",
   detail_emphasis: "Destaca um detalhe", hand_occlusion: "Mão passa pela câmera", camera_motion: "Movimento de câmera",
   hook_emphasis: "Reforça o gancho", cta_return: "Volta para a chamada final",
 };
@@ -146,7 +151,20 @@ export function buildUgcView(input: {
     const last = attempts[attempts.length - 1];
     return !last ? "Planejado" : last.status === "succeeded" ? "Gerado" : last.status === "failed" ? "Falhou" : "Em andamento";
   };
-  const editorial: EditorialItemView[] = plan ? previewEditorialTimeline(plan).map((item) => ({
+  // Lote 5.7: Presenter Only — "Trecho N · Apresentadora · fala"; o último leva o CTA.
+  const presenterOnly = plan?.editPlanVersion === 3;
+  const editorial: EditorialItemView[] = plan && presenterOnly ? previewPresenterTimeline(plan).map((item) => ({
+    sceneId: item.sceneId,
+    roleLabel: item.label,
+    range: `${seconds(item.startSeconds)}–${seconds(item.endSeconds)}`,
+    durationLabel: seconds(item.endSeconds - item.startSeconds),
+    speech: item.speech,
+    visual: item.isFinal ? "Apresentadora fecha e faz o CTA falado; ~1s de cena natural no fim" : "Apresentadora falando com o produto na mão",
+    cutReasonLabel: item.isFinal ? "Fechamento + CTA" : CUT_REASON_LABELS[item.startSeconds === 0 ? "opening" : "natural_pause"],
+    audioNote: null,
+    continuity: item.continuity,
+    status: sceneState(item.sceneId),
+  })) : plan ? previewEditorialTimeline(plan).map((item) => ({
     sceneId: item.sceneId,
     roleLabel: item.role === "aroll" ? "A-ROLL" : "B-ROLL",
     range: `${seconds(item.startSeconds)}–${seconds(item.endSeconds)}`,
@@ -159,6 +177,15 @@ export function buildUgcView(input: {
     status: item.role === "broll" ? "Sem custo extra (frame da referência)" : sceneState(item.sceneId),
   })) : [];
   const usage = (job.manifest?.edit?.usage ?? []).map((u) => ({ sceneId: u.sceneId, label: `${seconds(u.generatedSeconds)} gerados · ${seconds(u.usedSeconds)} usados` }));
+  // Cotação: segundos gerados (cobrados, 8s por trecho Veo) × usados estimados (duração editorial).
+  const ugcScenes = plan?.scenes.filter((s) => s.edit?.role === "aroll") ?? [];
+  const sceneCost = job.estimate?.ugcSceneCost?.brl;
+  const durationSummary = presenterOnly ? {
+    clips: ugcScenes.length,
+    generatedSeconds: ugcScenes.reduce((sum, s) => sum + veoRequestedDuration(s.estimatedGenerationSeconds, { resolution: "720p" }), 0),
+    estimatedUsedSeconds: Math.round(ugcScenes.reduce((sum, s) => sum + s.duration, 0) * 10) / 10,
+    costLabel: sceneCost === undefined ? null : new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(sceneCost),
+  } : undefined;
   return {
     headline: "Esta será a pessoa apresentando seu produto",
     historicalSimulation: false,
@@ -190,6 +217,7 @@ export function buildUgcView(input: {
     canConfirmFidelity: !input.active && !!approved && current?.id === approved.id && fidelityStatus !== "approved",
     editorial,
     usage,
+    ...(durationSummary ? { durationSummary } : {}),
   };
 }
 

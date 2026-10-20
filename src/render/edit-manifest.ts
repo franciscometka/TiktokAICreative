@@ -3,6 +3,8 @@ import type { CreativePlan } from "@/domain/creative";
 import type { ProductInput } from "@/domain/product";
 import { RenderManifestSchema, VIDEO_FORMAT, type ManifestAsset, type RenderManifest } from "@/domain/render";
 import { buildEditPlan, type EditClip } from "./edit-plan";
+import { buildPresenterEditPlan } from "./presenter-edit-plan";
+import { PRESENTER_EDIT_PLAN_VERSION } from "@/domain/edit";
 
 export interface BuildEditedManifestInput {
   campaignId: string;
@@ -24,7 +26,8 @@ export function buildEditedRenderManifest(input: BuildEditedManifestInput): Rend
   const { plan, product } = input;
   const cta = plan.scenes.findLast((s) => s.edit?.role === "aroll" && s.visualSource === "ugc_cta")?.onScreenText.trim();
   const hookScene = plan.scenes[0];
-  const edit = buildEditPlan({
+  // Lote 5.7: Presenter Only (V3) — só A-rolls, sem hook textual, CTA pequeno opcional no fim.
+  const edit = plan.editPlanVersion === PRESENTER_EDIT_PLAN_VERSION ? buildPresenterEditPlan({ plan, clips: input.clips, ctaLabel: cta || undefined }) : buildEditPlan({
     plan,
     clips: input.clips,
     referenceImageUri: input.referenceImageUri,
@@ -56,12 +59,13 @@ export function buildEditedRenderManifest(input: BuildEditedManifestInput): Rend
     audio: [],
     captions: edit.captions.map((c) => ({ text: c.text, startSeconds: c.startSeconds, endSeconds: c.endSeconds })),
     captionSource: "estimated",
+    // V3: legenda mapeada às pausas medidas (ainda sem ASR); o rótulo "estimated" é mantido.
     extendedSeconds: 0,
     overlays: { productName: product.name, priceBrl: product.priceBrl, callToAction: plan.callToAction, hook: edit.hook?.text, benefit: product.benefits[0] },
     duration: edit.durationSeconds,
     generatedVideoSeconds: edit.usage.reduce((sum, u) => sum + u.generatedSeconds, 0),
     output: { ...VIDEO_FORMAT, path: `${input.outputDir}/renders/${input.campaignId}/${plan.id}` },
-    warnings: [],
+    warnings: (edit.warnings ?? []).map((message) => ({ sceneId: null, code: "edit_plan" as const, message })),
     edit,
   });
 }

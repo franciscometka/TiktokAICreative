@@ -77,7 +77,7 @@ describe("prompts de realismo e continuidade", () => {
     expect(prompt).toMatch(/front eye level/);
     expect(prompt).toMatch(/movement rotate/);
     expect(prompt).toMatch(/plain blue shirt/);
-    expect(prompt).toMatch(/Avoid: commercial studio look, presenter or avatar look/);
+    expect(prompt).toMatch(/Avoid: commercial studio look, corporate presenter or avatar look/);
     expect(prompt).toMatch(/Brazilian Portuguese/);
   });
 });
@@ -130,7 +130,7 @@ describe("Editor V2 no pipeline (Krea com fetch falso, zero rede)", () => {
     expect(fidelityReleasesVideo(after.ugc!.references.find(reference => reference.id === approved.id), "real")).toBe(false);
   });
 
-  it("fidelidade aprovada libera: continuidade e fidelidade chegam ao prompt Veo; render V2 usa só o áudio do A-roll", async () => {
+  it("fidelidade aprovada libera: continuidade e fidelidade chegam ao prompt Veo; render Presenter Only (V3) usa só A-rolls", async () => {
     const h = await harness();
     const resumed = await h.service.approveUgcReference(h.jobId, h.reference.id, { fidelityConfirmed: true });
     expect((await resumed.completion!).kind).not.toBe("FAILED");
@@ -142,9 +142,11 @@ describe("Editor V2 no pipeline (Krea com fetch falso, zero rede)", () => {
     expect(String(posts[0]!.body!.prompt)).toMatch(/Never invent or add numbers|must read exactly/);
     const job = await h.service.getJob(h.jobId);
     const edit = job.manifest!.edit!;
-    expect(edit.version).toBe(2);
+    // Lote 5.7: padrão = Presenter Only (V3): todo trecho é vídeo da apresentadora, sem B-roll/imagem.
+    expect(edit.version).toBe(3);
+    expect(arolls.length).toBe(plan.scenes.length);
     expect(edit.audio.map((a) => a.sceneId)).toEqual(arolls.map((s) => s.id));
-    expect(edit.visuals.filter((v) => v.role === "broll").every((v) => v.media === "image" && v.uri === job.ugc!.references.at(-1)!.imageUri)).toBe(true);
+    expect(edit.visuals.every((v) => v.role === "aroll" && v.media === "video")).toBe(true);
     // Custo continua pelo GERADO (8s); o corte usa menos.
     const ledger = (await new FileCostLedger(h.config.dataDir).list({ jobId: h.jobId })).filter((e) => e.category === "ugc_scene");
     expect(ledger.every((e) => e.quantity === 8)).toBe(true);

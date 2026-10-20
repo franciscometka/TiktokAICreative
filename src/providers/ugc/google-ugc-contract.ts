@@ -74,7 +74,7 @@ export function buildVeoUgcVideoRequest(request: UgcVideoRequest, model: VeoMode
   return {
     provider: GOOGLE_UGC_PROVIDER,
     model: model.model,
-    prompt: buildUgcVideoPrompt({ action: request.action, speech: request.speech, continuity: request.continuity, identity: request.identity, fidelity: request.fidelity }),
+    prompt: buildUgcVideoPrompt({ action: request.action, speech: request.speech, continuity: request.continuity, identity: request.identity, fidelity: request.fidelity, ...(request.finalTail ? { finalTail: true } : {}) }),
     image: {
       sourceUri: request.reference.imageUri,
       approvedReferenceId: request.reference.id,

@@ -1,4 +1,6 @@
 import { rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
+import { probeRenderedMedia, validateRenderedMedia } from "./media-probe";
+import { auditEditTimeline } from "../presenter-edit-plan";
 import { join, resolve } from "node:path";
 import { bundle } from "@remotion/bundler";
 import { ensureBrowser, renderMedia, selectComposition } from "@remotion/renderer";
@@ -133,6 +135,13 @@ export class RemotionRenderer implements Renderer {
       await rename(partial, join(dir, FINAL_FILE));
       const { size } = await stat(join(dir, FINAL_FILE));
       const renderMs = Date.now() - started;
+      // Lote 5.7: validação pós-render (AAC 48 kHz estéreo, duração) + auditoria da timeline editada.
+      const probe = await probeRenderedMedia(join(dir, FINAL_FILE));
+      const mediaIssues = [
+        ...(probe ? validateRenderedMedia(probe, { durationSeconds: props.durationInFrames / props.fps, hasAudio, fps: props.fps }) : ["ffprobe indisponível: validação de mídia não executada."]),
+        ...(manifest.edit ? auditEditTimeline(manifest.edit) : []),
+      ];
+      for (const message of mediaIssues) warnings.push({ sceneId: null, code: "edit_plan", message: `Validação pós-render: ${message}` });
 
       // Registro reprodutível: sem caminhos absolutos, sem URLs efêmeras, sem segredos.
       const urlToUri = new Map([...files.keys()].map((uri) => [assetServer.urlFor(uri), uri]));
@@ -152,6 +161,7 @@ export class RemotionRenderer implements Renderer {
         manifest,
         props,
         warnings,
+        mediaCheck: { probe: probe ?? null, issues: mediaIssues },
       };
       await writeFile(
         join(dir, MANIFEST_FILE),

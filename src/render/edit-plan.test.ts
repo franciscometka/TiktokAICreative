@@ -17,7 +17,7 @@ import type { ResolvedAsset } from "./asset-resolver";
 const p = product({ features: ["2100W de potência", "Bico concentrador"], benefits: ["Seca rápido", "Tem 3 temperaturas"] });
 
 function editorialPlan(quality: "economy" | "high" | "premium" = "high"): CreativePlan {
-  const draft = buildMockDraft({ product: p, styles: ["ugc"], creativeCount: 1, settings: SIMPLE_UGC_QUALITY_PRESETS[quality], creativeMode: "ai_ugc", ugcAudioStrategy: "native_speech" });
+  const draft = buildMockDraft({ product: p, styles: ["ugc"], creativeCount: 1, settings: SIMPLE_UGC_QUALITY_PRESETS[quality], creativeMode: "ai_ugc", ugcAudioStrategy: "native_speech", ugcPresenterOnly: false });
   let n = 0;
   const plan = hydrateCampaignPlan(draft, p, (prefix) => `${prefix}_${++n}`).creatives[0]!;
   return applyUgcEditorial(plan, { quality, finalRange: SIMPLE_UGC_QUALITY_PRESETS[quality].finalVideoSeconds }).plan;

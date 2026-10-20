@@ -41,6 +41,22 @@ async function fixture(): Promise<RenderManifest> {
   });
 }
 
+/** WAV PCM 16-bit mono com trechos de silêncio (fala simulada por tom) — fixture local, sem TTS. */
+function speechWav(seconds: number, silent: [number, number][], sampleRate: number): Buffer {
+  const samples = Math.round(seconds * sampleRate);
+  const data = Buffer.alloc(samples * 2);
+  for (let i = 0; i < samples; i++) {
+    const t = i / sampleRate;
+    const quiet = silent.some(([a, b]) => t >= a && t < b);
+    data.writeInt16LE(quiet ? 0 : Math.round(Math.sin((2 * Math.PI * 220 * i) / sampleRate) * 9000), i * 2);
+  }
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0, "ascii"); header.writeUInt32LE(36 + data.length, 4); header.write("WAVE", 8, "ascii"); header.write("fmt ", 12, "ascii");
+  header.writeUInt32LE(16, 16); header.writeUInt16LE(1, 20); header.writeUInt16LE(1, 22); header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28); header.writeUInt16LE(2, 32); header.writeUInt16LE(16, 34); header.write("data", 36, "ascii"); header.writeUInt32LE(data.length, 40);
+  return Buffer.concat([header, data]);
+}
+
 describe("RemotionRenderer (render real curto)", () => {
   it("gera MP4 1080x1920 de 3s, registra manifest, avisos e não sobrescreve versões", async () => {
     const manifest = await fixture();
@@ -127,7 +143,7 @@ describe("RemotionRenderer (render real curto)", () => {
     const { buildEditedRenderManifest } = await import("../edit-manifest");
     const { product } = await import("@/test/fixtures");
     const settings = SIMPLE_UGC_QUALITY_PRESETS.economy;
-    const draft = buildMockDraft({ product: product(), styles: ["ugc"], creativeCount: 1, settings, creativeMode: "ai_ugc", ugcAudioStrategy: "native_speech" });
+    const draft = buildMockDraft({ product: product(), styles: ["ugc"], creativeCount: 1, settings, creativeMode: "ai_ugc", ugcAudioStrategy: "native_speech", ugcPresenterOnly: false });
     let n = 0;
     const plan = applyUgcEditorial(hydrateCampaignPlan(draft, product(), (prefix) => `${prefix}_${++n}`).creatives[0]!, { quality: "economy", finalRange: settings.finalVideoSeconds }).plan;
     const clips = new Map(plan.scenes.filter((s) => s.edit?.role === "aroll").map((s) => [s.id, {
@@ -150,6 +166,53 @@ describe("RemotionRenderer (render real curto)", () => {
     expect(saved.props.edit.captions.length).toBeGreaterThan(0);
     expect(saved.props.edit.cta.endFrame - saved.props.edit.cta.startFrame).toBe(54); // 1,8s × 30fps
     expect(saved.props.edit.cta.endFrame).toBe(saved.props.durationInFrames);
+  }, 900_000);
+
+  it("Presenter Only (V3): só A-rolls, áudio 44,1 kHz mono das fontes sai AAC 48 kHz estéreo, timeline contínua e validada", async () => {
+    // Clipe-fonte REAL (h264 + AAC) com fala simulada: respiração 0–0,3s, pausa 1,0–1,15s e silêncio final 2,0–3,0s.
+    const base = await fixture();
+    const wavUri = `${UPLOADS.replaceAll("\\", "/")}/prod_test/presenter_fixture.wav`;
+    await writeFile(wavUri, speechWav(3, [[0, 0.3], [1.0, 1.15], [2.0, 3.0]], 44_100));
+    const source = await new RemotionRenderer({ rendersDir: RENDERS, allowedAssetRoots: [UPLOADS], browserExecutable: process.env.RENDER_BROWSER_EXECUTABLE ?? null }).render(RenderManifestSchema.parse({
+      ...base, creativeId: "creative_presenter_source", output: { ...base.output, path: `${RENDERS}/campaign_render_test/creative_presenter_source` },
+      audio: [{ kind: "narration", uri: wavUri, startSeconds: 0, durationSeconds: 3, isMock: false }],
+    }));
+    const videos = join(ROOT, "videos-v3");
+    await mkdir(videos, { recursive: true });
+    const clipUri = `${videos.replaceAll("\\", "/")}/presenter.mp4`;
+    await writeFile(clipUri, await readFile(source.outputUri));
+    const { analyzeAudioSilence } = await import("../audio-silence");
+    const silence = await analyzeAudioSilence(clipUri, 3, { noiseDb: -38, minSeconds: 0.1 });
+    expect(silence?.intervals.length).toBeGreaterThanOrEqual(2);
+    const { buildMockDraft } = await import("@/ai/mock-planner");
+    const { hydrateCampaignPlan } = await import("@/ai/hydrate");
+    const { applyPresenterOnly } = await import("@/ai/ugc-presenter-only");
+    const { SIMPLE_UGC_QUALITY_PRESETS } = await import("@/config/simple-presets");
+    const { buildEditedRenderManifest } = await import("../edit-manifest");
+    const { auditEditTimeline } = await import("../presenter-edit-plan");
+    const { probeRenderedMedia } = await import("./media-probe");
+    const { product } = await import("@/test/fixtures");
+    const draft = buildMockDraft({ product: product(), styles: ["ugc"], creativeCount: 1, settings: SIMPLE_UGC_QUALITY_PRESETS.economy, creativeMode: "ai_ugc", ugcAudioStrategy: "native_speech" });
+    let n = 0;
+    const plan = applyPresenterOnly(hydrateCampaignPlan(draft, product(), (prefix) => `${prefix}_${++n}`).creatives[0]!).plan;
+    const clips = new Map(plan.scenes.map((s) => [s.id, { uri: clipUri, actualSeconds: 3, generatedSeconds: 8, ...(silence ? { audioSilence: silence } : {}) }]));
+    const manifest = buildEditedRenderManifest({ campaignId: "campaign_render_test", plan: { ...plan, id: "creative_render_v3" }, product: product(), clips, outputDir: ROOT.replaceAll("\\", "/") });
+    expect(manifest.edit!.version).toBe(3);
+    expect(auditEditTimeline(manifest.edit!)).toEqual([]);
+    const renderer = new RemotionRenderer({ rendersDir: RENDERS, allowedAssetRoots: [UPLOADS, videos], browserExecutable: process.env.RENDER_BROWSER_EXECUTABLE ?? null });
+    const result = await renderer.render(manifest);
+    const probe = await probeRenderedMedia(result.outputUri);
+    expect(probe?.audio).toMatchObject({ codec: "aac", sampleRate: 48_000, channels: 2 });
+    expect(Math.abs(probe!.durationSeconds - manifest.edit!.durationSeconds)).toBeLessThan(1 / 30 + 0.05);
+    const saved = JSON.parse(await readFile(result.manifestUri!, "utf8"));
+    expect(saved.mediaCheck.issues).toEqual([]);
+    expect(saved.props.edit.version).toBe(3);
+    expect(saved.props.edit.visuals.every((v: { role: string; kind: string }) => v.role === "aroll" && v.kind === "video")).toBe(true);
+    const audio = saved.props.edit.audio as { startFrame: number; durationFrames: number }[];
+    audio.forEach((track, i) => { if (i > 0) expect(track.startFrame).toBe(audio[i - 1]!.startFrame + audio[i - 1]!.durationFrames); });
+    expect(audio.at(-1)!.startFrame + audio.at(-1)!.durationFrames).toBe(saved.props.durationInFrames);
+    expect(manifest.edit!.finalTailSeconds).toBeGreaterThanOrEqual(0.8);
+    expect(saved.props.edit.captions.every((c: { lines: string[] }) => c.lines.length <= 2)).toBe(true);
   }, 900_000);
 
   it("recusa asset fora das pastas autorizadas sem gerar arquivo", async () => {

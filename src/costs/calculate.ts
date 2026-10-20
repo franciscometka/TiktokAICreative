@@ -20,7 +20,7 @@ import { RUNWAY_VIDEO, runwayDuration } from "@/config/video-models";
 import { RUNWAY_PRESENTER, presenterBilledSeconds } from "@/config/presenters";
 import { veoConfigForPricingModel, veoRequestedDuration } from "@/config/ugc-models";
 import { KREA_UGC_PROVIDER, kreaRequestedDuration } from "@/config/krea-ugc-models";
-import { UGC_EDITORIAL_PLANS } from "@/config/edit-policy";
+import { UGC_PRESENTER_PLANS } from "@/config/edit-policy";
 import type { PricingCatalog } from "./pricing-catalog";
 
 /**
@@ -368,8 +368,8 @@ export function estimatePresetRange(
     let videoUsd: number;
     let audioUsd: number;
     if (settings.ugc && pricing.ugcReference && pricing.ugcVideo && settings.quality !== "custom") {
-      // Editor V2: só os A-rolls são gerados; B-roll é recorte do frame de referência (custo zero).
-      const arolls = UGC_EDITORIAL_PLANS[settings.quality].filter(entry => entry.role === "aroll");
+      // Lote 5.7 (Presenter Only): todos os trechos são A-rolls gerados; cada um cobra a duração Veo (8s).
+      const arolls = UGC_PRESENTER_PLANS[settings.quality];
       const planned = arolls.reduce((sum, entry) => sum + entry.seconds, 0);
       const scale = planned > 0 ? Math.max(1, genSeconds / planned) : 1;
       const ugcUsd = arolls.reduce((sum, entry) => sum + costForUsage(pricing.ugcVideo!, ugcVideoUsage(Math.min(8, entry.seconds * scale), pricing.ugcVideo!)).costUsd, 0);

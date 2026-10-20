@@ -5,7 +5,7 @@
  */
 
 export const COMPOSITION_ID = "TikTokCreative";
-export const COMPOSITION_VERSION = "tiktok-creative@1.3.0";
+export const COMPOSITION_VERSION = "tiktok-creative@1.4.0";
 
 /** Mesmos valores de SceneAssetKind / VisualSource / Motion / Transition do domínio. */
 export type SceneKind = "generated_video" | "product_image" | "text_card";
@@ -87,11 +87,13 @@ export interface EditAudioProps {
 }
 
 export interface EditProps {
-  version: 2;
+  /** 2 = Editor V2 (A-roll + B-roll); 3 = Presenter Only (Lote 5.7). */
+  version: 2 | 3;
   visuals: EditVisualProps[];
   /** Áudio SEPARADO do visual: só as faixas de A-roll; todo visual é mudo. */
   audio: EditAudioProps[];
-  captions: (CaptionProps & { emphasis: string[] })[];
+  /** `lines`: quebra (≤ 2 linhas) decidida no plano; a Caption V3 não recalcula layout por frame. */
+  captions: (CaptionProps & { emphasis: string[]; lines?: string[] })[];
   hook: { text: string; endFrame: number } | null;
   cta: { text: string; startFrame: number; endFrame: number } | null;
 }

@@ -246,6 +246,7 @@ export async function generateUgcScene(
     identity: state.identity, product: state.product, speech: scene.narration, action: scene.videoDirection?.subjectAction || UGC_ROLE_ACTIONS[scene.visualSource],
     durationSeconds: audio ? audio.endSeconds - audio.startSeconds : scene.estimatedGenerationSeconds, aspectRatio: "9:16", audio,
     ...(scene.edit?.continuity ? { continuity: scene.edit.continuity } : {}),
+    ...(scene.edit?.finalTail ? { finalTail: true } : {}),
     fidelity: fidelityPromptLines(state.product.fidelityConstraints ?? []),
     ...(provider.capabilities?.supportsReferenceImages ? { additionalReferenceUris: [state.product.imageUri] } : {}),
   };
