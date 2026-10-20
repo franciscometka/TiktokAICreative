@@ -8,6 +8,7 @@ produto → análise/hooks/conceitos/roteiro/cenas (Claude) → validação + aj
 Custo é preocupação central; nada pago de mídia acontece sem aprovação explícita.
 
 ## Estado atual
+- Lote 6 (D95–D98): UX V2 — a UX principal esconde a complexidade do pipeline (Início, Criar vídeo, Projetos, Avatares | Configurações; técnico em Configurações → Avançado e `?view=advanced`). Avatares reutilizáveis com identidade e voz próprias (`domain/avatar.ts`, `DATA_DIR/avatars`, revisões congeladas no job). Roteiro mestre único dividido por A-roll (`ai/master-script.ts`, prompt ativo `campaign-plan@1.8.0`, 30/45/60s). Voice Lock só com provider que aceita áudio externo + lip-sync de verdade (`domain/video-speech.ts`); Krea/Veo = fala nativa registrada como "Voice Lock indisponível com este provider.". Projetos V2: `request.uxVersion = 2`. Nenhuma chamada real feita.
 - Lote 5.5 (D90): fluxo normal REAL-only. `ALLOW_MOCKS=false` (padrão) bloqueia qualquer etapa MOCK com motivo claro; provider inválido/indisponível nunca cai em MOCK. Testes ligam mocks explicitamente (`forceMocksForTests` no setup). Jobs MOCK antigos ficam como histórico; referência MOCK não é aprovável.
 - Lote 5.3 AI UGC (D79–D85): modo `creativeMode: "ai_ugc"` com providers separados do Presenter; referência pessoa+produto versionada e APROVADA antes das cenas; identidade persistida; áudio nativo ou lip-sync, nunca duplicado. Lote 5.4 (D86–D87): transporte REAL Google (`gemini-3.1-flash-image` + Veo 3.1) implementado, DESLIGADO por padrão: exige `GOOGLE_AI_API_KEY` + `UGC_PROVIDER=google` + `UGC_REAL_ALLOWED=true`. Intenção com hash/teto antes do POST, `uncertain` sem reenvio, retomada por operation ID. Nenhuma chamada real feita. Ver `docs/AI-UGC.md`.
 - AI UGC via Krea (D88): `UGC_PROVIDER=krea` + `KREA_API_KEY` + `UGC_REAL_ALLOWED=true` (Nano Banana 2 + Veo 3.1 Fast com áudio, 4/6/8s). Arquivos `krea-*` separados; Google intacto. Sem validação paga.
@@ -126,6 +127,8 @@ Para ver a tela de processamento com o mock: `MOCK_PLANNER_DELAY_MS=20000` em `.
 - Comentários e textos de UI em português; identificadores em inglês.
 
 ## O que NÃO fazer
+- Não escrever mini-roteiros independentes por trecho no AI UGC com duração: o roteiro mestre é a fonte; não presumir áudio externo/lip-sync de provider (capability declarada); não cair de Voice Lock para fala nativa sem registrar o motivo; não enviar `providerVoiceId` ao browser; não apagar revisões de avatar.
+- Não colocar termos técnicos (provider, modelo, readiness, IDs, erro cru) na tela principal V2: vão para Configurações → Avançado ou "Detalhes técnicos".
 - Não editar UGC como concatenação linear: B-roll nunca toca áudio, todo corte tem motivo, catálogo proibido sem `commercialStyle`; não liberar vídeo sem fidelidade aprovada; não alterar billing pela janela usada (ledger = gerado).
 - Não gerar cena UGC sem referência aprovada; não chamar Presenter em AI UGC; não combinar fala nativa do clipe com narração real; não escrever fala UGC com experiência inventada.
 - Não automatizar a interface web do Google Flow; UGC real só por API oficial, com preço com fonte.

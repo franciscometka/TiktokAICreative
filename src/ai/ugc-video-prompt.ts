@@ -28,7 +28,7 @@ export interface UgcVideoPromptInput {
   action: string;
   speech: string;
   continuity?: Pick<SceneContinuity, "entryPose" | "exitPose" | "productHand" | "productPosition" | "cameraPosition" | "cameraDistance" | "motionDirection" | "eyeDirection" | "presenterPosition">;
-  identity?: Pick<UgcCharacterIdentity, "appearance" | "wardrobe" | "environmentDescription">;
+  identity?: Pick<UgcCharacterIdentity, "appearance" | "wardrobe" | "environmentDescription" | "voiceDescription">;
   /** Linhas de fidelidade do produto (textos/números/logo não mudam). */
   fidelity?: readonly string[];
   /** Último trecho: depois da última palavra, ~1s de cena natural sem fala (nunca corta na sílaba). */
@@ -59,6 +59,8 @@ export function buildUgcVideoPrompt(input: UgcVideoPromptInput): string {
     input.identity ? `Keep the same adult synthetic person (${input.identity.appearance}), wardrobe (${input.identity.wardrobe}) and environment (${input.identity.environmentDescription}) as the approved reference frame, and the exact same product.`
       : "Keep the same adult synthetic person, face, hair, wardrobe and environment as the approved reference frame, and the exact same product.",
     ...(input.fidelity ?? []),
+    // Lote 6: fala nativa não trava a voz; a MESMA descrição em todos os trechos reduz a variação.
+    input.identity?.voiceDescription ? `Voice: ${input.identity.voiceDescription}; exactly the same voice, accent, pitch and pace as in every other clip of this video.` : "",
     `The person says naturally in Brazilian Portuguese, casual and unhurried, with short pauses: "${input.speech.trim()}"`,
     input.finalTail ? "After the last word, the person stays in frame for about one second without speaking, still holding the product and looking at the camera with a relaxed expression." : "",
     ...UGC_AVOID_LINES,

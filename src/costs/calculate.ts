@@ -401,6 +401,35 @@ export function estimatePresetRange(
   };
 }
 
+/**
+ * Lote 6 — estimativa ANTES de gerar no fluxo V2 (duração 30/45/60s): roteiro (Claude) +
+ * referência + N trechos × duração cobrada pelo provider (8s Veo) + render. Só estimativa:
+ * o teto real continua sendo a cotação do job depois do planejamento.
+ */
+export function estimateDurationCost(
+  settings: QualitySettings,
+  pricing: ResolvedPricing,
+  exchangeRate: number,
+  clips: number,
+  finalSeconds: number,
+): { total: Money; lines: { label: string; brl: number }[]; containsPlaceholderPrices: boolean } {
+  const llmUsd = priceUnits(pricing.llm.input, settings.llmTokensPerCreative.input) + priceUnits(pricing.llm.output, settings.llmTokensPerCreative.output);
+  const referenceUsd = pricing.ugcReference ? costForUsage(pricing.ugcReference, { generations: 1 }).costUsd : 0;
+  const clipUsd = pricing.ugcVideo ? costForUsage(pricing.ugcVideo, ugcVideoUsage(8, pricing.ugcVideo)).costUsd : 0;
+  const renderUsd = costForUsage(pricing.rendering, { seconds: finalSeconds, generations: 1 }).costUsd;
+  const lines = [
+    { label: "Roteiro", usd: llmUsd },
+    { label: "Apresentadora (imagem de referência)", usd: referenceUsd },
+    { label: `Vídeo (${clips} trechos)`, usd: clipUsd * clips },
+    { label: "Finalização", usd: renderUsd },
+  ];
+  return {
+    total: toMoney(lines.reduce((s, l) => s + l.usd, 0), exchangeRate),
+    lines: lines.map((l) => ({ label: l.label, brl: toMoney(l.usd, exchangeRate).brl })),
+    containsPlaceholderPrices: [pricing.llm.input, pricing.ugcReference, pricing.ugcVideo, pricing.rendering].some((p) => p?.isPlaceholder === true),
+  };
+}
+
 // ---------- Custo efetivo ----------
 
 export interface BuildActualCostInput {

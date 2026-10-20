@@ -17,6 +17,7 @@ import {
   type UgcReference,
 } from "@/domain/ugc";
 import type { Clock } from "@/lib/clock";
+import type { AvatarSnapshot } from "@/domain/avatar";
 import type { IdGenerator } from "@/lib/ids";
 import { waitForCompletion, type PollOptions } from "@/providers/poll";
 import { InvalidMediaError, ProviderError, type ProviderJobRef } from "@/providers/types";
@@ -97,8 +98,15 @@ export function initialUgcState(campaign: Campaign, ids: IdGenerator, audioStrat
   const product = productAnchor(campaign.request.product);
   if (!product) return undefined;
   const request = UgcRequestSchema.parse(campaign.request.ugc ?? {});
-  const identity = resolveUgcIdentity({ id: ids("character"), revision: 1, product: campaign.request.product, request });
+  const avatar = campaign.request.avatar?.snapshot;
+  const identity = resolveUgcIdentity({ id: ids("character"), revision: 1, product: campaign.request.product, request, ...(avatar ? { avatar, voiceDescription: avatarVoiceDescription(avatar) } : {}) });
   return { identity, audioStrategy, product, references: [] };
+}
+
+/** Descrição estável da voz do avatar (repetida no prompt de todos os trechos com fala nativa). */
+export function avatarVoiceDescription(avatar: Pick<AvatarSnapshot, "gender" | "speakingStyle" | "personality" | "voiceName">): string {
+  const who = avatar.gender === "woman" ? "adult female" : "adult male";
+  return [`${who} Brazilian Portuguese voice`, avatar.speakingStyle || avatar.personality || "natural and friendly", "medium natural pace"].filter(Boolean).join(", ");
 }
 
 function upsertReference(state: UgcJobState, reference: UgcReference): UgcJobState {

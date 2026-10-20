@@ -5,19 +5,37 @@ import { imagePreviewUrl, type ImageView } from "@/application/campaign-view";
 import { CampaignWizard } from "@/components/create/campaign-wizard";
 import { ReadinessPanel } from "@/components/readiness-panel";
 import { DEFAULT_SPEAKER_PROFILE_ID, SPEAKER_PROFILES } from "@/config/voices";
-import { getPresetSummaries, getPublicConfig, getRuntime } from "@/server/runtime";
+import { getPresetSummaries, getPublicConfig, getRuntime, getV2Estimates } from "@/server/runtime";
+import { listAvatarViews } from "@/application/avatar-actions";
+import { CreateVideo } from "@/components/v2/create-video";
+import { PageHeader } from "@/components/v2/ui";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Criar campanha · Creative Factory" };
+export const metadata: Metadata = { title: "Criar vídeo · Creative Factory" };
 
 function toInput(n: number): string {
   return n.toFixed(2).replace(".", ",");
 }
 
-export default async function CreatePage({ searchParams }: { searchParams: Promise<{ from?: string; edit?: string }> }) {
-  const { from, edit } = await searchParams;
+export default async function CreatePage({ searchParams }: { searchParams: Promise<{ from?: string; edit?: string; mode?: string }> }) {
+  const { from, edit, mode } = await searchParams;
   const publicConfig = getPublicConfig();
   const { service } = getRuntime().deps;
+
+  // Lote 6: Create V2 é o padrão. "Planejar de novo" (from) e a criação avançada (mode=advanced)
+  // continuam no wizard completo, com todas as opções técnicas.
+  if (!from && mode !== "advanced") {
+    const avatars = await listAvatarViews(getRuntime().deps);
+    return (
+      <main className="mx-auto max-w-5xl px-4 py-8 sm:px-8 sm:py-12">
+        <PageHeader title="Criar vídeo" description="Foto + ideia + avatar + duração. A gente cuida do roteiro, da apresentadora e da edição." />
+        <div className="mt-8">
+          <CreateVideo productId={newProductId()} avatars={avatars.filter((a) => a.active).map((a) => ({ id: a.id, name: a.name, imageUrl: a.imageUrl, tags: a.tags }))}
+            estimates={getV2Estimates()} planningAvailable={publicConfig.planningAvailable} />
+        </div>
+      </main>
+    );
+  }
 
   let initial: CampaignFormInput = {
     simpleFlow: true,

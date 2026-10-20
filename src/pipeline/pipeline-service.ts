@@ -25,6 +25,12 @@ import { alignedPresenterPlan, slicePresenterAudio, type AudioSlicer } from "@/s
 import { scenePromptFor } from "@/ai/video-prompt";
 import { applyUgcEditorial } from "@/ai/ugc-editorial";
 import { applyPresenterOnly } from "@/ai/ugc-presenter-only";
+import { applyMasterScript, personaFor } from "@/ai/master-script";
+import { DURATION_TARGETS } from "@/config/duration-targets";
+import { withTargetDuration } from "@/config/simple-presets";
+import { masterAudioSegments, resolveVoiceLock } from "@/domain/video-speech";
+import { speechCapabilities } from "@/providers/ugc/ugc-providers";
+import type { SpeechCapabilities } from "@/domain/video-speech";
 import type { GeneratedVisualSource } from "@/domain/creative";
 import {
   PlanningError,
@@ -228,6 +234,20 @@ export class PipelineService {
   // Execução híbrida: uma ação autoriza somente uma unidade da etapa escolhida.
   private fingerprint(value: unknown): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
   getStageCapabilities(): StageCapabilities | undefined { return this.deps.hybrid?.capabilities; }
+
+  /**
+   * Lote 6 (Diagnóstico/Voice Lock): matriz de capacidades DECLARADA pelo provider de vídeo UGC
+   * que seria usado agora. Sem rede; undefined quando o provider não pode ser criado.
+   */
+  ugcSpeechMatrix(mode: "mock" | "real" = this.mocksAllowed() ? "mock" : "real"): { provider: string; model: string; audioStrategy: string; capabilities: SpeechCapabilities } | undefined {
+    try {
+      const refs = this.deps.ugcChoice ? this.deps.ugcChoice("high") : SIMPLE_UGC_QUALITY_PRESETS.high.ugc!;
+      const provider = this.ugcFactories().video(this.deps.pricing.requireOne(refs.video), mode);
+      return { provider: provider.descriptor.id, model: provider.descriptor.model, audioStrategy: provider.audioStrategy, capabilities: speechCapabilities(provider) };
+    } catch {
+      return undefined;
+    }
+  }
   /** Lote 5.5: MOCK só quando permitido; nunca substitui um provider REAL indisponível. */
   private mocksAllowed(): boolean { return this.deps.hybrid?.allowMocks ?? true; }
   private mockBlocked(stage: ExecutionStage): string {
@@ -780,12 +800,19 @@ export class PipelineService {
     const preset = parsed.quality !== "custom" && (parsed.simpleFlow || ugcMode)
       ? (ugcMode ? SIMPLE_UGC_QUALITY_PRESETS : SIMPLE_QUALITY_PRESETS)[parsed.quality]
       : resolveQualitySettings(parsed.quality, parsed.customSettings);
-    const resolved = ugcMode && this.deps.ugcChoice && parsed.quality !== "custom" ? { ...preset, ugc: this.deps.ugcChoice(parsed.quality) } : preset;
+    const chosen = ugcMode && this.deps.ugcChoice && parsed.quality !== "custom" ? { ...preset, ugc: this.deps.ugcChoice(parsed.quality) } : preset;
+    // Lote 6: duração escolhida (30/45/60s) redimensiona trechos/segundos do preset AI UGC.
+    const resolved = ugcMode && parsed.targetDurationSeconds ? withTargetDuration(chosen, DURATION_TARGETS[parsed.targetDurationSeconds]) : chosen;
     // AI UGC: a estratégia de áudio é DECLARADA pelo UGCVideoProvider e fica fixa no projeto.
-    const request: CampaignRequest = ugcMode
+    // Lote 6: Voice Lock só com suporte REAL a áudio externo + lip-sync; "locked" sem suporte é recusado.
+    const ugcVideo = ugcMode ? this.ugcFactories().video(this.deps.pricing.requireOne(resolved.ugc!.video), parsed.stageModes?.ugc_video ?? "mock") : undefined;
+    const request: CampaignRequest = ugcVideo
       ? {
           ...parsed, presenterPresetId: undefined, presenterChoice: undefined,
-          ugc: { ...UgcRequestSchema.parse(parsed.ugc ?? {}), audioStrategy: this.ugcFactories().video(this.deps.pricing.requireOne(resolved.ugc!.video), parsed.stageModes?.ugc_video ?? "mock").audioStrategy },
+          ugc: {
+            ...UgcRequestSchema.parse(parsed.ugc ?? {}), audioStrategy: ugcVideo.audioStrategy,
+            voiceLockDecision: resolveVoiceLock({ requested: parsed.voiceLock ?? "auto", provider: ugcVideo.descriptor.id, capabilities: speechCapabilities(ugcVideo), ...(parsed.avatar?.snapshot?.voiceProfileId ? { voiceProfileId: parsed.avatar.snapshot.voiceProfileId } : {}) }),
+          },
         }
       : parsed;
     const settings = this.deps.videoChoice && request.quality !== "custom" ? { ...resolved, video: this.deps.videoChoice } : resolved;
@@ -1025,6 +1052,9 @@ export class PipelineService {
           environment: change.environment ?? state.identity.environment,
           visualStyle: state.identity.visualStyle,
         },
+        // Lote 6: trocar só o ambiente mantém o avatar da biblioteca; trocar o apresentador sai dele.
+        ...(state.identity.source === "library" && !change.presenter && ctx.campaign.request.avatar?.snapshot
+          ? { avatar: ctx.campaign.request.avatar.snapshot, ...(state.identity.voiceDescription ? { voiceDescription: state.identity.voiceDescription } : {}) } : {}),
       });
       const next: GenerationJob = { ...ctx.job, ugc: { ...this.rejectOpenReferences(state), identity }, updatedAt: this.deps.clock() };
       await this.deps.store.saveJob(next);
@@ -1152,16 +1182,31 @@ export class PipelineService {
       // external_lipsync (narração contínua ElevenLabs) continua na montagem linear; V2 = fala nativa.
       // Lote 5.7: padrão = Presenter Only (só a apresentadora); B-roll (V2) só com brollEnabled.
       const presenterOnly = started.request.ugc?.brollEnabled !== true;
+      // Lote 6: roteiro mestre único → segmentos de fala (um por A-roll), mesma persona em todos.
+      const duration = started.request.creativeMode === "ai_ugc" && presenterOnly ? started.request.targetDurationSeconds : undefined;
+      let scriptedPlan = selectedPlan;
+      if (duration) {
+        try {
+          const persona = personaFor(started.request.avatar?.snapshot, started.request.personalization);
+          scriptedPlan = { ...selectedPlan, creatives: selectedPlan.creatives.map((creative) => applyMasterScript(creative, { duration, persona })) };
+        } catch (error) {
+          campaign = { ...transitionCampaign(campaign, "failed", clock()), error: `Roteiro mestre inválido: ${messageOf(error)}`, errorCode: "invalid_response" };
+          await store.saveCampaign(campaign);
+          return campaign;
+        }
+      }
       const editorialPlan = started.request.creativeMode === "ai_ugc" && started.request.ugc?.audioStrategy !== "external_lipsync" ? {
-        ...selectedPlan, creatives: selectedPlan.creatives.map(creative => presenterOnly ? applyPresenterOnly(creative, { minFinalSeconds: settings.finalVideoSeconds.min }).plan : applyUgcEditorial(creative, {
+        ...scriptedPlan, creatives: scriptedPlan.creatives.map(creative => presenterOnly ? applyPresenterOnly(creative, { minFinalSeconds: settings.finalVideoSeconds.min }).plan : applyUgcEditorial(creative, {
           commercialStyle: started.request.ugc?.commercialStyle === true,
           finalRange: settings.finalVideoSeconds,
           ...(settings.quality === "custom" ? {} : { quality: settings.quality }),
         }).plan),
-      } : selectedPlan;
+      } : scriptedPlan;
       const review = reviewCampaignPlan(editorialPlan, settings, pricing, rate);
       const ugcState = started.request.creativeMode === "ai_ugc" ? () => initialUgcState(started, this.deps.ids, started.request.ugc?.audioStrategy ?? "native_speech") : undefined;
-      const jobs = review.plan.creatives.map((creative) => ({ ...this.newJob(campaign.id, creative), ...(this.deps.hybrid ? { stageModes: started.request.stageModes ?? { ...MOCK_STAGE_MODES } } : {}), ...(ugcState ? { ugc: ugcState() } : {}) }));
+      const jobs = review.plan.creatives.map((creative) => ({ ...this.newJob(campaign.id, creative), ...(this.deps.hybrid ? { stageModes: started.request.stageModes ?? { ...MOCK_STAGE_MODES } } : {}), ...(ugcState ? { ugc: ugcState() } : {}),
+        ...(started.request.avatar?.avatarId && started.request.avatar.avatarRevision ? { avatar: { avatarId: started.request.avatar.avatarId, avatarRevision: started.request.avatar.avatarRevision } } : {}),
+        ...(started.request.ugc?.voiceLockDecision ? { voiceLock: started.request.ugc.voiceLockDecision } : {}) }));
       for (const job of jobs) await store.saveJob(job);
       campaign = {
         ...transitionCampaign(campaign, "planned", clock()),
@@ -1184,6 +1229,9 @@ export class PipelineService {
       projectName: request.projectName, videoConcept: request.videoConcept, scriptMode: request.scriptMode, script: request.script,
       creativeMode: request.creativeMode, ugcAudioStrategy: request.ugc?.audioStrategy,
       ...(request.creativeMode === "ai_ugc" ? { ugcPresenterOnly: request.ugc?.brollEnabled !== true } : {}),
+      ...(request.targetDurationSeconds ? { targetDurationSeconds: request.targetDurationSeconds } : {}),
+      ...(request.avatar?.snapshot ? { presenterPersona: { name: request.avatar.snapshot.name, personality: request.avatar.snapshot.personality, speakingStyle: request.avatar.snapshot.speakingStyle, gender: request.avatar.snapshot.gender } } : {}),
+      ...(request.personalization ? { personalization: request.personalization } : {}),
       styles: request.styles,
       creativeCount: request.creativeCount,
       settings,
@@ -1864,7 +1912,7 @@ export class PipelineService {
     // Narração CONTÍNUA por criativo (D55): um texto falado, uma chamada, um timing.
     const speaker = getSpeakerProfile(ctx.campaign.request.speakerProfileId);
     const script = buildNarrationScript(ctx.creative);
-    return this.executeAttempt(ctx, {
+    const outcome = await this.executeAttempt(ctx, {
       kind: "audio",
       sceneId: null,
       provider: provider.descriptor,
@@ -1883,6 +1931,28 @@ export class PipelineService {
       finalize: (result, attemptId) =>
         this.storeNarration(ctx, { script, speakerProfileId: speaker.id, language: speaker.language }, result as AudioResult, attemptId, provider),
     });
+    return this.recordMasterAudio(ctx, outcome, provider);
+  }
+
+  /**
+   * Lote 6 — Voice Lock: a narração contínua vira o ÁUDIO MESTRE do vídeo inteiro; cada trecho usa
+   * o intervalo do seu segmento do roteiro mestre (divisão lógica, sem novo áudio por trecho).
+   */
+  private async recordMasterAudio(ctx: JobContext, outcome: { job: GenerationJob; attempt: MediaAttempt }, provider: AudioProvider): Promise<{ job: GenerationJob; attempt: MediaAttempt }> {
+    const { attempt } = outcome;
+    const master = ctx.creative.masterScript;
+    if (outcome.job.voiceLock?.strategy !== "locked_voice" || !master || attempt.status !== "succeeded" || !attempt.assetUri || !attempt.durationSeconds) return outcome;
+    const segments = masterAudioSegments({ durationSeconds: attempt.durationSeconds, segmentWordCounts: master.segments.map((s) => s.wordCount), sceneIds: master.segments.map((s, i) => s.sceneId ?? `segment_${i + 1}`) });
+    const job: GenerationJob = {
+      ...outcome.job,
+      masterAudio: {
+        narrationVersion: attempt.narration?.version ?? attempt.id, uri: attempt.assetUri, durationSeconds: attempt.durationSeconds,
+        provider: provider.descriptor.id, model: provider.descriptor.model, ...(outcome.job.voiceLock.voiceProfileId ? { voiceProfileId: outcome.job.voiceLock.voiceProfileId } : {}), segments,
+      },
+      updatedAt: this.deps.clock(),
+    };
+    await this.deps.store.saveJob(job);
+    return { job, attempt };
   }
 
   /**

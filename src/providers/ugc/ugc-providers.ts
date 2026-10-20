@@ -1,4 +1,5 @@
 import type { SceneContinuity } from "@/domain/edit";
+import type { SpeechCapabilities } from "@/domain/video-speech";
 import type { UgcAudioStrategy, UgcCharacterIdentity, UgcPersonSource, UgcProductAnchor } from "@/domain/ugc";
 import type { CostQuote, MediaResult, ProviderDescriptor, ProviderJobRef, ProviderJobStatus } from "../types";
 
@@ -90,9 +91,27 @@ export interface UgcVideoProvider {
   /** Estratégia de áudio DECLARADA pelo provider (ver UgcAudioStrategy). */
   readonly audioStrategy: UgcAudioStrategy;
   readonly capabilities?: { supportsReferenceImages: boolean; maxReferenceImages: number; supportsSeed: boolean; nativeAudio: boolean };
+  /** Lote 6: matriz de capacidades de fala/referência DECLARADA (nada presumido). */
+  readonly speech?: SpeechCapabilities;
   estimateCost(seconds: number): CostQuote;
   prepare?(request: UgcVideoRequest, previous?: Record<string, string | number | boolean>): Promise<UgcPreparedReference>;
   submit(request: UgcVideoRequest, prepared?: UgcPreparedReference): Promise<ProviderJobRef>;
   getStatus(ref: ProviderJobRef): Promise<ProviderJobStatus>;
   downloadResult(ref: ProviderJobRef): Promise<UgcVideoResult>;
+}
+
+/**
+ * Capacidades de fala do provider. Sem declaração explícita, deriva SÓ do que o provider já
+ * declara (estratégia de áudio + referenceImages); identidade por imagem nunca é presumida.
+ */
+export function speechCapabilities(provider: Pick<UgcVideoProvider, "audioStrategy" | "capabilities" | "speech">): SpeechCapabilities {
+  if (provider.speech) return provider.speech;
+  const external = provider.audioStrategy === "external_lipsync";
+  return {
+    supportsNativeAudio: !external,
+    supportsExternalAudio: external,
+    supportsLipSync: external,
+    supportsIdentityReference: false,
+    supportsProductReference: provider.capabilities?.supportsReferenceImages === true,
+  };
 }

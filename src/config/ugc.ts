@@ -1,4 +1,5 @@
 import type { ProductInput } from "@/domain/product";
+import { avatarAppearance, type AvatarSnapshot } from "@/domain/avatar";
 import { deriveFidelityConstraints } from "@/domain/fidelity";
 import type { PresetQuality } from "./quality-presets";
 import {
@@ -69,7 +70,12 @@ export function resolveUgcIdentity(input: {
   revision: number;
   product: Pick<ProductInput, "id" | "name" | "description">;
   request: UgcRequest;
+  /** Lote 6: avatar salvo (revisão congelada). Mesma pessoa/roupa/ambiente em todos os trechos. */
+  avatar?: AvatarSnapshot;
+  /** Lote 6: descrição da voz do avatar, repetida em todos os trechos (fala nativa). */
+  voiceDescription?: string;
 }): UgcCharacterIdentity {
+  if (input.avatar) return identityFromAvatar({ ...input, avatar: input.avatar });
   const seed = `${input.product.id}:${input.revision}`;
   const gender = input.request.presenter === "auto" ? pick(["woman", "man"] as const, `${seed}:gender`) : input.request.presenter;
   const environment = input.request.environment === "auto" ? suggestEnvironment(input.product) : input.request.environment;
@@ -86,6 +92,34 @@ export function resolveUgcIdentity(input: {
     environmentDescription: UGC_ENVIRONMENT_LABELS[environment].description,
     visualStyle: input.request.visualStyle,
     tags: [],
+  });
+}
+
+/**
+ * Identidade a partir de um avatar da biblioteca: NÃO é regenerada do zero — aparência, roupa,
+ * ambiente e faixa de idade vêm da revisão congelada do avatar; a foto (se houver) acompanha.
+ */
+function identityFromAvatar(input: { id: string; revision: number; product: Pick<ProductInput, "id" | "name" | "description">; request: UgcRequest; avatar: AvatarSnapshot; voiceDescription?: string }): UgcCharacterIdentity {
+  const { avatar } = input;
+  const environment = input.request.environment !== "auto" ? input.request.environment : avatar.environment ?? suggestEnvironment(input.product);
+  const environmentDescription = [avatar.defaultEnvironment.trim(), UGC_ENVIRONMENT_LABELS[environment].description].filter(Boolean).join(", ");
+  return UgcCharacterIdentitySchema.parse({
+    id: input.id,
+    revision: input.revision,
+    source: "library",
+    libraryCharacterId: avatar.id,
+    avatarRevision: avatar.revision,
+    avatarName: avatar.name,
+    gender: avatar.gender,
+    ageRange: avatar.visualAgeRange,
+    appearance: avatarAppearance(avatar),
+    wardrobe: avatar.defaultOutfit.trim() || pick(WARDROBES, `${avatar.id}:${avatar.revision}:wardrobe`),
+    environment,
+    environmentDescription,
+    visualStyle: input.request.visualStyle,
+    tags: avatar.tags.slice(0, 10),
+    ...(avatar.referenceImage ? { identityImageUri: avatar.referenceImage.uri } : {}),
+    ...(input.voiceDescription ? { voiceDescription: input.voiceDescription } : {}),
   });
 }
 

@@ -2,6 +2,7 @@ import { UGC_MAX_WORDS_PER_SECOND } from "@/config/ugc";
 import { PRESENTER_POLICY } from "@/config/edit-policy";
 const PRESENTER_WORDS = PRESENTER_POLICY.words;
 import type { ScenePlanDraft } from "@/domain/creative";
+import { wordWindow, type DurationTarget } from "@/config/duration-targets";
 import { isUgcPersonSource, UGC_PERSON_SOURCES, type UgcAudioStrategy, type UgcCharacterIdentity, type UgcProductAnchor } from "@/domain/ugc";
 
 /**
@@ -96,12 +97,15 @@ export const UGC_ROLE_ACTIONS: Record<(typeof UGC_PERSON_SOURCES)[number], strin
  * Presenter Only (Lote 5.7): roteiro completo de 5–6 trechos da apresentadora, ~75–95 palavras
  * para 32–40s (tolerância de ±10 para não desperdiçar uma tentativa paga por uma palavra).
  */
-export function validatePresenterScript(scenes: readonly Pick<ScenePlanDraft, "visualSource" | "narration">[]): string[] {
+export function validatePresenterScript(scenes: readonly Pick<ScenePlanDraft, "visualSource" | "narration">[], target?: DurationTarget): string[] {
   const issues: string[] = [];
   const presenter = scenes.filter((s) => isUgcPersonSource(s.visualSource));
-  if (presenter.length < 5 || presenter.length > 6) issues.push(`Presenter Only planeja 5 ou 6 trechos da apresentadora (recebido ${presenter.length}).`);
+  // Lote 6: com duração escolhida (30/45/60s), trechos = alvo ±1 e palavras pela janela da duração.
+  const clips = target ? { min: Math.max(4, target.clips - 1), max: target.clips + 1 } : { min: 5, max: 6 };
+  if (presenter.length < clips.min || presenter.length > clips.max) issues.push(`Presenter Only planeja ${clips.min} a ${clips.max} trechos da apresentadora (recebido ${presenter.length}).`);
   const words = countWords(presenter.map((s) => s.narration).join(" "));
-  if (words < PRESENTER_WORDS.min - 10 || words > PRESENTER_WORDS.max + 10) issues.push(`Roteiro com ${words} palavras; o alvo é ${PRESENTER_WORDS.min}–${PRESENTER_WORDS.max} para 32–40s.`);
+  const window = target ? wordWindow(target) : { min: PRESENTER_WORDS.min - 10, max: PRESENTER_WORDS.max + 10 };
+  if (!target && (words < window.min || words > window.max)) issues.push(`Roteiro com ${words} palavras; o alvo é ${PRESENTER_WORDS.min}–${PRESENTER_WORDS.max} para 32–40s.`);
   if (presenter[presenter.length - 1]?.visualSource !== "ugc_cta") issues.push("O último trecho é o fechamento com CTA falado (ugc_cta).");
   return issues;
 }

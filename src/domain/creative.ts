@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { EditPlanVersionSchema, SceneEditSchema } from "./edit";
+import { MasterScriptSchema } from "./master-script";
 
 /**
  * Dois níveis de schema:
@@ -210,6 +211,8 @@ export const CreativePlanSchema = z
     callToAction: nonEmpty,
     /** 2 = Creative Editor V2 (A-roll contínuo + B-roll overlay). Ausente = montagem linear antiga. */
     editPlanVersion: EditPlanVersionSchema.optional(),
+    /** Lote 6: roteiro mestre único, dividido em segmentos de fala (um por A-roll). */
+    masterScript: MasterScriptSchema.optional(),
   })
   .superRefine((creative, ctx) => {
     checkDurationsMatch(creative, ctx);

@@ -468,3 +468,45 @@ Decisão:
 - **Áudio**: render final AAC 48 kHz estéreo (Remotion re-amostra as fontes). Validação pós-render (`render/remotion/media-probe.ts`, ffprobe local): codec, sample rate, canais, duração do arquivo e da trilha; mais `auditEditTimeline` (lacuna/sobreposição/duração). Problemas viram aviso no registro do render (`mediaCheck`). Nenhum crossfade grande.
 - **Custos**: cotação/estimativa contam todos os trechos gerados (8s Veo cada); a UI mostra trechos, segundos gerados, usados estimados e custo das cenas.
 - **Compatibilidade**: jobs/planos V2 continuam abrindo e renderizando; novos AI UGC usam V3. Product Fidelity Gate inalterado (só referência approved + confirmação humana libera vídeo).
+
+## D95 — UX V2: a UX principal esconde a complexidade do pipeline (Lote 6)
+
+A UX principal esconde a complexidade do pipeline.
+
+Contexto: o motor funcionava, mas a tela mostrava providers, etapas, readiness, storyboard técnico, custos por etapa e aprovações demais.
+
+Decisão:
+- Navegação: Início · Criar vídeo · Projetos · Avatares | Configurações (`components/v2/app-shell.tsx`). Jobs, providers, modelos, readiness, ledger/IDs e a criação completa ficam em Configurações → Avançado / Diagnóstico e em "Detalhes técnicos" do projeto (`/campaigns/[id]?view=advanced`). Nada técnico foi removido.
+- Create V2 (`application/create-v2.ts`, `components/v2/create-video-form.tsx`): obrigatórios = foto + nome, ideia, avatar (Automático por padrão) e duração (30/45/60s). "Personalizar" (gênero, ambiente, tom, CTA) e "Configurações avançadas" (preset interno, Voice Lock) ficam recolhidos. "Estimativa: R$ XX,XX" antes do botão, com "Ver detalhes" (`costs/calculate.ts#estimateDurationCost`).
+- Projeto V2 (`application/project-v2-view.ts` + `components/v2/project-v2-panel.tsx`): uma ação por vez — progresso em 4 passos (Preparando roteiro → Preparando apresentadora → Criando vídeo → Finalizando), aprovação simples, erro curto ("Não conseguimos gerar o trecho 3." + Tentar novamente / Ver detalhes) e resultado ("Seu vídeo está pronto", player 9:16, duração, custo, Baixar, Gerar outra versão, "Quer mudar alguma coisa?").
+- Aprovação: avatar salvo → só "Confira o produto" (checklist cor/formato, logo/textos, especificações); avatar novo → "Esta será sua apresentadora" (Usar esta pessoa / Gerar outra). O Product Fidelity Gate continua igual por dentro (o botão só habilita com o checklist completo e envia fidelityConfirmed=true).
+- Edição por texto: `domain/change-request.ts` interpreta o pedido (tipo, escopo, instruções, ativos afetados, custo estimado) sem custo e sem executar; regenerações complexas ficam para lotes seguintes.
+- Compatibilidade: projetos V2 têm `request.uxVersion = 2`; projetos antigos abrem na tela completa de sempre. Teto do job, aprovação por cotação, ledger e histórico financeiro inalterados.
+
+## D96 — Avatares são entidades reutilizáveis com identidade e voz próprias (Lote 6)
+
+Avatares são entidades reutilizáveis com identidade e voz próprias.
+
+- Modelo (`domain/avatar.ts`): id, name, active, referenceImage, gender, appearanceDescriptors, visualAgeRange, hair, appearancePrompt, defaultOutfit, defaultEnvironment (+ cenário genérico opcional), speakingStyle, personality, tags[], preferredProductCategories[], defaultForTags[] ("Usar como padrão para"), voiceProfileId/voiceProvider/voiceName/voiceSettings. Tags são LIVRES (normalizadas, sem nichos no código).
+- Identidade visual separada da voz: mudar foto/aparência/roupa/ambiente cria nova `revision`; nome/tags/voz atualizam a revisão atual. Todas as revisões ficam em `DATA_DIR/avatars/<id>.json`; "Excluir" arquiva. Jobs guardam `avatar { avatarId, avatarRevision }` e o pedido guarda o snapshot congelado: alterar o avatar depois não muda jobs antigos.
+- VoiceProfile (`provider, providerVoiceId, name, language, locale, style, stability, speed, similarity, enabled`): perfis embutidos = SpeakerProfiles pt-BR; `providerVoiceId` nunca sai do servidor (views omitem o campo).
+- Seleção automática (`domain/avatar-selection.ts`): tags do produto (texto do produto + tags opcionais da análise) × avatares ativos; `defaultForTags` pesa mais que categorias preferidas, que pesam mais que tags; motivo registrado em `request.avatar.reason`. Sem avatar compatível: geração sintética existente. O usuário sempre pode escolher outro.
+- Consistência: com avatar salvo, a identidade UGC vem da revisão congelada (`source: "library"`, `libraryCharacterId`, `avatarRevision`) — mesma aparência, roupa, ambiente e faixa de idade em todos os A-rolls, a partir da mesma referência aprovada. A foto do avatar fica registrada (`identityImageUri`), mas só entra como referência de imagem quando o provider declarar `supportsIdentityReference` (nenhum provider instalado declara hoje).
+
+## D97 — O roteiro é criado como master script antes de ser dividido em A-rolls (Lote 6)
+
+O roteiro é criado como master script antes de ser dividido em A-rolls.
+
+- `campaign-plan@1.8.0` (ativo): com duração escolhida, o Claude escreve UM roteiro contínuo no `script` (hook → corpo → demonstração → fechamento → CTA como última frase), com a persona do avatar e a personalização do usuário como dados; as falas das cenas são partes consecutivas do mesmo texto. Style guide de UGC brasileiro (`ai/ugc-style-guide.ts`): frases curtas, ritmo de conversa, detalhes reais; proibidos linguagem corporativa, comercial de TV, "revolucionário", "você precisa disso", "imperdível", "garantido", depoimento falso e urgência falsa.
+- Faixas: 30s ≈ 70–90 palavras (5 trechos), 45s ≈ 100–125 (7), 60s ≈ 130–160 (9) — guidance com tolerância de 15% (`config/duration-targets.ts`) para não refazer chamada paga por diferença pequena.
+- `ai/master-script.ts` (puro): normaliza só espaços/pontuação, valida, divide em segmentos CONTÍGUOS nas fronteiras de frase (DP equilibrando palavras; vírgula só se faltarem frases) e aplica um segmento por A-roll. Todos os segmentos têm o mesmo `personaId`; o último contém o CTA; `plan.callToAction` = última frase do roteiro. Persistido em `CreativePlan.masterScript`. Depois vem o Presenter Only V3 (D94) com a cauda final de 0,8–1,2s.
+- Divisão impossível (frases de menos) → planejamento falha com motivo claro; nada é aceito pela metade.
+
+## D98 — Voice Lock é usado apenas quando o provider suporta áudio externo/lip-sync de forma real (Lote 6)
+
+Voice Lock é usado apenas quando o provider suporta áudio externo/lip-sync de forma real.
+
+- Capability matrix DECLARADA por provider (`domain/video-speech.ts`, `speechCapabilities`): supportsNativeAudio, supportsExternalAudio, supportsLipSync, supportsIdentityReference, supportsProductReference. Krea (Veo 3.1 Fast) e Google (Veo 3.1) declaram só áudio nativo; nenhum provider instalado aceita áudio externo + lip-sync hoje. Diagnóstico mostra a matriz em Configurações → Avançado.
+- `VideoSpeechStrategy = native | external_lipsync`; `resolveVoiceLock`: LOCKED_VOICE (preferido) só com suporte real; "auto" sem suporte → PROVIDER_NATIVE com motivo "Voice Lock indisponível com este provider." registrado no job (`job.voiceLock`) e exibido; "Exigir Voice Lock" sem suporte → erro antes de criar o projeto. Nunca fallback silencioso.
+- LOCKED_VOICE: UMA narração contínua ElevenLabs do roteiro mestre com a voz do avatar (`speakerProfileId` do VoiceProfile) → `job.masterAudio` (uri, duração, provider, modelo, voiceProfileId, segmentos) → divisão lógica por segmento (`masterAudioSegments`, no meio da pausa quando há alignment; proporcional às palavras sem ele) → o provider de lip-sync recebe a fatia de cada trecho (rota `external_lipsync` existente). Validado só com o mock de lip-sync; nenhuma chamada real.
+- Fala nativa: a voz pode variar entre trechos (limite do provider); mitigação = mesma descrição de voz do avatar em todos os prompts de vídeo.

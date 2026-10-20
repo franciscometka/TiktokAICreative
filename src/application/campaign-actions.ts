@@ -13,6 +13,7 @@ import { StaleEstimateError } from "@/pipeline/guards";
 import { FINAL_FILE, RENDER_ID, renderDir, SAFE_ENTITY_ID } from "@/render/output-paths";
 import { LocalAudioAssetStore } from "@/storage/audio-asset-store";
 import type { LocalUploadStore } from "@/storage/upload-store";
+import type { AvatarLibraryStore } from "@/storage/avatar-store";
 import { parseCampaignForm, toCampaignRequest, type FieldErrors } from "./campaign-form";
 import { recommendedNextAction } from "./job-workflow";
 import {
@@ -47,6 +48,8 @@ export interface AppDeps {
   allowMocks?: boolean;
   /** Provider de narração configurado (só o id; nunca a chave). */
   audioProvider?: "mock" | "elevenlabs";
+  /** Lote 6: biblioteca de avatares e perfis de voz (DATA_DIR/avatars). */
+  avatars?: AvatarLibraryStore;
 }
 
 export type ActionResult<T> =

@@ -249,6 +249,15 @@ Pré-requisito já atendido: ledger persistido em `ledger.jsonl`.
 - Durabilidade: referência e cena persistem intenção antes do POST; vídeo guarda `ugcVideoOperations` com operation ID, duração pedida e custo estimado. Retomada consulta/poll/download pelo ID, sem novo submit; timeout/cobrança incerta pausa.
 - UI: `application/ugc-view.ts`, `components/campaign/ugc-reference-panel.tsx`, cartões do storyboard com quem/segura/fala/faz.
 
+## UX V2, Avatares, Roteiro mestre e Voice Lock (Lote 6 / D95–D98)
+- UI: `components/v2/` (design system `ui.tsx`, `app-shell.tsx`, `create-video-form.tsx` + `create-video.tsx`, `project-v2-panel.tsx` + `project-v2.tsx`, `project-cards.tsx`, `avatar-form.tsx`, `tag-input.tsx`, `voice-profile-form.tsx`). Componentes presentacionais recebem as Server Actions por props (testáveis com `renderToStaticMarkup`).
+- Rotas: `/` (Home V2), `/create` (Create V2; `?from=` e `?mode=advanced` = wizard completo), `/projects` (cards + filtros; `/campaigns` redireciona), `/avatars`, `/avatars/new`, `/avatars/[id]`, `/settings` (Vozes + Avançado/Diagnóstico). `/campaigns/[id]`: V2 para `uxVersion: 2`, tela completa para antigos e com `?view=advanced`.
+- Aplicação: `application/create-v2.ts` (`startVideoV2`, `resolveAvatarSelection`, `v2Estimates`), `application/avatar-actions.ts` (CRUD, vozes, views sem `providerVoiceId`), `application/project-v2-view.ts` (fase/progresso/aprovação/erro/resultado e cards).
+- Domínio: `domain/avatar.ts`, `domain/avatar-selection.ts`, `domain/master-script.ts`, `domain/video-speech.ts` (capability matrix, `resolveVoiceLock`, `masterAudioSegments`), `domain/change-request.ts`. Pedido: `uxVersion`, `targetDurationSeconds`, `avatar` (seleção + snapshot), `personalization`, `voiceLock`; job: `avatar`, `voiceLock`, `masterAudio`; plano: `masterScript`.
+- IA: `ai/master-script.ts`, `ai/ugc-style-guide.ts`, prompt `campaign-plan@1.8.0`; `config/duration-targets.ts` + `withTargetDuration` (presets por duração).
+- Storage: `storage/avatar-store.ts` (`DATA_DIR/avatars/<id>.json` com revisões, `DATA_DIR/voice-profiles.json`).
+- Pipeline: `startPlanning` decide Voice Lock pela matriz do provider; `runPlanning` aplica o roteiro mestre antes do Presenter Only; narração LOCKED_VOICE grava `job.masterAudio`; `ugcSpeechMatrix()` alimenta o Diagnóstico.
+
 ## Presenter Only (Lote 5.7 / D94)
 - Plano: `ai/ugc-presenter-only.ts` (`applyPresenterOnly`, `previewPresenterTimeline`), presets `UGC_PRESENTER_PLANS` e `PRESENTER_POLICY` em `config/edit-policy.ts`; prompt `campaign-plan@1.7.0`; `validatePresenterScript` em `ai/ugc-script.ts`.
 - Edição: `render/presenter-edit-plan.ts` (`buildPresenterEditPlan`, `presenterWindow`, `captionPhrases`/`captionLines`, `auditEditTimeline`), escolhido por `editPlanVersion: 3` em `render/edit-manifest.ts`.

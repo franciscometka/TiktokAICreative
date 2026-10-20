@@ -2,6 +2,13 @@
 
 Modo "AI UGC" (Lote 5.3): foto real do produto → pessoa sintética segurando/apresentando o produto → storyboard → vídeo falado → cenas complementares → render. MOCK por padrão; transporte REAL Google implementado no Lote 5.4 e DESLIGADO até opt-in explícito (D79–D87). Nenhuma chamada real foi executada.
 
+## Lote 6 — UX V2, avatares, roteiro mestre e Voice Lock
+
+- Fluxo do usuário: foto + ideia + avatar + duração → Gerar vídeo → progresso em 4 passos → "Seu vídeo está pronto". A UX principal esconde a complexidade do pipeline (D95).
+- Avatares são entidades reutilizáveis com identidade e voz próprias (D96): com avatar salvo, todos os A-rolls usam a mesma revisão (rosto, cabelo, roupa base, ambiente, faixa de idade); o job guarda `avatarId` + `avatarRevision`. Automático escolhe pelo match de tags; sem match, apresentadora sintética.
+- O roteiro é criado como master script antes de ser dividido em A-rolls (D97): 30s ≈ 70–90 palavras, 45s ≈ 100–125, 60s ≈ 130–160; CTA natural é a última frase; mesma persona em todos os segmentos.
+- Voice Lock é usado apenas quando o provider suporta áudio externo/lip-sync de forma real (D98). Krea/Veo atuais só têm áudio nativo: o projeto registra "Voice Lock indisponível com este provider." e usa a fala nativa, repetindo a descrição da voz do avatar em todos os trechos. Com um provider de lip-sync, uma única narração ElevenLabs vira o áudio mestre e cada trecho usa a sua fatia.
+
 ## Presenter Only (Lote 5.7, padrão)
 
 Por enquanto, o modo AI UGC prioriza Presenter Only. B-roll gerado/estático permanece disponível arquiteturalmente, mas não participa dos presets padrão.

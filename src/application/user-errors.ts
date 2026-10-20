@@ -167,6 +167,8 @@ export function toUserError(error: unknown): UserError {
   }
   // Product Fidelity Gate: a mensagem já é para o usuário (sem dados sensíveis).
   if (named(error, "UgcFidelityError")) return make("invalid_state", "Fidelidade do produto", error.message);
+  // Lote 6: Voice Lock pedido sem suporte real do provider — nunca troca de estratégia sozinho.
+  if (named(error, "VoiceLockUnavailableError")) return make("validation", "Voice Lock indisponível", error.message);
   if (named(error, "UploadValidationError")) return make("upload", "Imagem recusada", error.message);
   if (named(error, "InvalidUploadPathError")) return make("upload", "Imagem recusada", "Referência de imagem inválida.");
 

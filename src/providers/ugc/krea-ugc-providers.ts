@@ -158,6 +158,8 @@ export class UgcVideoProviderKrea implements UgcVideoProvider {
   readonly audioStrategy = "native_speech" as const;
   readonly modelConfig: KreaVeoConfig;
   readonly capabilities = { supportsReferenceImages: false, maxReferenceImages: 0, supportsSeed: false, nativeAudio: true };
+  /** Lote 6: Veo 3.1 Fast via Krea gera a fala; não aceita áudio externo nem lip-sync (sem Voice Lock). */
+  readonly speech = { supportsNativeAudio: true, supportsExternalAudio: false, supportsLipSync: false, supportsIdentityReference: false, supportsProductReference: false };
 
   constructor(private readonly pricing: ProviderPricing, private readonly http: KreaHttpClient, private readonly loadImage: KreaImageLoader) {
     if (pricing.provider !== KREA_UGC_PROVIDER) throw new ProviderError("Preço não pertence à Krea.");

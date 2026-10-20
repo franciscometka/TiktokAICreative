@@ -18,6 +18,8 @@ import { ProductInputSchema } from "./product";
 import { GenerationQualitySchema, QualitySettingsSchema } from "./quality";
 import { RenderManifestSchema, RenderRecordSchema } from "./render";
 import { AudioSilenceAnalysisSchema } from "./edit";
+import { AvatarSelectionSchema } from "./avatar";
+import { MasterAudioAssetSchema, VoiceLockDecisionSchema, VoiceLockRequestSchema } from "./video-speech";
 
 const nonEmpty = z.string().trim().min(1);
 
@@ -79,6 +81,21 @@ export const CampaignRequestSchema = z.object({
   creativeMode: CreativeModeSchema.optional(),
   /** Só com creativeMode = "ai_ugc": apresentador, ambiente e estilo visual. */
   ugc: UgcRequestSchema.optional(),
+  /** Lote 6: projeto criado pela UX V2 (foto + ideia + avatar + duração). Ausente = fluxo antigo. */
+  uxVersion: z.literal(2).optional(),
+  /** Lote 6: duração escolhida (30/45/60s); define trechos e palavras do roteiro mestre. */
+  targetDurationSeconds: z.union([z.literal(30), z.literal(45), z.literal(60)]).optional(),
+  /** Lote 6: avatar usado (revisão congelada) e o motivo da escolha. */
+  avatar: AvatarSelectionSchema.optional(),
+  /** Lote 6: "Personalizar" (opcional). */
+  personalization: z.object({
+    tone: z.string().trim().max(120).optional(),
+    cta: z.string().trim().max(200).optional(),
+    style: z.string().trim().max(60).optional(),
+    environmentText: z.string().trim().max(160).optional(),
+  }).optional(),
+  /** Lote 6: Voice Lock pedido pelo usuário. */
+  voiceLock: VoiceLockRequestSchema.optional(),
 });
 export type CampaignRequest = z.infer<typeof CampaignRequestSchema>;
 
@@ -206,6 +223,12 @@ export const GenerationJobSchema = z.object({
   currentStage: z.enum(["narration", "scenes", "avatar", "ugc_reference", "ugc_video", "render"]).optional(),
   /** AI UGC: identidade do personagem, produto-âncora e referências versionadas (pessoa + produto). */
   ugc: UgcJobStateSchema.optional(),
+  /** Lote 6: avatar e revisão usados por este job (alterar o avatar depois não muda o job). */
+  avatar: z.object({ avatarId: z.string(), avatarRevision: z.int().positive() }).optional(),
+  /** Lote 6: estratégia de voz decidida (LOCKED_VOICE ou nativa) com o motivo. */
+  voiceLock: VoiceLockDecisionSchema.optional(),
+  /** Lote 6: áudio mestre (narração contínua) e os intervalos de cada trecho, quando LOCKED_VOICE. */
+  masterAudio: MasterAudioAssetSchema.optional(),
   /** Intenções/operações Veo persistidas para retomada sem POST duplicado. */
   ugcVideoOperations: z.array(UgcVideoOperationSchema).optional(),
   presenterTasks: z.array(PresenterTaskSchema).optional(),

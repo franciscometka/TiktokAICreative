@@ -18,6 +18,8 @@ import { formatBrl } from "@/lib/money";
 import { getPublicConfig, getRuntime } from "@/server/runtime";
 import { ReadinessPanel } from "@/components/readiness-panel";
 import { SimpleVideoWorkspace } from "@/components/campaign/simple-video-workspace";
+import { buildProjectV2View } from "@/application/project-v2-view";
+import { ProjectV2 } from "@/components/v2/project-v2";
 
 export const dynamic = "force-dynamic";
 
@@ -43,8 +45,9 @@ function stepStates(view: CampaignView): StepState[] {
   }
 }
 
-export default async function CampaignPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function CampaignPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ view?: string }> }) {
   const { id } = await params;
+  const { view: viewMode } = await searchParams;
   const publicConfig = getPublicConfig();
   const result = await getCampaignView(getRuntime().deps, id);
 
@@ -62,14 +65,26 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
   }
 
   const view = result.value;
+  // Lote 6: projetos da UX V2 abrem na tela simples; "Detalhes técnicos" (?view=advanced) mostra tudo.
+  // Projetos antigos (sem uxVersion) continuam na tela completa de sempre.
+  if (view.uxVersion === 2 && viewMode !== "advanced") {
+    const v2 = buildProjectV2View(view);
+    const busy = v2.phase === "planning" || v2.phase === "generating";
+    return (
+      <main className="mx-auto max-w-5xl px-4 py-8 sm:px-8 sm:py-12">
+        {busy && <AutoRefresh intervalMs={3_000} />}
+        <ProjectV2 view={v2} campaignId={view.id} />
+      </main>
+    );
+  }
   const planned = view.state === "planned";
   const created = new Date(view.createdAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
       <nav className="text-sm text-zinc-500" aria-label="Navegação">
-        <Link href="/campaigns" className="hover:text-zinc-900">
-          Campanhas
+        <Link href={view.uxVersion === 2 ? `/campaigns/${view.id}` : "/projects"} className="hover:text-zinc-900">
+          {view.uxVersion === 2 ? "← Voltar à visão simples" : "Projetos"}
         </Link>
         <span className="mx-2 text-zinc-300">/</span>
         <span className="text-zinc-700">{view.product.name}</span>

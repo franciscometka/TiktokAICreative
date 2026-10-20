@@ -121,6 +121,14 @@ export interface JobActivity {
 }
 
 export interface CreativeView {
+  /** Lote 6: autorização única do job (ativa/pausada/concluída) — a UX V2 decide a próxima ação. */
+  authorization?: { status: "active" | "paused" | "completed"; pausedReason?: string };
+  /** Lote 6: estratégia de voz decidida (Voice Lock ou fala nativa) e o motivo. */
+  voiceLock?: { strategyLabel: string; reason: string; available: boolean };
+  /** Lote 6: avatar/revisão usados pelo job. */
+  avatar?: { avatarId: string; avatarRevision: number };
+  /** Lote 6: roteiro mestre (contagem e segmentos). */
+  masterScript?: { text: string; wordCount: number; segments: number; tone: string; warnings: string[] };
   jobQuote?: JobQuote;
   stageQuotes?: StageQuote[];
   hybrid?: boolean;
@@ -170,6 +178,11 @@ export interface CreativeView {
 }
 
 export interface CampaignView {
+  /** Lote 6: 2 = projeto criado pela UX V2. */
+  uxVersion?: 2;
+  targetDurationSeconds?: 30 | 45 | 60;
+  /** Lote 6: quem apresenta e por quê (sem IDs técnicos para o usuário). */
+  avatarSelection?: { mode: "auto" | "manual" | "synthetic"; name: string | null; reason: string; avatarId: string | null; avatarRevision: number | null };
   stageCapabilities?: StageCapabilities;
   planningQuote?: StageQuote;
   projectName?: string;
@@ -340,6 +353,10 @@ function creativeView(
       productPreviewUrl: job?.ugc ? imagePreviewUrl(campaign.request.product.id, job.ugc.product.imageId) ?? null : null,
     }),
     offline: campaign.executionMode === "offline",
+    ...(job?.jobAuthorization ? { authorization: { status: job.jobAuthorization.status, ...(job.jobAuthorization.pausedReason ? { pausedReason: job.jobAuthorization.pausedReason } : {}) } } : {}),
+    ...(job?.voiceLock ? { voiceLock: { strategyLabel: job.voiceLock.strategy === "locked_voice" ? "Voice Lock (voz fixa do avatar)" : "Voz do próprio vídeo", reason: job.voiceLock.reason, available: job.voiceLock.available } } : {}),
+    ...(job?.avatar ? { avatar: job.avatar } : {}),
+    ...(creative.masterScript ? { masterScript: { text: creative.masterScript.text, wordCount: creative.masterScript.wordCount, segments: creative.masterScript.segments.length, tone: creative.masterScript.persona.tone, warnings: creative.masterScript.warnings } } : {}),
     adjustment: presetAdjustment(review, campaign.settings.label, campaign.plannerId),
     warnings: review?.final.warnings.map((w) => w.message) ?? [],
     estimate: job?.estimate ? presentEstimate(job.estimate) : undefined,
@@ -436,6 +453,9 @@ export function buildCampaignView({
   return {
     id: campaign.id,
     projectName: request.projectName, videoConcept: request.videoConcept, offline: campaign.executionMode === "offline",
+    ...(request.uxVersion ? { uxVersion: request.uxVersion } : {}),
+    ...(request.targetDurationSeconds ? { targetDurationSeconds: request.targetDurationSeconds } : {}),
+    ...(request.avatar ? { avatarSelection: { mode: request.avatar.mode, name: request.avatar.snapshot?.name ?? null, reason: request.avatar.reason, avatarId: request.avatar.avatarId ?? null, avatarRevision: request.avatar.avatarRevision ?? null } } : {}),
     createdAt: campaign.createdAt,
     updatedAt: campaign.updatedAt,
     state,

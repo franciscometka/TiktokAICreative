@@ -19,11 +19,14 @@ export function ImageUploader({
   images,
   onChange,
   error,
+  hint,
 }: {
   productId: string;
   images: ImageView[];
   onChange: (images: ImageView[]) => void;
   error?: string;
+  /** Lote 6: texto de ajuda próprio (ex.: foto do avatar). Ausente = texto do produto. */
+  hint?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(0);
@@ -129,8 +132,8 @@ export function ImageUploader({
         }}
       />
       <p className="mt-2 text-xs text-zinc-500">
-        JPG, PNG ou WebP · até {UPLOAD_LIMITS.maxBytes / MB} MB cada · até {UPLOAD_LIMITS.maxImagesPerProduct} imagens. Fotos reais
-        do produto reduzem os segundos de vídeo IA necessários.
+        {hint ?? <>JPG, PNG ou WebP · até {UPLOAD_LIMITS.maxBytes / MB} MB cada · até {UPLOAD_LIMITS.maxImagesPerProduct} imagens. Fotos reais
+        do produto reduzem os segundos de vídeo IA necessários.</>}
       </p>
       {images.length === 0 && remaining > 0 && (
         <button type="button" className={cx(buttonClasses("secondary", "sm"), "mt-2 sm:hidden")} onClick={() => inputRef.current?.click()}>

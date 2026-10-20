@@ -20,6 +20,12 @@ export interface PlanningRequest {
   ugcAudioStrategy?: UgcAudioStrategy;
   /** Lote 5.7: AI UGC só com a apresentadora (padrão). false = Editor V2 com B-roll (opt-in). */
   ugcPresenterOnly?: boolean;
+  /** Lote 6 (campaign-plan@1.8.0+): duração escolhida → trechos e palavras do roteiro mestre. */
+  targetDurationSeconds?: 30 | 45 | 60;
+  /** Lote 6: persona do avatar escolhido (tom, estilo de fala). Dados, não instruções. */
+  presenterPersona?: { name?: string; personality?: string; speakingStyle?: string; gender?: "woman" | "man" };
+  /** Lote 6: "Personalizar" — tom, CTA desejado, estilo. */
+  personalization?: { tone?: string; cta?: string; style?: string; environmentText?: string };
   settings: QualitySettings;
 }
 

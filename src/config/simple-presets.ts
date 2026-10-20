@@ -1,6 +1,20 @@
 import { QUALITY_PRESETS, type PresetQuality } from "./quality-presets";
 import type { QualitySettings } from "@/domain/quality";
 import { UGC_PRICING_REFS } from "./ugc-models";
+import type { DurationTarget } from "./duration-targets";
+
+/**
+ * Lote 6: duração escolhida (30/45/60s) redimensiona o preset AI UGC: trechos × 8s gerados
+ * (cobrados) e a faixa final. O teto/aprovação continuam valendo sobre esses números.
+ */
+export function withTargetDuration(settings: QualitySettings, target: DurationTarget): QualitySettings {
+  return {
+    ...settings,
+    description: `${target.label} · Presenter Only: ${target.clips} trechos da apresentadora num roteiro único.`,
+    finalVideoSeconds: { ...target.finalVideoSeconds },
+    generatedVideoSeconds: { min: (target.clips - 1) * 6, max: (target.clips + 1) * 8 },
+  };
+}
 
 export const SIMPLE_QUALITY_PRESETS: Record<PresetQuality, QualitySettings> = {
   economy: {

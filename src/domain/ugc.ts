@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { FidelityConstraintSchema, ReferenceFidelitySchema, type FidelityStatus } from "./fidelity";
 import { ProviderDiagnosticSchema } from "./provider-diagnostic";
+import { VoiceLockDecisionSchema } from "./video-speech";
 
 /**
  * AI UGC (Lote 5.3): pessoa realista SEGURANDO/APRESENTANDO o produto real, falando para a câmera.
@@ -57,6 +58,8 @@ export const UgcRequestSchema = z.object({
   brollEnabled: z.boolean().optional(),
   /** Preenchido pelo sistema no planejamento a partir do UGCVideoProvider escolhido. */
   audioStrategy: UgcAudioStrategySchema.optional(),
+  /** Lote 6: decisão de Voice Lock (estratégia + motivo), fixa no projeto. */
+  voiceLockDecision: VoiceLockDecisionSchema.optional(),
 });
 export type UgcRequest = z.infer<typeof UgcRequestSchema>;
 
@@ -79,6 +82,11 @@ export const UgcCharacterIdentitySchema = z.object({
   environmentDescription: nonEmpty,
   visualStyle: UgcVisualStyleSchema,
   tags: z.array(z.string().trim().min(1)).max(10).default([]),
+  /** Lote 6: avatar da biblioteca — revisão congelada, foto de identidade e descrição da voz. */
+  avatarRevision: z.int().positive().optional(),
+  avatarName: z.string().optional(),
+  identityImageUri: z.string().optional(),
+  voiceDescription: z.string().optional(),
 });
 export type UgcCharacterIdentity = z.infer<typeof UgcCharacterIdentitySchema>;
 

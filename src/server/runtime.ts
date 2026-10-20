@@ -12,6 +12,9 @@ import { StaticPricingCatalog } from "@/costs/pricing-catalog";
 import type { CostBudget } from "@/domain/cost";
 import { LocalUploadStore } from "@/storage/upload-store";
 import { SIMPLE_QUALITY_PRESETS } from "@/config/simple-presets";
+import { FileAvatarLibraryStore } from "@/storage/avatar-store";
+import { v2Estimates, type V2EstimateView } from "@/application/create-v2";
+import { kreaUgcPricingRefs } from "@/config/krea-ugc-models";
 
 /**
  * Runtime do processo Next.js (SERVIDOR). Um único PipelineService por processo: ele guarda os
@@ -47,9 +50,13 @@ export function getRuntime(): Runtime {
         audioProvider: config.audioProvider,
         offlineOnly: false,
         allowMocks: mocksAllowed(config),
+        avatars: new FileAvatarLibraryStore(config.dataDir),
       },
     };
   }
+  // Runtime criado por uma versão anterior (hot reload): acrescenta a biblioteca de avatares sem
+  // recriar o PipelineService (que guarda locks e execuções em andamento).
+  g[KEY].deps.avatars ??= new FileAvatarLibraryStore(g[KEY].config.dataDir);
   return g[KEY];
 }
 
@@ -89,6 +96,12 @@ export function getPublicConfig(): PublicAppConfig {
     defaultBudget: config.defaultBudget,
     exchangeRate: { rate: config.exchangeRate.rate, source: config.exchangeRate.source },
   };
+}
+
+/** Lote 6: estimativas da UX V2 (duração × qualidade), calculadas no servidor pela tabela de preços. */
+export function getV2Estimates(): V2EstimateView[] {
+  const config = getRuntime().config;
+  return v2Estimates(new StaticPricingCatalog(PRICING_TABLE), config.exchangeRate.rate, config.ugc.provider === "krea" ? kreaUgcPricingRefs : undefined);
 }
 
 export function getPresetSummaries(): PresetSummary[] {

@@ -22,7 +22,11 @@ import {
   type ActionResult,
   type GenerationResultView,
 } from "@/application/campaign-actions";
-import { getRuntime } from "@/server/runtime";
+import { getRuntime, getV2Estimates } from "@/server/runtime";
+import { changeRequestCosts, startVideoV2 } from "@/application/create-v2";
+import { archiveAvatar, saveAvatar, saveVoiceProfile, setAvatarActive, type AvatarView, type VoiceProfileView } from "@/application/avatar-actions";
+import { SAFE_AVATAR_ID } from "@/domain/avatar";
+import { parseChangeRequest, type ChangeRequest } from "@/domain/change-request";
 import { UgcEnvironmentChoiceSchema, UgcPresenterChoiceSchema } from "@/domain/ugc";
 
 /**
@@ -183,4 +187,60 @@ export async function updateUgcIdentityAction(input: unknown): Promise<ActionRes
   const parsed = z.object({ jobId: id, presenter: UgcPresenterChoiceSchema.optional(), environment: UgcEnvironmentChoiceSchema.optional() }).safeParse(input);
   if (!parsed.success) return badInput();
   return updateUgcIdentity(getRuntime().deps, parsed.data);
+}
+
+// ---------------------------------------------------------------- Lote 6 · UX V2
+
+export async function startVideoV2Action(input: unknown): Promise<ActionResult<{ campaignId: string; avatarReason: string }>> {
+  const { deps, config } = getRuntime();
+  const result = await startVideoV2({ ...deps, defaultBudget: config.defaultBudget }, input);
+  if (result.ok) { revalidatePath("/"); revalidatePath("/projects"); }
+  return result;
+}
+
+export async function saveAvatarAction(input: unknown): Promise<ActionResult<AvatarView>> {
+  if (typeof input !== "object" || input === null) return badInput();
+  const result = await saveAvatar(getRuntime().deps, input as Record<string, unknown>);
+  if (result.ok) revalidatePath("/avatars");
+  return result;
+}
+
+const AvatarToggleInput = z.object({ avatarId: z.string().regex(SAFE_AVATAR_ID), active: z.boolean() });
+export async function setAvatarActiveAction(input: unknown): Promise<ActionResult<AvatarView>> {
+  const parsed = AvatarToggleInput.safeParse(input);
+  if (!parsed.success) return badInput();
+  const result = await setAvatarActive(getRuntime().deps, parsed.data.avatarId, parsed.data.active);
+  revalidatePath("/avatars");
+  return result;
+}
+
+export async function archiveAvatarAction(avatarId: unknown): Promise<ActionResult<{ id: string }>> {
+  const parsed = z.string().regex(SAFE_AVATAR_ID).safeParse(avatarId);
+  if (!parsed.success) return badInput();
+  const result = await archiveAvatar(getRuntime().deps, parsed.data);
+  revalidatePath("/avatars");
+  return result;
+}
+
+export async function saveVoiceProfileAction(input: unknown): Promise<ActionResult<VoiceProfileView>> {
+  const result = await saveVoiceProfile(getRuntime().deps, input);
+  if (result.ok) revalidatePath("/settings");
+  return result;
+}
+
+const ChangeRequestInput = z.object({ campaignId: id, text: z.string().trim().min(1).max(500) });
+/** Só interpreta e estima (sem custo, sem execução). Gastar exige confirmação em outra etapa. */
+export async function estimateChangeRequestAction(input: unknown): Promise<ActionResult<ChangeRequest>> {
+  const parsed = ChangeRequestInput.safeParse(input);
+  if (!parsed.success) return badInput();
+  try {
+    const { deps } = getRuntime();
+    const campaign = await deps.service.getCampaign(parsed.data.campaignId);
+    const jobs = await deps.service.listJobs(campaign.id);
+    const quality = campaign.request.quality === "custom" ? "high" : campaign.request.quality;
+    const costs = changeRequestCosts(getV2Estimates(), campaign.request.targetDurationSeconds ?? 30, quality, jobs[0]?.voiceLock?.strategy === "locked_voice");
+    return { ok: true, value: parseChangeRequest(parsed.data.text, costs) };
+  } catch (error) {
+    return { ok: false, error: { code: "validation", title: "Não entendemos o pedido", message: error instanceof Error ? error.message : "Tente descrever de outro jeito.", retryable: true } };
+  }
 }

@@ -269,6 +269,18 @@ Guia: [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md).
 - [x] Auditoria pré-REAL: CLI escolhe Krea, dry-run zero rede/escrita, asset durável/reutilizável, UUID/result.urls atuais, download HTTPS com redirects seguros, readiness de modelo/preço e janelas de crash cobertas offline
 - [ ] Executar somente UMA referência Krea real e revisar visualmente; vídeo continua bloqueado até essa aprovação
 
+## Lote 6 — UX V2 + Avatar Library + Master Script + Voice Lock ✅ (sem chamada paga)
+- [x] Navegação V2 (Início, Criar vídeo, Projetos, Avatares | Configurações); técnico em Configurações → Avançado / Diagnóstico
+- [x] Home V2 e Create V2 (foto + nome, ideia, avatar, duração 30/45/60; Personalizar e Avançado recolhidos; estimativa antes de gerar)
+- [x] Biblioteca de avatares (CRUD, tags livres, padrão por tag, revisões, voz), seleção automática com motivo
+- [x] Roteiro mestre (campaign-plan@1.8.0) + style guide BR + divisão determinística por A-roll; CTA no roteiro
+- [x] VoiceProfile + Voice Lock (capability matrix, LOCKED_VOICE × PROVIDER_NATIVE explícito, master audio dividido)
+- [x] Projeto V2: progresso em 4 passos, aprovação simples, erro curto, Result Page V2, ChangeRequest com estimativa
+- [x] Projetos em cards com filtros; jobs antigos continuam na tela completa
+- [ ] Executar ChangeRequests (CTA/tom/duração/ambiente/avatar) com cotação e aprovação próprias
+- [ ] Provider real de lip-sync com áudio externo (adapter já preparado) e referência de identidade por imagem
+- [ ] Usar tags da análise do Claude na seleção automática (hoje: texto do produto × tags do usuário)
+
 ## Lote 5.7 — Presenter Only UGC ✅ (sem chamada paga)
 - [x] Presenter Only como padrão AI UGC (só A-rolls; B-roll V2 só com `brollEnabled`)
 - [x] Presets ~32/~36/~40s (5/5/6 trechos), nunca < 30s

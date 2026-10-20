@@ -7,6 +7,8 @@ import type { ProductInput } from "@/domain/product";
 import type { QualitySettings } from "@/domain/quality";
 import type { UgcAudioStrategy, UgcPersonSource } from "@/domain/ugc";
 import { UGC_ROLE_ACTIONS } from "./ugc-script";
+import { splitMasterScript, splitSentences } from "./master-script";
+import { DURATION_TARGETS, type DurationTarget, type TargetDuration } from "@/config/duration-targets";
 
 /**
  * Roteiro AI UGC determinístico do planner MOCK (Editor V2). Estrutura de creator:
@@ -129,8 +131,69 @@ function buildMockPresenterCreative(product: ProductInput, quality: PresetQualit
   };
 }
 
-export function buildMockUgcCreative(product: ProductInput, settings: QualitySettings, _strategy: UgcAudioStrategy, presenterOnly = true): CreativePlanDraft {
+/**
+ * Lote 6 — roteiro mestre MOCK para 30/45/60s: UM texto contínuo (hook → corpo → demonstração →
+ * fechamento → CTA) com só fatos fornecidos; depois dividido em trechos consecutivos.
+ */
+export function buildMockMasterScriptText(product: ProductInput, target: DurationTarget, personalization?: { cta?: string }): string {
+  const facts = [...product.features, ...product.benefits].map(stripDot).filter(Boolean);
+  const benefit = product.benefits[0] ? lowerFirst(stripDot(product.benefits[0])) : undefined;
+  const hook = benefit ? `Se você está procurando ${benefit}, olha esse modelo aqui.` : "Olha esse modelo aqui que eu quero mostrar pra vocês.";
+  const body = [
+    `Esse é o ${product.name}.`,
+    "Deixa eu mostrar ele de pertinho pra vocês.",
+    ...facts.slice(0, 3).map((fact, i) => (i === 0 ? `Um detalhe que chama atenção: ${lowerFirst(fact)}.` : `E também ${lowerFirst(fact)}.`)),
+  ];
+  const demo = ["Olha aqui de lado, girando devagar.", "Repara no formato e no tamanho dele na mão.", "Dá pra ver bem o acabamento daqui."];
+  const filler = [
+    "Repara nos detalhes, com calma.", "Aqui de frente dá pra ter uma boa noção do tamanho.", "Agora mais de perto, pra vocês verem melhor.",
+    "Olha como ele fica na mão.", "Vou virar de novo pra mostrar o outro lado.", "Esse ângulo mostra bem o acabamento.",
+    "Dá pra ver cada parte com clareza.", "Aqui em cima tem mais um detalhe.", "Repara nesse lado também.", "E aqui embaixo, olha só.",
+  ];
+  const closing = "Então é isso, esse é o modelo.";
+  const cta = personalization?.cta?.trim() ? `${stripDot(personalization.cta)}.` : "Se você curtiu esse modelo, dá uma olhada no carrinho e confere os detalhes.";
+  const sentences = [hook, ...body, ...demo];
+  const words = (list: readonly string[]) => list.join(" ").split(/\s+/).length;
+  for (const line of filler) {
+    if (words([...sentences, closing, cta]) >= target.words.min) break;
+    sentences.push(line);
+  }
+  while (words([...sentences, closing, cta]) > target.words.max && sentences.length > target.clips) sentences.splice(-1, 1);
+  return [...sentences, closing, cta].join(" ");
+}
+
+function presenterSourcesFor(clips: number): UgcPersonSource[] {
+  const middle: UgcPersonSource[] = ["ugc_demo", "ugc_benefit", "ugc_demo", "ugc_benefit"];
+  return Array.from({ length: clips }, (_, i) => (i === 0 ? "ugc_hook" : i === clips - 1 ? "ugc_cta" : middle[(i - 1) % middle.length]!));
+}
+
+function buildMockDurationCreative(product: ProductInput, target: DurationTarget, personalization?: { cta?: string }): CreativePlanDraft {
+  const script = buildMockMasterScriptText(product, target, personalization);
+  const segments = splitMasterScript(script, target.clips);
+  const scenes: ScenePlanDraft[] = presenterSourcesFor(target.clips).map((source, i) => {
+    const direction = VIDEO_STRATEGIES[source].direction;
+    return {
+      duration: target.clipSeconds, narration: segments[i]!, onScreenText: i === target.clips - 1 ? EDIT_POLICY.ctaLabel : "",
+      visualDescription: `Apresentadora (mesma pessoa da referência aprovada) segura ${product.name}. ${UGC_ROLE_ACTIONS[source]}.`,
+      generationPrompt: `${direction.subjectAction}. Same person and the exact product from the approved reference. Vertical 9:16.`,
+      videoDirection: direction, shotType: "talking_head", transition: i === 0 ? undefined : "cut",
+      visualSource: source, motion: "none", requiresGeneratedVideo: true, estimatedGenerationSeconds: target.clipSeconds,
+    };
+  });
+  const sentences = splitSentences(script);
+  return {
+    concept: {
+      title: `AI UGC — ${product.name}`, angle: "Creator mostrando o produto real do começo ao fim, num roteiro único", hook: sentences[0]!,
+      targetEmotion: "curiosidade", format: "ugc", description: `Roteiro mestre simulado (MOCK) de ${target.label}: a mesma apresentadora o vídeo inteiro.`,
+    },
+    duration: Math.round(scenes.reduce((sum, s) => sum + s.duration, 0) * 100) / 100,
+    hook: sentences[0]!, script, scenes, callToAction: sentences.at(-1)!,
+  };
+}
+
+export function buildMockUgcCreative(product: ProductInput, settings: QualitySettings, _strategy: UgcAudioStrategy, presenterOnly = true, targetDuration?: TargetDuration, personalization?: { cta?: string }): CreativePlanDraft {
   const quality: PresetQuality = settings.quality === "custom" ? "high" : settings.quality;
+  if (presenterOnly && targetDuration) return buildMockDurationCreative(product, DURATION_TARGETS[targetDuration], personalization);
   if (presenterOnly) return buildMockPresenterCreative(product, quality);
   const entries = UGC_EDITORIAL_PLANS[quality];
   const arollCount = entries.filter((e) => e.role === "aroll").length;
