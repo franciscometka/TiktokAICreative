@@ -58,3 +58,15 @@ export async function probeRenderedMedia(path: string): Promise<RenderedMediaPro
     return undefined;
   }
 }
+
+/** Lote 7 (worker:check): o FFmpeg empacotado pelo Remotion executa neste ambiente? Sem rede. */
+export async function ffmpegAvailable(): Promise<boolean> {
+  try {
+    const { RenderInternals } = await import("@remotion/renderer");
+    const ffmpeg = RenderInternals.getExecutablePath({ type: "ffmpeg", indent: false, logLevel: "error", binariesDirectory: null });
+    await execute(ffmpeg, ["-version"], { timeout: 10_000, windowsHide: true });
+    return true;
+  } catch {
+    return false;
+  }
+}

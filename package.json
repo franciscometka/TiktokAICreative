@@ -23,7 +23,12 @@
     "ugc:reference:real": "tsx scripts/ugc-reference-real.ts",
     "ugc:video:real": "tsx scripts/ugc-video-real.ts",
     "db:migrate": "tsx scripts/db-migrate.ts",
-    "test:cloud": "vitest run src/cloud"
+    "test:cloud": "vitest run src/cloud",
+    "start:api": "tsx src/cloud/api/main.ts",
+    "dev:api": "tsx watch src/cloud/api/main.ts",
+    "worker": "tsx src/cloud/worker/main.ts",
+    "dev:worker": "tsx watch src/cloud/worker/main.ts",
+    "worker:check": "tsx src/cloud/worker/main.ts --check"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
