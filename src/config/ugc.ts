@@ -92,6 +92,7 @@ export function resolveUgcIdentity(input: {
     environmentDescription: UGC_ENVIRONMENT_LABELS[environment].description,
     visualStyle: input.request.visualStyle,
     tags: [],
+    identityStrategy: "synthetic",
   });
 }
 
@@ -118,7 +119,9 @@ function identityFromAvatar(input: { id: string; revision: number; product: Pick
     environmentDescription,
     visualStyle: input.request.visualStyle,
     tags: avatar.tags.slice(0, 10),
-    ...(avatar.referenceImage ? { identityImageUri: avatar.referenceImage.uri } : {}),
+    // Com foto: a FOTO é a identidade (enviada ao provider). Sem foto: só a descrição, declarado.
+    identityStrategy: avatar.referenceImage ? "avatar_reference_image" : "avatar_description",
+    ...(avatar.referenceImage ? { identityImageUri: avatar.referenceImage.uri, avatarReferenceAsset: { ...avatar.referenceImage } } : {}),
     ...(input.voiceDescription ? { voiceDescription: input.voiceDescription } : {}),
   });
 }

@@ -6,7 +6,7 @@ import { getCampaignView, type AppDeps } from "@/application/campaign-actions";
 import { isUgcPersonSource } from "@/domain/ugc";
 import { FileCostLedger } from "@/storage/file-cost-ledger";
 import { LocalUploadStore } from "@/storage/upload-store";
-import { ugcHarness } from "@/test/ugc-harness";
+import { ugcHarness, FULL_REVIEW } from "@/test/ugc-harness";
 import { activeAttempt } from "./guards";
 import { generateUgcScene, UgcReferenceRequiredError } from "./ugc-flow";
 import { MockUgcVideoProvider } from "@/providers/ugc/mock-ugc-providers";
@@ -54,7 +54,7 @@ describe("AI UGC — gerar outra referência, trocar apresentador/ambiente", () 
     expect(entries.every((e) => e.simulated)).toBe(true);
     expect(h.calls.videos()).toHaveLength(0);
     // A referência v1 não pode mais ser aprovada.
-    await expect(h.service.approveUgcReference(h.jobId, h.reference.id, { fidelityConfirmed: true })).rejects.toThrow(/mais recente/);
+    await expect(h.service.approveUgcReference(h.jobId, h.reference.id, FULL_REVIEW)).rejects.toThrow(/mais recente/);
   });
 
   it("trocar apresentador e ambiente cria nova revisão da identidade e exige nova referência", async () => {
@@ -67,12 +67,12 @@ describe("AI UGC — gerar outra referência, trocar apresentador/ambiente", () 
     expect(job.ugc!.references[0]!.review).toBe("rejected");
     expect(job.ugc!.references[1]).toMatchObject({ identityRevision: 2, review: "pending" });
     expect(h.calls.references()[1]!.identity.gender).toBe("man");
-    await expect(h.service.approveUgcReference(h.jobId, job.ugc!.references[0]!.id, { fidelityConfirmed: true })).rejects.toThrow();
+    await expect(h.service.approveUgcReference(h.jobId, job.ugc!.references[0]!.id, FULL_REVIEW)).rejects.toThrow();
   });
 
   it("depois que existem cenas UGC, trocar a pessoa é recusado (consistência)", async () => {
     const h = await pausedAtReference();
-    await (await h.service.approveUgcReference(h.jobId, h.reference.id, { fidelityConfirmed: true })).completion;
+    await (await h.service.approveUgcReference(h.jobId, h.reference.id, FULL_REVIEW)).completion;
     await expect(h.service.updateUgcIdentity(h.jobId, { presenter: "man" })).rejects.toThrow(/cópia/);
     await expect(h.service.regenerateUgcReference(h.jobId)).rejects.toThrow(/cópia/);
   });
@@ -82,7 +82,7 @@ describe("AI UGC — retomada e incerteza", () => {
   it("reinício do processo durante a pausa: aprovar na nova instância continua e conclui", async () => {
     const h = await pausedAtReference();
     const restarted = h.build();
-    const result = await restarted.approveUgcReference(h.jobId, h.reference.id, { fidelityConfirmed: true });
+    const result = await restarted.approveUgcReference(h.jobId, h.reference.id, FULL_REVIEW);
     expect(result.resumed).toBe(true);
     expect((await result.completion!).kind).toBe("COMPLETED");
     expect(h.calls.references()).toHaveLength(1);
@@ -135,7 +135,7 @@ describe("AI UGC — estratégia de áudio externa (ElevenLabs + lip sync)", () 
     const h = await pausedAtReference({ strategy: "external_lipsync" });
     expect(h.job.ugc!.audioStrategy).toBe("external_lipsync");
     expect(h.calls.narrations()).toHaveLength(0); // narração vem DEPOIS da aprovação
-    await (await h.service.approveUgcReference(h.jobId, h.reference.id, { fidelityConfirmed: true })).completion;
+    await (await h.service.approveUgcReference(h.jobId, h.reference.id, FULL_REVIEW)).completion;
     expect(h.calls.narrations()).toHaveLength(1);
     for (const call of h.calls.videos()) {
       expect(call.audio).toBeDefined();

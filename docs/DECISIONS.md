@@ -510,3 +510,28 @@ Voice Lock é usado apenas quando o provider suporta áudio externo/lip-sync de 
 - `VideoSpeechStrategy = native | external_lipsync`; `resolveVoiceLock`: LOCKED_VOICE (preferido) só com suporte real; "auto" sem suporte → PROVIDER_NATIVE com motivo "Voice Lock indisponível com este provider." registrado no job (`job.voiceLock`) e exibido; "Exigir Voice Lock" sem suporte → erro antes de criar o projeto. Nunca fallback silencioso.
 - LOCKED_VOICE: UMA narração contínua ElevenLabs do roteiro mestre com a voz do avatar (`speakerProfileId` do VoiceProfile) → `job.masterAudio` (uri, duração, provider, modelo, voiceProfileId, segmentos) → divisão lógica por segmento (`masterAudioSegments`, no meio da pausa quando há alignment; proporcional às palavras sem ele) → o provider de lip-sync recebe a fatia de cada trecho (rota `external_lipsync` existente). Validado só com o mock de lip-sync; nenhuma chamada real.
 - Fala nativa: a voz pode variar entre trechos (limite do provider); mitigação = mesma descrição de voz do avatar em todos os prompts de vídeo.
+
+## D99 — Avatar salvo nunca vira outra pessoa; especificações exigem conferência; roteiro re-dividido antes de validar (correção do Lote 6)
+
+Avatar salvo nunca é substituído silenciosamente por uma identidade sintética.
+
+- Causa do avatar diferente: no Lote 6 a identidade do avatar guardava a foto (`identityImageUri`), mas nenhum provider a recebia. A referência Krea mandava só a foto do produto em `image_urls` e o prompt dizia "fictional synthetic adult person", então o Nano Banana 2 criava uma pessoa nova. A tela V2 ainda tratava o avatar salvo como "pessoa conhecida" e mostrava só "Confira o produto" com "Apresentado por <nome>".
+- `identityStrategy` (`avatar_reference_image` | `avatar_description` | `synthetic`) e `avatarReferenceAsset` ficam gravados na identidade, em cada referência e em `job.avatar`, junto com `avatarId` e `avatarRevision`. Jobs antigos derivam a estratégia de `source` e `identityImageUri`.
+- Capacidade declarada `UgcReferenceProvider.supportsIdentityReference`:
+  - Krea = true. O OpenAPI oficial do Nano Banana 2 tem `image_urls` como array, preço fixo por requisição. A foto do avatar vira asset durável (hash + reuso, mesmo protocolo D89) e o corpo envia `[produto, avatar]` com a instrução "Image 2 is the presenter: keep exactly the same person".
+  - Google = false, porque o transporte atual envia só o produto.
+  - Mock = configurável.
+- Sem suporte, o pedido é bloqueado antes de criar o projeto (nem o roteiro é pago), na cotação da etapa e no próprio `generateUgcReference` (`UgcIdentityUnsupportedError`). A mensagem é "Este provider ainda não consegue preservar este avatar." Não existe fallback sintético.
+- Vídeo: o Veo usa a referência APROVADA (que já contém o avatar) como `start_image`. O `reference_images` do Veo/Krea não é usado, porque a combinação com `start_image` não foi validada.
+- Avatar SEM foto = `avatar_description`, declarado na UI: "Inspirado em X (avatar sem foto: aparência pela descrição)". "Apresentado por X" só aparece com a foto realmente usada.
+- UX:
+  - Criar vídeo mostra a foto do avatar escolhido.
+  - A conferência mostra a foto real do avatar ao lado da referência, com o item "É X: mesmo rosto da foto do avatar".
+- Fidelidade:
+  - O prompt da referência trata a foto original como única fonte de verdade: textos e números são copiados, nunca reescritos; potência e tensão nunca mudam; o nome do produto é só contexto, não texto a imprimir.
+  - Cada especificação exata conhecida (ex.: 2100W, 220V) precisa ser conferida individualmente (`confirmedSpecs`). Sem isso `decideFidelity` mantém `pending` e a aprovação é recusada. A revisão humana continua obrigatória e nada é aprovado automaticamente.
+- "Não conseguimos preparar o roteiro":
+  - Causa: com duração escolhida (30s = 5 trechos de 6,6s), a validação herdada da 1.5.0 limita cada trecho a 18 palavras. O nome "Secador de Cabelos Profissional Color Wind Santa Clara 2100W 220V" (10 palavras) estoura um trecho, e a tentativa extra falha igual, mesmo com o roteiro total no alvo.
+  - Correção em `campaign-plan@1.8.1`: re-divisão determinística do roteiro mestre antes da validação (`normalizeMasterScriptDraft`), com duração por trecho na medida da fala (até 8s), e instrução de nome curto do produto na fala. `applyMasterScript` usa a mesma regra.
+  - Sem reparo por LLM para erro determinístico.
+  - "Ver detalhes" mostra a causa real sanitizada (`planningErrorDetails`: trecho e motivo, sem chaves, caminhos ou URLs).

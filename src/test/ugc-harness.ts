@@ -18,6 +18,7 @@ import { createHybridPipelineService } from "@/pipeline/hybrid-service";
 import { VersionedMockRenderer } from "@/pipeline/offline-service";
 import type { PipelineDeps } from "@/pipeline/pipeline-service";
 import { campaignRequest, product } from "./fixtures";
+import { deriveFidelityConstraints, exactSpecs } from "@/domain/fidelity";
 
 /** Referência "REAL" falsa (sem rede): devolve bytes PNG, custo NÃO simulado. */
 export class FakeRealUgcReferenceProvider extends MockUgcReferenceProvider {
@@ -111,3 +112,9 @@ export async function ugcHarness(options: {
   };
   return { root, config, service, build, campaign, jobId, calls, run, renderer, ugcAssets };
 }
+
+/**
+ * Revisão humana COMPLETA da referência do produto de teste: confirmação geral + cada
+ * especificação exata conferida (correção Lote 6: "24h" e "750ml" não aprovam sozinhos).
+ */
+export const FULL_REVIEW = { fidelityConfirmed: true, confirmedSpecs: exactSpecs(deriveFidelityConstraints(product())) };

@@ -10,7 +10,7 @@ async function until(check: () => Promise<boolean>, timeoutMs = 10_000): Promise
     await new Promise((r) => setTimeout(r, 75));
   }
 }
-import { ugcHarness } from "@/test/ugc-harness";
+import { ugcHarness, FULL_REVIEW } from "@/test/ugc-harness";
 import { saveAvatar } from "./avatar-actions";
 import { getCampaignView } from "./campaign-actions";
 import type { CampaignView } from "./campaign-view";
@@ -19,14 +19,17 @@ import { buildProjectV2View, clockLabel, listProjectCards, matchesFilter, PRODUC
 
 const budget = { maxCostPerCreativeBrl: 200, maxCostPerCampaignBrl: 500, allowOverBudget: false };
 
-async function v2Project(withAvatar: boolean) {
+async function v2Project(withAvatar: boolean | "photo", productName = "Secador de cabelo") {
   const h = await ugcHarness();
   const { uploads } = await tempUploads();
   const avatars = new InMemoryAvatarLibraryStore();
   const deps = { service: h.service, uploads, rendersDir: h.config.rendersDir, audioDir: h.config.audioDir, avatars, defaultBudget: budget };
-  if (withAvatar) await saveAvatar(deps, { name: "Marina", gender: "woman", tags: ["cabelo"] });
+  if (withAvatar) {
+    const face = withAvatar === "photo" ? await uploads.save("avatar_photos", { bytes: PNG_BYTES, size: PNG_BYTES.length, declaredType: "image/png" }) : undefined;
+    await saveAvatar(deps, { name: "Marina", gender: "woman", tags: ["cabelo"], ...(face ? { referenceImage: { ownerId: "avatar_photos", imageId: face.id } } : {}) });
+  }
   const photo = await uploads.save("prod_v2", { bytes: PNG_BYTES, size: PNG_BYTES.length, declaredType: "image/png" });
-  const started = await startVideoV2(deps, { productId: "prod_v2", name: "Secador de cabelo", imageIds: [photo.id], idea: "Natural no quarto", duration: 30 });
+  const started = await startVideoV2(deps, { productId: "prod_v2", name: productName, imageIds: [photo.id], idea: "Natural no quarto", duration: 30 });
   if (!started.ok) throw new Error(started.error.message);
   const campaignId = started.value.campaignId;
   const jobId = async () => (await h.service.getCampaign(campaignId)).jobIds[0]!;
@@ -46,19 +49,26 @@ describe("Projeto V2 — geração automática com progresso simples (Lote 6)", 
     expect(v2.progress[0]!.state).toBe("done");
   });
 
-  it("avatar automático novo → \"Esta será sua apresentadora\"; avatar salvo → só \"Confira o produto\"", async () => {
-    for (const [withAvatar, phase, title] of [[false, "presenter_review", "Esta será sua apresentadora"], [true, "product_check", "Confira o produto"]] as const) {
+  it("sintético → \"Esta será sua apresentadora\"; avatar sem foto → revisão honesta da pessoa; avatar COM foto → foto real + \"é a Marina?\"", async () => {
+    for (const [withAvatar, phase, title, first] of [
+      [false, "presenter_review", "Esta será sua apresentadora", undefined],
+      [true, "presenter_review", "Marina (sem foto): confira a apresentadora", undefined],
+      ["photo", "product_check", "Confira Marina com o produto", "É Marina: mesmo rosto da foto do avatar"],
+    ] as const) {
       const { h, jobId, view } = await v2Project(withAvatar);
       const quote = await h.service.quoteJob(jobId);
       expect((await (await h.service.authorizeAndRunJob(jobId, quote.token)).completion).kind).toBe("WAITING_STAGE");
       const v2 = buildProjectV2View(await view());
       expect(v2.phase).toBe(phase);
-      expect(v2.approval).toMatchObject({ title, checklist: [...PRODUCT_CHECKLIST] });
+      expect(v2.approval).toMatchObject({ title, checklist: [...(first ? [first] : []), ...PRODUCT_CHECKLIST] });
+      expect(v2.approval!.avatarPhotoUrl === null).toBe(withAvatar !== "photo");
+      // Só afirma "Apresentado por Marina" quando a foto da Marina é usada de fato.
+      expect(v2.avatar?.label).toBe(withAvatar === "photo" ? "Apresentado por Marina" : withAvatar ? "Inspirado em Marina (avatar sem foto: aparência pela descrição)" : "Apresentadora gerada automaticamente");
       // Sem estados técnicos na tela principal.
       expect(JSON.stringify({ ...v2.approval, referenceId: undefined })).not.toMatch(/pending|needs_review|approved|ugcref_/);
       const reference = (await h.service.getJob(jobId)).ugc!.references[0]!;
       expect(v2.approval!.referenceId).toBe(reference.id);
-      await (await h.service.approveUgcReference(jobId, reference.id, { fidelityConfirmed: true })).completion;
+      await (await h.service.approveUgcReference(jobId, reference.id, FULL_REVIEW)).completion;
       const after = buildProjectV2View(await view());
       expect(["simulated_done", "done"]).toContain(after.phase);
       expect(after.progress.every((s) => s.state === "done")).toBe(true);

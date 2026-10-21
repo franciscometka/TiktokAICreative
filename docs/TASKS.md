@@ -281,6 +281,14 @@ Guia: [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md).
 - [ ] Provider real de lip-sync com áudio externo (adapter já preparado) e referência de identidade por imagem
 - [ ] Usar tags da análise do Claude na seleção automática (hoje: texto do produto × tags do usuário)
 
+## Correção do Lote 6 — avatar real, fidelidade e roteiro ✅ (sem chamada paga, D99)
+- [x] Avatar salvo com foto: foto enviada à Krea (Nano Banana 2, `image_urls` = produto + avatar); `identityStrategy`/`avatarReferenceAsset` persistidos no job e na referência
+- [x] Provider sem referência de identidade: bloqueio antes de qualquer chamada paga ("Este provider ainda não consegue preservar este avatar."); nunca fallback sintético
+- [x] UX: foto do avatar no Criar vídeo e na conferência; "Apresentado por X" só com a foto realmente usada
+- [x] Fidelidade: prompt com foto como fonte de verdade; cada especificação exata (ex.: 2100W) conferida individualmente
+- [x] Roteiro: causa reproduzida (limite por trecho × nome longo); `campaign-plan@1.8.1` re-divide antes de validar; "Ver detalhes" com causa sanitizada
+- [ ] Validação REAL: 1 referência Krea com avatar com foto (conferir se o rosto é preservado) e revisão de fidelidade
+
 ## Lote 5.7 — Presenter Only UGC ✅ (sem chamada paga)
 - [x] Presenter Only como padrão AI UGC (só A-rolls; B-roll V2 só com `brollEnabled`)
 - [x] Presets ~32/~36/~40s (5/5/6 trechos), nunca < 30s

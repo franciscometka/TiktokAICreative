@@ -6,7 +6,7 @@ import { createUgcProviderFactories } from "@/providers/ugc";
 import { FileCostLedger } from "@/storage/file-cost-ledger";
 import { FAKE_GOOGLE_KEY, googleFake, PNG_1X1, type GoogleFakeOptions } from "@/test/google-fake";
 import { makeMp4 } from "@/test/mp4-fixture";
-import { ugcHarness } from "@/test/ugc-harness";
+import { ugcHarness, FULL_REVIEW } from "@/test/ugc-harness";
 import { activeAttempt } from "./guards";
 import { generateUgcReference, UgcCostChangedError } from "./ugc-flow";
 
@@ -30,7 +30,7 @@ async function approvedReference(options: GoogleFakeOptions = {}) {
   const h = await googleHarness(options, true);
   expect((await h.run()).kind).toBe("WAITING_STAGE");
   const reference = (await h.job()).ugc!.references.at(-1)!;
-  return { ...h, approve: () => h.service.approveUgcReference(h.jobId, reference.id, { fidelityConfirmed: true }) };
+  return { ...h, approve: () => h.service.approveUgcReference(h.jobId, reference.id, FULL_REVIEW) };
 }
 
 describe("referência Gemini REAL (fetch falso)", () => {

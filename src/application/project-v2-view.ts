@@ -2,6 +2,7 @@ import type { Campaign, GenerationJob } from "@/domain/pipeline";
 import { formatBrl } from "@/lib/money";
 import type { AppDeps } from "./campaign-actions";
 import { campaignState, imagePreviewUrl, type CampaignView, type CreativeView } from "./campaign-view";
+import { planningErrorDetails } from "./user-errors";
 
 /**
  * Lote 6 — UX V2: a complexidade do pipeline continua existindo, mas a tela principal mostra só
@@ -30,12 +31,18 @@ export interface ProjectV2View {
     imageUrl: string | null;
     referenceId: string;
     checklist: string[];
+    /** Especificações exatas conferidas uma a uma (vão ao servidor como `confirmedSpecs`). */
+    specs: string[];
+    /** Foto REAL do avatar salvo (null = sem foto/sintético). */
+    avatarPhotoUrl: string | null;
+    avatarName: string | null;
     canGenerateOther: boolean;
     simulated: boolean;
   } | null;
   error: { message: string; details: string; retry: "job" | "scene" | "planning"; sceneId?: string; sceneToken?: string } | null;
   result: { videoUrl: string; downloadUrl: string; durationLabel: string; costLabel: string } | null;
-  avatar: { name: string | null; reason: string } | null;
+  /** `label` é o que a tela afirma; só diz "Apresentado por X" quando a foto de X é usada de fato. */
+  avatar: { name: string | null; label: string; reason: string } | null;
   voice: { label: string; reason: string } | null;
   jobId: string | null;
   quoteToken: string | null;
@@ -61,6 +68,32 @@ function steps(states: [ProgressState, ProgressState, ProgressState, ProgressSta
   return (["script", "presenter", "video", "finish"] as const).map((id, i) => ({ id, label: PROGRESS_LABELS[id], state: states[i]! }));
 }
 
+/** Item do checklist para uma especificação exata conhecida (ex.: 2100W). */
+export function specChecklistItem(spec: string): string {
+  return `“${spec}” igual ao produto (ou não aparece) — nenhum número diferente`;
+}
+
+/**
+ * Cabeçalho "Apresentado por …": só afirma o nome quando a foto do avatar é de fato usada.
+ * Avatar sem foto = descrição (pode variar); bloqueado/sintético = sem o nome do avatar.
+ */
+function avatarHeader(view: CampaignView, creative: CreativeView | undefined): ProjectV2View["avatar"] {
+  const selection = view.avatarSelection;
+  if (!selection) return null;
+  const identity = creative?.ugc?.identity;
+  if (!identity) return { name: null, label: selection.name ? `Avatar escolhido: ${selection.name}` : "Apresentadora gerada automaticamente", reason: selection.reason };
+  if (identity.strategy === "avatar_reference_image") return { name: identity.avatarName, label: `Apresentado por ${identity.avatarName ?? selection.name ?? "seu avatar"}`, reason: selection.reason };
+  if (identity.strategy === "avatar_description") return { name: null, label: `Inspirado em ${identity.avatarName ?? selection.name ?? "seu avatar"} (avatar sem foto: aparência pela descrição)`, reason: selection.reason };
+  return { name: null, label: "Apresentadora gerada automaticamente", reason: selection.reason };
+}
+
+/** Título do erro + causa real sanitizada (nunca só a mensagem genérica). */
+export function planningFailureDetails(error: CampaignView["error"]): string {
+  if (!error) return "Sem detalhes.";
+  const cause = planningErrorDetails(error.detail);
+  return cause ? `${error.title}. Causa: ${cause}` : `${error.title}: ${error.message}`;
+}
+
 function failedScene(creative: CreativeView) {
   return creative.scenes.find((s) => s.status === "failed");
 }
@@ -69,7 +102,7 @@ export function buildProjectV2View(view: CampaignView): ProjectV2View {
   const creative = view.creatives[0];
   const base = {
     title: view.projectName || view.product.name,
-    avatar: view.avatarSelection ? { name: view.avatarSelection.name, reason: view.avatarSelection.reason } : null,
+    avatar: avatarHeader(view, creative),
     voice: creative?.voiceLock ? { label: creative.voiceLock.strategyLabel, reason: creative.voiceLock.reason } : null,
     jobId: creative?.jobId ?? null,
     quoteToken: creative?.jobQuote?.token ?? null,
@@ -89,7 +122,8 @@ export function buildProjectV2View(view: CampaignView): ProjectV2View {
   if (view.state === "failed" || view.state === "interrupted") {
     return {
       ...base, phase: "planning_failed", headline: "Não conseguimos preparar o roteiro.",
-      error: { message: "Não conseguimos preparar o roteiro.", details: view.error ? `${view.error.title}: ${view.error.message}` : "Sem detalhes.", retry: "planning" },
+      // Erro simples na tela; "Ver detalhes" mostra a causa real sanitizada (ex.: qual trecho e por quê).
+      error: { message: "Não conseguimos preparar o roteiro.", details: planningFailureDetails(view.error), retry: "planning" },
       progress: steps(["error", "pending", "pending", "pending"]),
     };
   }
@@ -119,14 +153,24 @@ export function buildProjectV2View(view: CampaignView): ProjectV2View {
   }
   const reference = ugc?.current;
   if (ugc && reference && (ugc.canApprove || ugc.canConfirmFidelity)) {
-    // Avatar salvo: a pessoa já é conhecida → só a conferência do produto. Avatar novo: pessoa + produto.
-    const saved = view.avatarSelection?.mode === "auto" || view.avatarSelection?.mode === "manual";
+    // Correção Lote 6: avatar salvo COM foto → a foto real do avatar aparece ao lado da referência e
+    // a pessoa também é conferida ("é a Cristina?"). Sem foto ou sintético → revisão da apresentadora.
+    // Nunca uma pessoa diferente com o nome do avatar sem essa conferência.
+    const withPhoto = ugc.identity.strategy === "avatar_reference_image";
+    const name = ugc.identity.avatarName;
+    const title = withPhoto ? `Confira ${name ?? "o avatar"} com o produto` : name ? `${name} (sem foto): confira a apresentadora` : "Esta será sua apresentadora";
+    const checklist = [
+      ...(withPhoto ? [`É ${name ?? "o avatar"}: mesmo rosto da foto do avatar`] : []),
+      ...PRODUCT_CHECKLIST,
+      ...ugc.specs.map(specChecklistItem),
+    ];
     return {
-      ...base, phase: saved ? "product_check" : "presenter_review",
-      headline: saved ? "Confira o produto" : "Esta será sua apresentadora",
+      ...base, phase: withPhoto ? "product_check" : "presenter_review",
+      headline: title,
       approval: {
-        kind: saved ? "product" : "presenter", title: saved ? "Confira o produto" : "Esta será sua apresentadora",
-        imageUrl: reference.previewUrl, referenceId: reference.id, checklist: [...PRODUCT_CHECKLIST],
+        kind: withPhoto ? "product" : "presenter", title,
+        imageUrl: reference.previewUrl, referenceId: reference.id, checklist,
+        specs: [...ugc.specs], avatarPhotoUrl: ugc.identity.avatarPhotoUrl, avatarName: name,
         canGenerateOther: ugc.canRegenerate, simulated: reference.isMock,
       },
       progress: steps([scriptStep, "current", "pending", "pending"]),

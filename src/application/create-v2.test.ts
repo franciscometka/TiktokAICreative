@@ -14,7 +14,7 @@ async function until(check: () => Promise<boolean>, timeoutMs = 10_000): Promise
     await new Promise((r) => setTimeout(r, 75));
   }
 }
-import { ugcHarness } from "@/test/ugc-harness";
+import { ugcHarness, FULL_REVIEW } from "@/test/ugc-harness";
 import { saveAvatar } from "./avatar-actions";
 import { getCampaignView } from "./campaign-actions";
 import { CREATE_V2_REQUIRED_FIELDS, CreateV2InputSchema, startVideoV2, v2Estimates } from "./create-v2";
@@ -61,7 +61,8 @@ describe("Create V2 (Lote 6)", () => {
     const { campaign, job, result } = await create();
     expect(result.avatarReason).toContain("Marina");
     expect(campaign.request).toMatchObject({ uxVersion: 2, targetDurationSeconds: 30, avatar: { mode: "auto", avatarRevision: 1, snapshot: { name: "Marina" } } });
-    expect(job.avatar).toEqual({ avatarId: campaign.request.avatar!.avatarId, avatarRevision: 1 });
+    // Avatar sem foto: estratégia declarada (descrição), nunca fingindo usar uma foto.
+    expect(job.avatar).toEqual({ avatarId: campaign.request.avatar!.avatarId, avatarRevision: 1, identityStrategy: "avatar_description" });
     // Identidade NÃO regenerada do zero: vem da revisão do avatar (aparência, roupa, ambiente, voz).
     expect(job.ugc!.identity).toMatchObject({ source: "library", libraryCharacterId: campaign.request.avatar!.avatarId, avatarRevision: 1, avatarName: "Marina", gender: "woman", wardrobe: "camiseta branca" });
     expect(job.ugc!.identity.environmentDescription).toContain("quarto moderno");
@@ -138,7 +139,7 @@ describe("Create V2 (Lote 6)", () => {
     const first = await (await h.service.authorizeAndRunJob(job.id, quote.token)).completion;
     expect(first.kind).toBe("WAITING_STAGE");
     const waiting = await h.service.getJob(job.id);
-    const approved = await h.service.approveUgcReference(job.id, waiting.ugc!.references[0]!.id, { fidelityConfirmed: true });
+    const approved = await h.service.approveUgcReference(job.id, waiting.ugc!.references[0]!.id, FULL_REVIEW);
     await approved.completion;
     const done = await h.service.getJob(job.id);
     expect(h.calls.narrations()).toHaveLength(1); // nunca uma voz por trecho

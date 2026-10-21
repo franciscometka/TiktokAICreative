@@ -8,7 +8,7 @@ import { createUgcProviderFactories } from "@/providers/ugc";
 import { FileCostLedger } from "@/storage/file-cost-ledger";
 import { PNG_1X1 } from "@/test/google-fake";
 import { FAKE_KREA_KEY, KREA_ASSET_ID, kreaFake, type KreaFakeOptions } from "@/test/krea-fake";
-import { ugcHarness } from "@/test/ugc-harness";
+import { ugcHarness, FULL_REVIEW } from "@/test/ugc-harness";
 import { FilePipelineStore } from "@/storage/file-pipeline-store";
 import { activeAttempt } from "./guards";
 import { hybridCapabilities } from "./hybrid-service";
@@ -54,7 +54,7 @@ describe("AI UGC via Krea no pipeline (fetch falso)", () => {
     const h = await kreaHarness({}, true);
     expect((await h.run()).kind).toBe("WAITING_STAGE");
     const reference = (await h.job()).ugc!.references.at(-1)!;
-    const resumed = await h.service.approveUgcReference(h.jobId, reference.id, { fidelityConfirmed: true });
+    const resumed = await h.service.approveUgcReference(h.jobId, reference.id, FULL_REVIEW);
     const outcome = await resumed.completion!;
     expect(outcome.kind).not.toBe("FAILED");
     const job = await h.job();

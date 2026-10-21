@@ -15,7 +15,8 @@ type Outcome = { ok: boolean; error?: { message: string } };
 export interface ProjectV2Handlers {
   startPlanning: (token: string) => Promise<Outcome>;
   authorize: (jobId: string, token: string) => Promise<Outcome>;
-  approve: (jobId: string, referenceId: string) => Promise<Outcome>;
+  /** `confirmedSpecs`: especificações exatas (ex.: 2100W) conferidas uma a uma no checklist. */
+  approve: (jobId: string, referenceId: string, confirmedSpecs: string[]) => Promise<Outcome>;
   regenerate: (jobId: string) => Promise<Outcome>;
   retryScene: (jobId: string, sceneId: string, token: string) => Promise<Outcome>;
   retryPlanning: () => Promise<Outcome>;
@@ -105,7 +106,7 @@ export function ProjectV2Panel({ view, campaignId, handlers, advancedHref }: { v
     <div className="space-y-6">
       <header>
         <h1 className="text-[28px] font-semibold tracking-tight text-zinc-950 sm:text-[32px]">{view.title}</h1>
-        {view.avatar && <p className="mt-1 text-sm text-zinc-500">{view.avatar.name ? `Apresentado por ${view.avatar.name}` : "Apresentadora gerada automaticamente"}</p>}
+        {view.avatar && <p className="mt-1 text-sm text-zinc-500">{view.avatar.label}</p>}
       </header>
 
       {view.result ? <ResultCard result={view.result} campaignId={campaignId} onEstimate={handlers.estimateChange} /> : null}
@@ -113,11 +114,20 @@ export function ProjectV2Panel({ view, campaignId, handlers, advancedHref }: { v
       {view.approval ? (
         <Card className="overflow-hidden p-0" id="approval">
           <div className="grid md:grid-cols-[minmax(0,18rem)_1fr]">
-            <div className="aspect-[9/16] bg-zinc-100">
-              {view.approval.imageUrl
-                // eslint-disable-next-line @next/next/no-img-element -- imagem local servida por rota com IDs
-                ? <img src={view.approval.imageUrl} alt={view.approval.kind === "presenter" ? "Sua apresentadora com o produto" : "Referência do produto"} className="size-full object-cover" />
-                : <div className="grid size-full place-items-center text-sm text-zinc-400">Imagem indisponível</div>}
+            <div className="bg-zinc-100">
+              {view.approval.avatarPhotoUrl && (
+                <figure className="flex items-center gap-3 border-b border-zinc-200 bg-white p-3" data-testid="avatar-photo">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- foto do avatar servida por rota com IDs */}
+                  <img src={view.approval.avatarPhotoUrl} alt={`Foto do avatar ${view.approval.avatarName ?? ""}`.trim()} className="size-14 rounded-lg object-cover" />
+                  <figcaption className="text-sm text-zinc-600">Foto de {view.approval.avatarName ?? "seu avatar"}<br /><span className="text-xs text-zinc-400">a pessoa abaixo deve ser a mesma</span></figcaption>
+                </figure>
+              )}
+              <div className="aspect-[9/16]">
+                {view.approval.imageUrl
+                  // eslint-disable-next-line @next/next/no-img-element -- imagem local servida por rota com IDs
+                  ? <img src={view.approval.imageUrl} alt={view.approval.avatarName ? `${view.approval.avatarName} com o produto` : "Apresentadora com o produto"} className="size-full object-cover" />
+                  : <div className="grid size-full place-items-center text-sm text-zinc-400">Imagem indisponível</div>}
+              </div>
             </div>
             <div className="p-6 sm:p-8">
               <h2 className="text-2xl font-semibold tracking-tight text-zinc-950">{view.approval.title}</h2>
@@ -130,7 +140,7 @@ export function ProjectV2Panel({ view, campaignId, handlers, advancedHref }: { v
                 ))}
               </ul>
               <div className="mt-6 flex flex-wrap gap-2">
-                <button type="button" className={v2Button("primary", "lg")} disabled={pending || !allChecked || !view.jobId} onClick={() => run(() => handlers.approve(view.jobId!, view.approval!.referenceId))}>
+                <button type="button" className={v2Button("primary", "lg")} disabled={pending || !allChecked || !view.jobId} onClick={() => run(() => handlers.approve(view.jobId!, view.approval!.referenceId, view.approval!.specs))}>
                   {pending && <Spinner />}{view.approval.kind === "presenter" ? "Usar esta pessoa" : "Confirmar"}
                 </button>
                 {view.approval.canGenerateOther && <button type="button" className={v2Button("secondary", "lg")} disabled={pending || !view.jobId} onClick={() => run(() => handlers.regenerate(view.jobId!))}>Gerar outra</button>}

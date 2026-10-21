@@ -4,7 +4,7 @@ import { ClipDurationCheckSchema } from "./media-integrity";
 import { z } from "zod";
 import { AvatarPresetSchema, PresenterTaskSchema, PresenterAudioSchema } from "./presenter";
 import { NarrationInfoSchema } from "./audio";
-import { CreativeModeSchema, UgcJobStateSchema, UgcRequestSchema, UgcSceneConsistencySchema, UgcVideoOperationSchema } from "./ugc";
+import { AvatarReferenceAssetSchema, CreativeModeSchema, UgcIdentityStrategySchema, UgcJobStateSchema, UgcRequestSchema, UgcSceneConsistencySchema, UgcVideoOperationSchema } from "./ugc";
 import { CampaignPlanSchema } from "./campaign";
 import {
   BudgetExceededDecisionSchema,
@@ -224,7 +224,13 @@ export const GenerationJobSchema = z.object({
   /** AI UGC: identidade do personagem, produto-âncora e referências versionadas (pessoa + produto). */
   ugc: UgcJobStateSchema.optional(),
   /** Lote 6: avatar e revisão usados por este job (alterar o avatar depois não muda o job). */
-  avatar: z.object({ avatarId: z.string(), avatarRevision: z.int().positive() }).optional(),
+  avatar: z.object({
+    avatarId: z.string(),
+    avatarRevision: z.int().positive(),
+    /** Correção Lote 6: foto do avatar enviada ao provider e como a identidade foi obtida. */
+    avatarReferenceAsset: AvatarReferenceAssetSchema.optional(),
+    identityStrategy: UgcIdentityStrategySchema.optional(),
+  }).optional(),
   /** Lote 6: estratégia de voz decidida (LOCKED_VOICE ou nativa) com o motivo. */
   voiceLock: VoiceLockDecisionSchema.optional(),
   /** Lote 6: áudio mestre (narração contínua) e os intervalos de cada trecho, quando LOCKED_VOICE. */

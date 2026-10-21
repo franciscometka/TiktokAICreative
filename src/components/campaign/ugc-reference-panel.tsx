@@ -16,6 +16,9 @@ export function UgcReferencePanel({ jobId, ugc, running }: { jobId: string | und
   const [message, setMessage] = useState<string>();
   const [fidelityChecked, setFidelityChecked] = useState(false);
   const [observed, setObserved] = useState("");
+  // Cada especificação exata (ex.: 2100W) é conferida individualmente; sem isso não há aprovação.
+  const [specChecks, setSpecChecks] = useState<Record<string, boolean>>({});
+  const specsChecked = (ugc.specs ?? []).every((spec) => specChecks[spec]);
   const observedTexts = observed.split(/[,;\n]/).map((t) => t.trim()).filter(Boolean).slice(0, 20);
   const reference = ugc.current;
   const disabled = pending || running || !jobId;
@@ -54,7 +57,12 @@ export function UgcReferencePanel({ jobId, ugc, running }: { jobId: string | und
             <p className="mt-2 text-sm text-zinc-600">Nenhuma cena UGC é gerada antes da sua aprovação. Todas as cenas usam esta mesma pessoa, roupa, ambiente e produto.</p>
           </div>
           <dl className="grid gap-3 text-sm sm:grid-cols-2">
-            <div><dt className="text-xs text-zinc-500">Quem aparece</dt><dd className="mt-0.5 font-medium">{ugc.person.genderLabel} · {ugc.person.wardrobe}</dd><dd className="text-xs text-zinc-500">{ugc.person.appearance}</dd></div>
+            <div><dt className="text-xs text-zinc-500">Quem aparece</dt><dd className="mt-0.5 font-medium">{ugc.person.genderLabel} · {ugc.person.wardrobe}</dd><dd className="text-xs text-zinc-500">{ugc.person.appearance}</dd>
+              {ugc.identity && <dd className="mt-1 flex items-center gap-2 text-xs text-zinc-600">
+                {/* eslint-disable-next-line @next/next/no-img-element -- foto do avatar servida por rota com IDs */}
+                {ugc.identity.avatarPhotoUrl && <img src={ugc.identity.avatarPhotoUrl} alt={`Foto do avatar ${ugc.identity.avatarName ?? ""}`.trim()} className="size-8 rounded object-cover" />}
+                {ugc.identity.label}
+              </dd>}</div>
             <div><dt className="text-xs text-zinc-500">O que segura</dt><dd className="mt-0.5 font-medium">{ugc.product.name}</dd><dd className="text-xs text-zinc-500">Preserva: {ugc.product.preserve.slice(0, 3).join(", ")}</dd></div>
             <div><dt className="text-xs text-zinc-500">Ambiente</dt><dd className="mt-0.5 font-medium">{ugc.person.environmentLabel}</dd></div>
             <div><dt className="text-xs text-zinc-500">Áudio</dt><dd className="mt-0.5 font-medium">{ugc.audioStrategyLabel}</dd></div>
@@ -73,6 +81,12 @@ export function UgcReferencePanel({ jobId, ugc, running }: { jobId: string | und
                     <input type="checkbox" className="mt-0.5" checked={fidelityChecked} disabled={disabled} onChange={(e) => setFidelityChecked(e.target.checked)} />
                     Conferi: o produto, o logo, os textos e os números estão iguais ao original.
                   </label>
+                  {(ugc.specs ?? []).map((spec) => (
+                    <label key={spec} className="flex items-start gap-2 text-zinc-800">
+                      <input type="checkbox" className="mt-0.5" checked={!!specChecks[spec]} disabled={disabled} onChange={(e) => setSpecChecks((c) => ({ ...c, [spec]: e.target.checked }))} />
+                      “{spec}” está igual ao produto (ou não aparece) — nenhum número diferente.
+                    </label>
+                  ))}
                   <label className="block text-xs text-zinc-600">Algum texto ou número diferente na imagem? (opcional, ex.: 3900)
                     <input type="text" maxLength={200} disabled={disabled} value={observed} onChange={(e) => setObserved(e.target.value)} className="mt-1 block w-full rounded-md border border-zinc-300 p-2 text-sm" />
                   </label>
@@ -83,7 +97,7 @@ export function UgcReferencePanel({ jobId, ugc, running }: { jobId: string | und
           )}
           <div className="flex flex-wrap gap-2">
             {(ugc.canApprove || ugc.canConfirmFidelity) && reference && (
-              <button type="button" className={buttonClasses("primary", "md")} disabled={disabled || !fidelityChecked} onClick={() => run("Referência aprovada com fidelidade confirmada. A geração continua dentro do mesmo teto.", () => approveUgcReferenceAction({ jobId, referenceId: reference.id, fidelityConfirmed: fidelityChecked, ...(observedTexts.length ? { observedTexts } : {}) }))}>
+              <button type="button" className={buttonClasses("primary", "md")} disabled={disabled || !fidelityChecked || !specsChecked} onClick={() => run("Referência aprovada com fidelidade confirmada. A geração continua dentro do mesmo teto.", () => approveUgcReferenceAction({ jobId, referenceId: reference.id, fidelityConfirmed: fidelityChecked, confirmedSpecs: (ugc.specs ?? []).filter((spec) => specChecks[spec]), ...(observedTexts.length ? { observedTexts } : {}) }))}>
                 {pending && <Spinner />}{ugc.canConfirmFidelity ? "Confirmar fidelidade" : "Aprovar esta pessoa"}
               </button>
             )}

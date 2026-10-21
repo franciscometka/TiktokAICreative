@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { ProjectV2View } from "@/application/project-v2-view";
 import { isActive, NAV_FOOTER, NAV_MAIN } from "./app-shell";
-import { CreateVideoForm } from "./create-video-form";
+import { CreateVideoForm, SelectedAvatar } from "./create-video-form";
 import { ProgressCard, ProjectV2Panel, ResultCard } from "./project-v2-panel";
 
 const noop = async () => ({ ok: true as const });
@@ -14,7 +14,7 @@ const handlers = {
 const steps = (["done", "current", "pending", "pending"] as const).map((state, i) => ({ id: (["script", "presenter", "video", "finish"] as const)[i]!, label: ["Preparando roteiro", "Preparando apresentadora", "Criando vídeo", "Finalizando"][i]!, state }));
 const baseView: ProjectV2View = {
   phase: "generating", title: "Secador", progress: steps, headline: "Gerando seu vídeo.", estimate: null, approval: null, error: null, result: null,
-  avatar: { name: "Marina", reason: "Marina escolhido automaticamente: padrão para cabelo." }, voice: { label: "Voz do próprio vídeo", reason: "Voice Lock indisponível com este provider." }, jobId: "job_1", quoteToken: "tok",
+  avatar: { name: "Marina", label: "Apresentado por Marina", reason: "Marina escolhido automaticamente: padrão para cabelo." }, voice: { label: "Voz do próprio vídeo", reason: "Voice Lock indisponível com este provider." }, jobId: "job_1", quoteToken: "tok",
 };
 
 describe("UI V2 (Lote 6)", () => {
@@ -71,10 +71,32 @@ describe("UI V2 (Lote 6)", () => {
   it("aprovação simples: checklist do produto, sem estados técnicos", () => {
     const html = renderToStaticMarkup(createElement(ProjectV2Panel, {
       campaignId: "c1", advancedHref: "#", handlers,
-      view: { ...baseView, phase: "product_check", approval: { kind: "product", title: "Confira o produto", imageUrl: "/api/ugc/x", referenceId: "ugcref_1", checklist: ["Cor e formato corretos", "Logo/textos corretos", "Especificações corretas"], canGenerateOther: true, simulated: false } },
+      view: { ...baseView, phase: "product_check", approval: { kind: "product", title: "Confira o produto", imageUrl: "/api/ugc/x", referenceId: "ugcref_1", checklist: ["Cor e formato corretos", "Logo/textos corretos", "Especificações corretas"], specs: [], avatarPhotoUrl: null, avatarName: null, canGenerateOther: true, simulated: false } },
     }));
     for (const text of ["Confira o produto", "Cor e formato corretos", "Logo/textos corretos", "Especificações corretas", "Confirmar", "Gerar outra"]) expect(html).toContain(text);
     // data-state="pending" é atributo do progresso; nenhum estado técnico aparece como TEXTO.
     expect(html).not.toMatch(/needs_review|ugcref_1|>\s*(pending|approved)\s*</);
+  });
+});
+
+describe("UI V2 — avatar salvo e especificações (correção Lote 6)", () => {
+  it("avatar com foto: a FOTO real do avatar aparece ao lado da referência; cada especificação vira item do checklist", () => {
+    const html = renderToStaticMarkup(createElement(ProjectV2Panel, {
+      campaignId: "c1", advancedHref: "#", handlers,
+      view: { ...baseView, avatar: { name: "Cristina", label: "Apresentado por Cristina", reason: "Cristina escolhido por você." }, phase: "product_check",
+        approval: { kind: "product", title: "Confira Cristina com o produto", imageUrl: "/api/ugc/ref", referenceId: "ugcref_1", checklist: ["É Cristina: mesmo rosto da foto do avatar", "“2100W” igual ao produto (ou não aparece) — nenhum número diferente"], specs: ["2100W"], avatarPhotoUrl: "/api/uploads/avatar_x/img_1.png", avatarName: "Cristina", canGenerateOther: true, simulated: false } },
+    }));
+    expect(html).toContain('src="/api/uploads/avatar_x/img_1.png"');
+    expect(html).toContain("Foto de Cristina");
+    expect(html).toContain("É Cristina: mesmo rosto da foto do avatar");
+    expect(html).toContain("“2100W” igual ao produto");
+  });
+
+  it("Criar vídeo: avatar com foto mostra a foto; sem foto avisa que a aparência pode variar", () => {
+    const withPhoto = renderToStaticMarkup(createElement(SelectedAvatar, { avatar: { id: "avatar_1", name: "Cristina", imageUrl: "/api/uploads/avatar_1/img_1.png", tags: [] } }));
+    expect(withPhoto).toContain('src="/api/uploads/avatar_1/img_1.png"');
+    const noPhoto = renderToStaticMarkup(createElement(SelectedAvatar, { avatar: { id: "avatar_2", name: "Bia", imageUrl: null, tags: [] } }));
+    expect(noPhoto).toMatch(/Bia não tem foto/);
+    expect(noPhoto).not.toContain("<img");
   });
 });

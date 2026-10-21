@@ -35,6 +35,8 @@ export const ReferenceFidelitySchema = z.object({
   checkedBy: z.enum(["rules", "human"]).optional(),
   /** Textos/números observados na imagem (revisão humana hoje; verificador visual no futuro). */
   observedTexts: z.array(z.string().trim().min(1).max(80)).max(20).default([]),
+  /** Especificações exatas (ex.: "2100W") conferidas UMA A UMA pelo humano. */
+  confirmedSpecs: z.array(z.string().trim().min(1).max(80)).max(20).default([]),
   note: z.string().max(300).optional(),
   reviewedAt: z.string().optional(),
 });
@@ -110,25 +112,45 @@ export function findFidelityConflicts(constraints: readonly FidelityConstraint[]
 
 /** Estado inicial da fidelidade de uma referência nova: sempre `pending` (revisão humana obrigatória). */
 export function initialFidelity(constraints: readonly FidelityConstraint[]): ReferenceFidelity {
-  return { status: "pending", constraints: [...constraints], conflicts: [], observedTexts: [] };
+  return { status: "pending", constraints: [...constraints], conflicts: [], observedTexts: [], confirmedSpecs: [] };
 }
 
 /**
  * Decisão humana. `confirmed=true` sem conflitos → approved. Qualquer conflito conhecido (texto
  * observado divergente) impede aprovação automática: needs_review (ou rejected se o humano reprovar).
  */
-export function decideFidelity(current: ReferenceFidelity, input: { confirmed: boolean; observedTexts?: readonly string[]; note?: string; reviewedAt: string }): ReferenceFidelity {
+export function decideFidelity(current: ReferenceFidelity, input: { confirmed: boolean; observedTexts?: readonly string[]; confirmedSpecs?: readonly string[]; note?: string; reviewedAt: string }): ReferenceFidelity {
   const observedTexts = (input.observedTexts ?? []).map(t => t.trim()).filter(Boolean).slice(0, 20);
   const conflicts = findFidelityConflicts(current.constraints, observedTexts);
-  const status: FidelityStatus = !input.confirmed ? "rejected" : conflicts.length > 0 ? "needs_review" : "approved";
-  return { ...current, status, conflicts, observedTexts, checkedBy: conflicts.length > 0 && input.confirmed ? "rules" : "human", ...(input.note ? { note: input.note.slice(0, 300) } : {}), reviewedAt: input.reviewedAt };
+  const confirmedSpecs = (input.confirmedSpecs ?? []).map(t => t.trim()).filter(Boolean).slice(0, 20);
+  // Especificação conhecida (ex.: 2100W) sem conferência explícita: continua pendente, nunca aprova.
+  const missing = missingSpecConfirmations(current.constraints, confirmedSpecs);
+  const status: FidelityStatus = !input.confirmed ? "rejected" : conflicts.length > 0 ? "needs_review" : missing.length > 0 ? "pending" : "approved";
+  return { ...current, status, conflicts, observedTexts, confirmedSpecs, checkedBy: conflicts.length > 0 && input.confirmed ? "rules" : "human", ...(input.note ? { note: input.note.slice(0, 300) } : {}), reviewedAt: input.reviewedAt };
 }
 
 /** Linhas para o prompt: o que NÃO pode mudar (textos, números, logo). */
 export function fidelityPromptLines(constraints: readonly FidelityConstraint[]): string[] {
-  const exact = constraints.filter(c => c.kind === "number" || c.kind === "model").map(c => `"${c.expected}"`);
+  const exact = exactSpecs(constraints).map(c => `"${c}"`);
   return [
-    exact.length ? `Printed specifications must read exactly ${exact.join(", ")} if visible; never change, invent or add numbers.` : "Never invent or add numbers or specifications.",
+    "Every text, number and marking already printed on the product must stay exactly as in the original product photo; copy them, never rewrite them.",
+    exact.length
+      ? `Known specifications from the product data: ${exact.join(", ")}. If a printed specification is visible it must read exactly that; never change the power, voltage, capacity or model values and never print a different number.`
+      : "Never invent or add numbers or specifications.",
+    "Never invent, add or change numbers, wattage, voltage, model codes or words. If a marking is unreadable, keep it as it is in the photo instead of inventing one.",
     "Keep the brand logo, printed text, model name, colors, shape, buttons, nozzle, cable and packaging exactly as in the original product photo.",
   ];
+}
+
+/** Especificações EXATAS conhecidas (números com unidade e modelo): cada uma exige conferência humana. */
+export function exactSpecs(constraints: readonly FidelityConstraint[]): string[] {
+  return constraints.filter(c => c.kind === "number" || c.kind === "model").map(c => c.expected);
+}
+
+const specKey = (value: string) => value.toLowerCase().replace(/\s+/g, "");
+
+/** Especificações conhecidas que o humano ainda NÃO confirmou individualmente. */
+export function missingSpecConfirmations(constraints: readonly FidelityConstraint[], confirmedSpecs: readonly string[] = []): string[] {
+  const confirmed = new Set(confirmedSpecs.map(specKey));
+  return exactSpecs(constraints).filter(spec => !confirmed.has(specKey(spec)));
 }

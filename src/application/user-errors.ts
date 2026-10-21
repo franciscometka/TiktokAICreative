@@ -88,6 +88,27 @@ export function planningUserError(code: CampaignErrorCode): UserError {
   return { code, ...PLANNING[code] };
 }
 
+/**
+ * "Ver detalhes" da falha de planejamento: a causa REAL (ex.: "Trecho 2: fala longa demais"),
+ * sanitizada — sem chaves/tokens, caminhos absolutos, URLs com parâmetros ou texto ilimitado.
+ */
+export function planningErrorDetails(detail: string | undefined): string | undefined {
+  if (!detail?.trim()) return undefined;
+  const clean = detail
+    .replace(/\b(sk-ant-|sk-|AIza|Bearer\s+)[\w.-]+/gi, "[oculto]")
+    .replace(/\b(api[_-]?key|token|secret|authorization)\s*[:=]\s*\S+/gi, "$1=[oculto]")
+    .replace(/\b[A-Za-z0-9_-]{40,}\b/g, "[oculto]")
+    .replace(/https?:\/\/\S+/gi, "[url]")
+    .replace(/(?:[A-Za-z]:\\|\/(?:home|Users|tmp|var|mnt)\/)[^\s"')]+/g, "[caminho]")
+    .replace(/creatives\.\d+\.scenes\.(\d+)(?:\.\w+)?/g, (_, i: string) => `Trecho ${Number(i) + 1}`)
+    .replace(/creatives\.\d+\.script/g, "Roteiro")
+    .replace(/creatives\.\d+\.scenes/g, "Trechos")
+    .replace(/creatives\.\d+/g, "Vídeo")
+    .replace(/[ \t]+/g, " ")
+    .trim();
+  return clean.length > 700 ? `${clean.slice(0, 699)}…` : clean;
+}
+
 function make(code: UserErrorCode, title: string, message: string, retryable = false): UserError {
   return { code, title, message, retryable };
 }
@@ -167,6 +188,8 @@ export function toUserError(error: unknown): UserError {
   }
   // Product Fidelity Gate: a mensagem já é para o usuário (sem dados sensíveis).
   if (named(error, "UgcFidelityError")) return make("invalid_state", "Fidelidade do produto", error.message);
+  // Correção Lote 6: avatar salvo com foto e provider sem referência de identidade — nada foi cobrado.
+  if (named(error, "UgcIdentityUnsupportedError")) return make("validation", "Avatar não suportado", error.message);
   // Lote 6: Voice Lock pedido sem suporte real do provider — nunca troca de estratégia sozinho.
   if (named(error, "VoiceLockUnavailableError")) return make("validation", "Voice Lock indisponível", error.message);
   if (named(error, "UploadValidationError")) return make("upload", "Imagem recusada", error.message);

@@ -22,8 +22,12 @@ export class MockUgcReferenceProvider implements UgcReferenceProvider {
   readonly calls: UgcReferenceRequest[] = [];
   private readonly jobs = new Map<string, UgcReferenceRequest>();
 
-  constructor(private readonly pricing: ProviderPricing, private readonly options: { fail?: boolean } = {}) {
+  /** Mock declara suporte (testes podem desligar para provar o bloqueio). */
+  readonly supportsIdentityReference: boolean;
+
+  constructor(private readonly pricing: ProviderPricing, private readonly options: { fail?: boolean; identityReference?: boolean } = {}) {
     this.descriptor = { id: "mock", model: pricing.model, isMock: true, pricing };
+    this.supportsIdentityReference = options.identityReference ?? true;
   }
 
   estimateCost() {

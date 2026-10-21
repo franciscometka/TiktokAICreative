@@ -1,3 +1,4 @@
+import { UGC_MAX_WORDS_PER_SECOND } from "@/config/ugc";
 import { DURATION_TARGETS, wordWindow, type DurationTarget, type TargetDuration } from "@/config/duration-targets";
 import { CreativePlanSchema, type CreativePlan } from "@/domain/creative";
 import { MasterScriptSchema, type MasterScript, type ScriptPersona } from "@/domain/master-script";
@@ -10,6 +11,9 @@ import { NATURAL_CTA, STYLE_BLOCKERS, styleWarnings } from "./ugc-style-guide";
  * fronteiras de frase → cada A-roll recebe o seu segmento. O texto nunca é reescrito com
  * conteúdo novo; só espaços/pontuação são normalizados deterministicamente.
  */
+
+/** Limite físico de um trecho (Veo gera até 8s). */
+const MAX_SEGMENT_SECONDS = 8;
 
 export const DEFAULT_PERSONA: ScriptPersona = {
   personaId: "persona_default", tone: "natural e simpática", speakingStyle: "conversa de celular, frases curtas", pace: "natural", vocabulary: "conversational_pt_br",
@@ -138,6 +142,46 @@ export function buildMasterScript(input: { text: string; target: DurationTarget;
   });
 }
 
+/** Menor duração (0,1s) em que a fala cabe no ritmo natural, sem passar do limite físico do clipe. */
+export function durationForSpeech(words: number, current: number): number {
+  const needed = Math.ceil((words / UGC_MAX_WORDS_PER_SECOND) * 10 + 1e-9) / 10;
+  return Math.round(Math.min(MAX_SEGMENT_SECONDS, Math.max(current, needed)) * 100) / 100;
+}
+
+/**
+ * Correção Lote 6 (campaign-plan@1.8.1) — normalização DETERMINÍSTICA do rascunho do LLM antes
+ * da validação: o roteiro mestre (`script`) é re-dividido pelo próprio sistema nas fronteiras de
+ * frase (a divisão do LLM é só sugestão) e cada trecho ganha a duração em que a sua fala cabe
+ * (até 8s). Assim uma divisão desigual — ex.: o nome longo do produto num trecho de 6,6s — não
+ * vira "plano inválido" nem nova chamada paga. Nunca muda palavras; formato inesperado passa intacto.
+ */
+export function normalizeMasterScriptDraft(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object" || !Array.isArray((raw as { creatives?: unknown }).creatives)) return raw;
+  const draft = raw as { creatives: unknown[] };
+  return { ...draft, creatives: draft.creatives.map(normalizeCreativeDraft) };
+}
+
+type RawScene = { visualSource?: unknown; narration?: unknown; duration?: unknown; estimatedGenerationSeconds?: unknown };
+
+function normalizeCreativeDraft(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object") return raw;
+  const creative = raw as { script?: unknown; duration?: unknown; scenes?: unknown };
+  if (!Array.isArray(creative.scenes) || !creative.scenes.every((s) => s && typeof s === "object")) return raw;
+  const scenes = creative.scenes as RawScene[];
+  const arolls = scenes.filter((s) => typeof s.visualSource === "string" && isUgcPersonSource(s.visualSource as never));
+  // Só Presenter Only puro (todas as cenas da apresentadora) e com campos no formato esperado.
+  if (arolls.length === 0 || arolls.length !== scenes.length || !scenes.every((s) => typeof s.narration === "string" && typeof s.duration === "number")) return raw;
+  const source = typeof creative.script === "string" && creative.script.trim() ? creative.script : scenes.map((s) => (s.narration as string).trim()).join(" ");
+  const { text } = normalizeScriptText(source);
+  let segments: string[];
+  try { segments = splitMasterScript(text, scenes.length); } catch { return raw; }
+  const next = scenes.map((scene, i) => {
+    const duration = durationForSpeech(countWords(segments[i]!), scene.duration as number);
+    return { ...scene, narration: segments[i]!, duration, ...(typeof scene.estimatedGenerationSeconds === "number" ? { estimatedGenerationSeconds: duration } : {}) };
+  });
+  return { ...creative, script: text, scenes: next, duration: Math.round(next.reduce((sum, s) => sum + s.duration, 0) * 100) / 100 };
+}
+
 /**
  * Aplica o roteiro mestre a um criativo AI UGC: o `script` do plano é o mestre; a fala de cada
  * A-roll passa a ser o segmento correspondente. Hook e CTA do plano vêm do próprio roteiro.
@@ -147,13 +191,21 @@ export function applyMasterScript(creative: CreativePlan, options: { duration: T
   if (arolls.length === 0) return creative;
   const source = creative.script.trim() || arolls.map((s) => s.narration.trim()).join(" ");
   const master = buildMasterScript({ text: source, target: DURATION_TARGETS[options.duration], persona: options.persona, sceneIds: arolls.map((s) => s.id) });
-  const bySceneId = new Map(master.segments.map((s) => [s.sceneId!, s.text]));
+  const bySceneId = new Map(master.segments.map((s) => [s.sceneId!, s]));
+  // Cada trecho dura o suficiente para a SUA fala (até 8s): a divisão determinística manda.
+  const scenes = creative.scenes.map((s) => {
+    const segment = bySceneId.get(s.id);
+    if (!segment) return s;
+    const duration = durationForSpeech(segment.wordCount, s.duration);
+    return { ...s, narration: segment.text, duration, ...(s.requiresGeneratedVideo ? { estimatedGenerationSeconds: duration } : {}) };
+  });
   return CreativePlanSchema.parse({
     ...creative,
     script: master.text,
     hook: master.sections.hook || creative.hook,
     callToAction: master.sections.cta,
-    scenes: creative.scenes.map((s) => (bySceneId.has(s.id) ? { ...s, narration: bySceneId.get(s.id)! } : s)),
+    scenes,
+    duration: Math.round(scenes.filter((s) => !s.edit?.overlay).reduce((sum, s) => sum + s.duration, 0) * 100) / 100,
     masterScript: master,
   });
 }

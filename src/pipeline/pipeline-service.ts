@@ -12,8 +12,8 @@ import { findUgcSpeechViolations, speechFitsDuration } from "@/ai/ugc-script";
 import { createUgcProviderFactories, type UgcProviderFactories } from "@/providers/ugc";
 import type { UgcReferenceProvider, UgcVideoProvider } from "@/providers/ugc/ugc-providers";
 import type { UgcAssetStore } from "@/storage/ugc-asset-store";
-import { generateUgcReference, generateUgcScene, initialUgcState, UgcCostChangedError, UgcFidelityError, UgcPendingError, type UgcFidelityReview, type UgcFlowDeps } from "./ugc-flow";
-import { decideFidelity, initialFidelity } from "@/domain/fidelity";
+import { generateUgcReference, generateUgcScene, identityBlockReason, initialUgcState, UgcCostChangedError, UgcFidelityError, UgcIdentityUnsupportedError, UgcPendingError, type UgcFidelityReview, type UgcFlowDeps } from "./ugc-flow";
+import { decideFidelity, initialFidelity, missingSpecConfirmations } from "@/domain/fidelity";
 import { generatePresenter, presenterPreview, PresenterPendingError, type PresenterFlowDeps } from "./presenter-flow";
 import type { PresenterProvider } from "@/providers/presenter/presenter-provider";
 import { readFile } from "node:fs/promises";
@@ -248,6 +248,21 @@ export class PipelineService {
       return undefined;
     }
   }
+  /**
+   * Correção Lote 6: o provider de referência que será usado (e o REAL, se configurado) aceita a
+   * foto do avatar? Sem rede. Provider não configurado não bloqueia aqui (o preflight da etapa cuida).
+   */
+  private assertAvatarIdentitySupported(settings: QualitySettings, explicitMode?: "mock" | "real"): void {
+    const refs = settings.ugc;
+    if (!refs) return;
+    const modes = [...new Set([explicitMode ?? (this.mocksAllowed() ? "mock" : "real"), "real"] as const)];
+    for (const mode of modes) {
+      let provider: UgcReferenceProvider;
+      try { provider = this.ugcFactories().reference(this.deps.pricing.requireOne(refs.reference), mode); } catch { continue; }
+      if (provider.supportsIdentityReference !== true) throw new UgcIdentityUnsupportedError();
+    }
+  }
+
   /** Lote 5.5: MOCK só quando permitido; nunca substitui um provider REAL indisponível. */
   private mocksAllowed(): boolean { return this.deps.hybrid?.allowMocks ?? true; }
   private mockBlocked(stage: ExecutionStage): string {
@@ -400,6 +415,9 @@ export class PipelineService {
           const identityAttempts = state.references.filter(reference => reference.identityId === state.identity.id && reference.identityRevision === state.identity.revision).length;
           if (!awaitingReview && identityAttempts >= this.deps.maxAttemptsPerScene) blocked ??= "Limite de tentativas da referência UGC atingido";
           const reference = this.ugcReferenceProvider(ctx); model = reference.descriptor.model;
+          // Avatar salvo com foto: o provider precisa aceitar a foto; senão, nada a autorizar.
+          const identityBlock = identityBlockReason(state.identity, reference);
+          if (identityBlock) blocked = identityBlock;
           estimatedBrl = reference.estimateCost().costUsd * (await this.deps.exchangeRates.getUsdBrl()).rate;
         }
       } else if (stage === "narration" && nativeSkip) {
@@ -806,6 +824,9 @@ export class PipelineService {
     // AI UGC: a estratégia de áudio é DECLARADA pelo UGCVideoProvider e fica fixa no projeto.
     // Lote 6: Voice Lock só com suporte REAL a áudio externo + lip-sync; "locked" sem suporte é recusado.
     const ugcVideo = ugcMode ? this.ugcFactories().video(this.deps.pricing.requireOne(resolved.ugc!.video), parsed.stageModes?.ugc_video ?? "mock") : undefined;
+    // Correção Lote 6: avatar salvo COM foto exige provider de referência que aceite a foto. Sem
+    // suporte, recusa ANTES de criar o projeto e de qualquer chamada paga (inclusive o roteiro).
+    if (ugcMode && parsed.avatar?.snapshot?.referenceImage) this.assertAvatarIdentitySupported(resolved, parsed.stageModes?.ugc_reference);
     const request: CampaignRequest = ugcVideo
       ? {
           ...parsed, presenterPresetId: undefined, presenterChoice: undefined,
@@ -990,7 +1011,12 @@ export class PipelineService {
       // Product Fidelity Gate: aprovar exige revisão humana explícita de produto/logo/textos/números.
       if (!review.fidelityConfirmed) throw new UgcFidelityError("Verifique se produto, logo, textos e especificações continuam fiéis e confirme antes de aprovar.");
       const now = this.deps.clock();
-      const fidelity = decideFidelity(reference.fidelity ?? initialFidelity(state.product.fidelityConstraints ?? []), { confirmed: true, observedTexts: review.observedTexts, note: review.note, reviewedAt: now });
+      const fidelity = decideFidelity(reference.fidelity ?? initialFidelity(state.product.fidelityConstraints ?? []), { confirmed: true, observedTexts: review.observedTexts, confirmedSpecs: review.confirmedSpecs, note: review.note, reviewedAt: now });
+      if (fidelity.status === "pending") {
+        // Especificação conhecida (ex.: 2100W) sem conferência explícita: nada é gravado como aprovado.
+        const missing = missingSpecConfirmations(fidelity.constraints, fidelity.confirmedSpecs);
+        throw new UgcFidelityError(`Confira na imagem cada especificação do produto antes de aprovar: ${missing.join(", ")}.`);
+      }
       if (fidelity.status !== "approved") {
         // Conflito conhecido (ex.: esperado 2100W, observado 3900): registra e NÃO segue automaticamente.
         const blocked: GenerationJob = { ...current, ugc: { ...state, references: state.references.map(r => r.id === reference.id ? { ...r, fidelity } : r) }, updatedAt: now };
@@ -1205,7 +1231,11 @@ export class PipelineService {
       const review = reviewCampaignPlan(editorialPlan, settings, pricing, rate);
       const ugcState = started.request.creativeMode === "ai_ugc" ? () => initialUgcState(started, this.deps.ids, started.request.ugc?.audioStrategy ?? "native_speech") : undefined;
       const jobs = review.plan.creatives.map((creative) => ({ ...this.newJob(campaign.id, creative), ...(this.deps.hybrid ? { stageModes: started.request.stageModes ?? { ...MOCK_STAGE_MODES } } : {}), ...(ugcState ? { ugc: ugcState() } : {}),
-        ...(started.request.avatar?.avatarId && started.request.avatar.avatarRevision ? { avatar: { avatarId: started.request.avatar.avatarId, avatarRevision: started.request.avatar.avatarRevision } } : {}),
+        ...(started.request.avatar?.avatarId && started.request.avatar.avatarRevision ? { avatar: {
+          avatarId: started.request.avatar.avatarId, avatarRevision: started.request.avatar.avatarRevision,
+          identityStrategy: started.request.avatar.snapshot?.referenceImage ? "avatar_reference_image" as const : "avatar_description" as const,
+          ...(started.request.avatar.snapshot?.referenceImage ? { avatarReferenceAsset: { ...started.request.avatar.snapshot.referenceImage } } : {}),
+        } } : {}),
         ...(started.request.ugc?.voiceLockDecision ? { voiceLock: started.request.ugc.voiceLockDecision } : {}) }));
       for (const job of jobs) await store.saveJob(job);
       campaign = {

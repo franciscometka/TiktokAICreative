@@ -487,9 +487,9 @@ export async function authorizeAndRunJob(deps: AppDeps, input: { jobId: string; 
 // ---------------------------------------------------------------- AI UGC (Lote 5.3)
 
 /** "Aprovar": a pessoa da referência apresenta o produto. Retoma o job pausado, no mesmo teto. */
-export async function approveUgcReference(deps: AppDeps, input: { jobId: string; referenceId: string; fidelityConfirmed: boolean; observedTexts?: string[]; note?: string }): Promise<ActionResult<{ resumed: boolean }>> {
+export async function approveUgcReference(deps: AppDeps, input: { jobId: string; referenceId: string; fidelityConfirmed: boolean; observedTexts?: string[]; confirmedSpecs?: string[]; note?: string }): Promise<ActionResult<{ resumed: boolean }>> {
   try {
-    const result = await deps.service.approveUgcReference(input.jobId, input.referenceId, { fidelityConfirmed: input.fidelityConfirmed, observedTexts: input.observedTexts, note: input.note });
+    const result = await deps.service.approveUgcReference(input.jobId, input.referenceId, { fidelityConfirmed: input.fidelityConfirmed, observedTexts: input.observedTexts, confirmedSpecs: input.confirmedSpecs, note: input.note });
     if (result.completion) logBackground(input.jobId, result.completion);
     return { ok: true, value: { resumed: result.resumed } };
   } catch (error) {

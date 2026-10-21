@@ -166,7 +166,7 @@ export async function updateStoryboardSceneAction(input: unknown): Promise<Actio
 
 export async function approveUgcReferenceAction(input: unknown): Promise<ActionResult<{ resumed: boolean }>> {
   // Product Fidelity Gate: confirmação humana explícita + textos divergentes opcionais (sem caminhos).
-  const parsed = z.object({ jobId: id, referenceId: id, fidelityConfirmed: z.boolean(), observedTexts: z.array(z.string().trim().min(1).max(80)).max(20).optional(), note: z.string().max(300).optional() }).safeParse(input);
+  const parsed = z.object({ jobId: id, referenceId: id, fidelityConfirmed: z.boolean(), observedTexts: z.array(z.string().trim().min(1).max(80)).max(20).optional(), confirmedSpecs: z.array(z.string().trim().min(1).max(80)).max(20).optional(), note: z.string().max(300).optional() }).safeParse(input);
   if (!parsed.success) return badInput();
   return approveUgcReference(getRuntime().deps, parsed.data);
 }

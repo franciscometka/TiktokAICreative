@@ -21,6 +21,8 @@ export interface VeoUgcVideoTransport {
 /** Adapter futuro Nano Banana; polling/timeout e retomada por operation ID permanecem no pipeline. */
 export class UgcReferenceProviderGoogle implements UgcReferenceProvider {
   readonly descriptor;
+  /** O transporte Gemini atual envia só a foto do produto: avatar salvo com foto é bloqueado. */
+  readonly supportsIdentityReference = false;
 
   constructor(private readonly pricing: ProviderPricing, private readonly transport: GoogleUgcReferenceTransport) {
     this.descriptor = { id: "google", model: pricing.model, isMock: false, pricing };

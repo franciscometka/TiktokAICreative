@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isUgcPersonSource } from "@/domain/ugc";
 import { activeAttempt } from "./guards";
-import { ugcHarness } from "@/test/ugc-harness";
+import { ugcHarness, FULL_REVIEW } from "@/test/ugc-harness";
 
 describe("AI UGC — pipeline MOCK completo, offline", () => {
   it("referência → pausa para aprovação → cenas UGC com a mesma pessoa → B-roll → render", async () => {
@@ -26,7 +26,7 @@ describe("AI UGC — pipeline MOCK completo, offline", () => {
     expect(h.calls.references()).toHaveLength(1);
     expect(h.calls.videos()).toHaveLength(0);
 
-    const approved = await h.service.approveUgcReference(h.jobId, job.ugc!.references[0]!.id, { fidelityConfirmed: true });
+    const approved = await h.service.approveUgcReference(h.jobId, job.ugc!.references[0]!.id, FULL_REVIEW);
     expect(approved.resumed).toBe(true);
     expect((await approved.completion!).kind).toBe("COMPLETED");
     job = await h.service.getJob(h.jobId);

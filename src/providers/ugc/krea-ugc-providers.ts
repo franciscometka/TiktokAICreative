@@ -38,12 +38,21 @@ export interface KreaVeoBody {
   resolution: KreaVeoConfig["resolution"];
 }
 
-/** Builder PURO do corpo da referência; `productUrl` é a URL do asset já enviado à Krea. */
-export function buildKreaReferenceBody(request: UgcReferenceRequest, productUrl: string): KreaReferenceBody {
+/**
+ * Builder PURO do corpo da referência; `productUrl`/`avatarUrl` são URLs de assets já enviados à
+ * Krea. Nano Banana 2 aceita várias `image_urls` (OpenAPI Krea, preço fixo por requisição): com
+ * avatar salvo vão DUAS imagens — 1 = produto (fonte de verdade), 2 = a pessoa do avatar.
+ */
+export function buildKreaReferenceBody(request: UgcReferenceRequest, productUrl: string, avatarUrl?: string): KreaReferenceBody {
   if (request.aspectRatio !== "9:16") throw new Error("AI UGC Krea deve permanecer em 9:16.");
+  if (request.identityImage && !avatarUrl) throw new Error("Avatar salvo sem a foto enviada à Krea: nenhuma pessoa nova é gerada no lugar dele.");
+  const product = `Preserve exactly: ${request.product.preserve.join(", ")}. Do not redesign, relabel or reshape the product.`;
+  const instruction = avatarUrl
+    ? `Image 1 is the ORIGINAL product photo and the only source of truth for the product. Image 2 is the presenter: keep exactly the same person as in image 2 (same face, facial features, skin tone, hair, apparent age and body type); do not create a different person. Compose a portrait 9:16 UGC frame of the person from image 2 holding the product from image 1. ${product}`
+    : `Edit the supplied product image into a portrait 9:16 UGC reference. ${product} The person must be synthetic and adult.`;
   return {
-    prompt: `${request.prompt}\nEdit the supplied product image into a portrait 9:16 UGC reference. Preserve exactly: ${request.product.preserve.join(", ")}. Do not redesign, relabel or reshape the product. The person must be synthetic and adult.`,
-    image_urls: [productUrl],
+    prompt: `${request.prompt}\n${instruction}`,
+    image_urls: avatarUrl ? [productUrl, avatarUrl] : [productUrl],
     aspect_ratio: "9:16",
     resolution: "1K",
   };
@@ -99,6 +108,8 @@ async function completedUrl(http: KreaHttpClient, jobId: string, billedUsage: { 
 /** Nano Banana 2 via Krea: upload da foto do produto (`/assets`) → job pago → polling → PNG/JPEG. */
 export class UgcReferenceProviderKrea implements UgcReferenceProvider {
   readonly descriptor;
+  /** Nano Banana 2 (Krea) aceita várias `image_urls`: produto + foto do avatar na mesma geração. */
+  readonly supportsIdentityReference = true;
 
   constructor(private readonly pricing: ProviderPricing, private readonly http: KreaHttpClient, private readonly loadImage: KreaImageLoader) {
     if (pricing.provider !== KREA_UGC_PROVIDER) throw new ProviderError("Preço não pertence à Krea.");
@@ -110,28 +121,37 @@ export class UgcReferenceProviderKrea implements UgcReferenceProvider {
   }
 
   async prepare(request: UgcReferenceRequest, previous?: Record<string, string | number | boolean>): Promise<UgcPreparedReference> {
-    const product = await this.loadImage(request.product.imageUri);
-    const sourceHash = createHash("sha256").update(product.data).digest("hex");
-    const priorId = previous?.kreaAssetId;
-    if (previous?.kreaAssetHash === sourceHash && previous?.kreaAssetProvider === KREA_UGC_PROVIDER && previous?.kreaAssetVersion === 1 && typeof priorId === "string") {
-      const current = await this.http.getAsset(priorId);
-      if (current) return { metadata: this.assetMetadata(current, sourceHash) };
-    }
-    const uploaded = await this.http.uploadAsset(product.data, product.mimeType, "product");
-    return { metadata: this.assetMetadata(uploaded, sourceHash) };
+    const metadata = await this.uploadOnce(request.product.imageUri, "product", "kreaAsset", previous);
+    // Avatar salvo: a foto da pessoa também vira asset durável (mesmo protocolo: hash + reuso).
+    if (!request.identityImage) return { metadata };
+    return { metadata: { ...metadata, ...(await this.uploadOnce(request.identityImage.uri, "avatar", "kreaAvatarAsset", previous)) } };
   }
 
-  private assetMetadata(asset: { id: string; imageUrl: string; uploadedAt: string }, sourceHash: string): UgcPreparedReference["metadata"] {
+  /** Upload não pago com reuso: mesmo SHA-256 + asset ainda existente na Krea = sem novo upload. */
+  private async uploadOnce(uri: string, label: string, prefix: "kreaAsset" | "kreaAvatarAsset", previous?: Record<string, string | number | boolean>): Promise<UgcPreparedReference["metadata"]> {
+    const image = await this.loadImage(uri);
+    const sourceHash = createHash("sha256").update(image.data).digest("hex");
+    const priorId = previous?.[`${prefix}Id`];
+    if (previous?.[`${prefix}Hash`] === sourceHash && previous?.[`${prefix}Provider`] === KREA_UGC_PROVIDER && previous?.[`${prefix}Version`] === 1 && typeof priorId === "string") {
+      const current = await this.http.getAsset(priorId);
+      if (current) return this.assetMetadata(current, sourceHash, prefix);
+    }
+    return this.assetMetadata(await this.http.uploadAsset(image.data, image.mimeType, label), sourceHash, prefix);
+  }
+
+  private assetMetadata(asset: { id: string; imageUrl: string; uploadedAt: string }, sourceHash: string, prefix: "kreaAsset" | "kreaAvatarAsset" = "kreaAsset"): UgcPreparedReference["metadata"] {
     return {
-      kreaAssetProvider: KREA_UGC_PROVIDER, kreaAssetVersion: 1, kreaAssetHash: sourceHash,
-      kreaAssetId: asset.id, kreaAssetUrl: asset.imageUrl, kreaAssetUploadedAt: asset.uploadedAt,
+      [`${prefix}Provider`]: KREA_UGC_PROVIDER, [`${prefix}Version`]: 1, [`${prefix}Hash`]: sourceHash,
+      [`${prefix}Id`]: asset.id, [`${prefix}Url`]: asset.imageUrl, [`${prefix}UploadedAt`]: asset.uploadedAt,
     };
   }
 
   async submit(request: UgcReferenceRequest, prepared?: UgcPreparedReference): Promise<ProviderJobRef> {
     const productUrl = prepared?.metadata.kreaAssetUrl;
     if (typeof productUrl !== "string") throw new ProviderError("Asset Krea não preparado; nenhum envio pago foi feito.");
-    const body = buildKreaReferenceBody(request, productUrl);
+    const avatarUrl = prepared?.metadata.kreaAvatarAssetUrl;
+    if (request.identityImage && typeof avatarUrl !== "string") throw new ProviderError("Foto do avatar não enviada à Krea; nenhum envio pago foi feito.");
+    const body = buildKreaReferenceBody(request, productUrl, typeof avatarUrl === "string" ? avatarUrl : undefined);
     const { jobId, requestId } = await this.http.createJob(KREA_REFERENCE_ENDPOINT, { ...body }, [request.prompt]);
     return { providerJobId: `krea:${jobId}`, ...(requestId ? { requestId } : {}) };
   }
@@ -158,7 +178,11 @@ export class UgcVideoProviderKrea implements UgcVideoProvider {
   readonly audioStrategy = "native_speech" as const;
   readonly modelConfig: KreaVeoConfig;
   readonly capabilities = { supportsReferenceImages: false, maxReferenceImages: 0, supportsSeed: false, nativeAudio: true };
-  /** Lote 6: Veo 3.1 Fast via Krea gera a fala; não aceita áudio externo nem lip-sync (sem Voice Lock). */
+  /**
+   * Lote 6: Veo 3.1 Fast via Krea gera a fala; não aceita áudio externo nem lip-sync (sem Voice Lock).
+   * Identidade no vídeo: vem do start_image (referência APROVADA, que já contém o avatar); o
+   * `reference_images` do Veo não é usado (combinação com start_image não validada).
+   */
   readonly speech = { supportsNativeAudio: true, supportsExternalAudio: false, supportsLipSync: false, supportsIdentityReference: false, supportsProductReference: false };
 
   constructor(private readonly pricing: ProviderPricing, private readonly http: KreaHttpClient, private readonly loadImage: KreaImageLoader) {

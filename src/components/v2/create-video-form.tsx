@@ -102,6 +102,7 @@ export function CreateVideoForm({ productId, avatars, estimates, planningAvailab
                 {avatars.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
               <Link href="/avatars/new" className="mt-1.5 block text-xs font-medium text-indigo-600 hover:text-indigo-500">+ Criar novo avatar</Link>
+              <SelectedAvatar avatar={avatars.find((a) => a.id === avatar)} />
             </div>
             <div>
               <FieldLabel>Duração</FieldLabel>
@@ -167,5 +168,22 @@ export function CreateVideoForm({ productId, avatars, estimates, planningAvailab
       {failure ? <p role="alert" className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800"><span className="font-medium">{failure.title}.</span> {failure.message}</p> : null}
       {!planningAvailable ? <p className="mt-4 text-sm text-amber-800">A geração ainda não está configurada neste servidor. Veja Configurações → Avançado.</p> : null}
     </Card>
+  );
+}
+
+/**
+ * Correção Lote 6: avatar salvo escolhido → a FOTO real dele aparece aqui (é ela que vai ao
+ * provider). Sem foto, o aviso é explícito: a aparência vem da descrição e pode variar.
+ */
+export function SelectedAvatar({ avatar }: { avatar: AvatarOption | undefined }) {
+  if (!avatar) return null;
+  return avatar.imageUrl ? (
+    <div className="mt-2 flex items-center gap-2 text-xs text-zinc-600" data-testid="selected-avatar">
+      {/* eslint-disable-next-line @next/next/no-img-element -- foto do avatar servida por rota com IDs */}
+      <img src={avatar.imageUrl} alt={`Foto do avatar ${avatar.name}`} className="size-10 rounded-lg object-cover" />
+      <span>{avatar.name} desta foto apresenta o vídeo.</span>
+    </div>
+  ) : (
+    <p className="mt-2 max-w-56 text-xs text-amber-700" data-testid="selected-avatar">{avatar.name} não tem foto: a aparência virá da descrição e pode variar. Adicione uma foto em Avatares.</p>
   );
 }

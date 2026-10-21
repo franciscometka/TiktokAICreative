@@ -3,14 +3,17 @@ import { veoRequestedDuration } from "@/config/ugc-models";
 import { previewEditorialTimeline } from "@/ai/ugc-editorial";
 import { UGC_ROLE_ACTIONS } from "@/ai/ugc-script";
 import type { CutReason } from "@/domain/edit";
-import type { FidelityConstraint, FidelityStatus } from "@/domain/fidelity";
+import { exactSpecs, type FidelityConstraint, type FidelityStatus } from "@/domain/fidelity";
+import { STORED_IMAGE_NAME } from "@/domain/upload";
 import { UGC_ENVIRONMENT_LABELS } from "@/config/ugc";
 import type { ScenePlan } from "@/domain/creative";
 import type { Campaign, GenerationJob } from "@/domain/pipeline";
 import {
   approvedReference,
+  identityStrategyOf,
   isUgcPersonSource,
   referenceFidelityStatus,
+  type UgcIdentityStrategy,
   latestReference,
   UGC_ENVIRONMENTS,
   type UgcEnvironment,
@@ -50,6 +53,13 @@ export interface UgcView {
   /** Status curto do que está rodando agora (null = nada em andamento). */
   progressLabel: string | null;
   person: { genderLabel: string; appearance: string; wardrobe: string; environment: UgcEnvironment; environmentLabel: string; visualStyle: string };
+  /**
+   * Correção Lote 6: de onde vem a pessoa. Com avatar com foto, `avatarPhotoUrl` é a foto REAL do
+   * avatar (mostrada ao lado da referência); sem foto, o rótulo diz que é só a descrição.
+   */
+  identity: { strategy: UgcIdentityStrategy; label: string; avatarName: string | null; avatarPhotoUrl: string | null };
+  /** Especificações exatas (ex.: "2100W") que precisam ser conferidas UMA A UMA antes de aprovar. */
+  specs: string[];
   product: { name: string; previewUrl: string | null; preserve: string[] };
   audioStrategy: "native_speech" | "external_lipsync";
   audioStrategyLabel: string;
@@ -201,6 +211,8 @@ export function buildUgcView(input: {
       environmentLabel: UGC_ENVIRONMENT_LABELS[identity.environment].label,
       visualStyle: identity.visualStyle,
     },
+    identity: identityView(identity),
+    specs: exactSpecs(constraints),
     product: { name: state.product.name, previewUrl: input.productPreviewUrl, preserve: state.product.preserve },
     audioStrategy: state.audioStrategy,
     audioStrategyLabel: state.audioStrategy === "native_speech" ? "Fala gerada pelo próprio vídeo (sem narração separada)" : "Narração ElevenLabs + sincronização labial",
@@ -219,6 +231,22 @@ export function buildUgcView(input: {
     usage,
     ...(durationSummary ? { durationSummary } : {}),
   };
+}
+
+/** Foto do avatar servida pela rota de uploads (só IDs gerados pelo servidor). */
+function avatarPhotoUrl(asset: { ownerId: string; imageId: string } | undefined): string | null {
+  if (!asset || !STORED_IMAGE_NAME.test(asset.imageId)) return null;
+  return `/api/uploads/${encodeURIComponent(asset.ownerId)}/${encodeURIComponent(asset.imageId)}`;
+}
+
+/** Quem é a pessoa, sem prometer o que o pipeline não faz (avatar sem foto = só descrição). */
+export function identityView(identity: Parameters<typeof identityStrategyOf>[0] & { avatarName?: string; avatarReferenceAsset?: { ownerId: string; imageId: string } }): UgcView["identity"] {
+  const strategy = identityStrategyOf(identity);
+  const name = identity.avatarName ?? null;
+  const label = strategy === "avatar_reference_image" ? `${name ?? "Avatar"} (foto do avatar enviada como referência)`
+    : strategy === "avatar_description" ? `${name ?? "Avatar"} sem foto: aparência pela descrição, pode variar`
+    : "Apresentadora gerada automaticamente";
+  return { strategy, label, avatarName: strategy === "synthetic" ? null : name, avatarPhotoUrl: strategy === "avatar_reference_image" ? avatarPhotoUrl(identity.avatarReferenceAsset) : null };
 }
 
 const ROLE_LABELS: Record<string, string> = {

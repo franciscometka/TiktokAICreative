@@ -68,6 +68,24 @@ export type UgcRequest = z.infer<typeof UgcRequestSchema>;
  * ambiente e produto. `source: "library"` + `libraryCharacterId` ficam prontos para uma futura
  * biblioteca de personagens reutilizáveis; `tags` são livres (sem nichos fixos).
  */
+/**
+ * Correção do Lote 6 — como a identidade da pessoa é obtida (gravado no job e em cada referência):
+ *   avatar_reference_image = foto do avatar salvo enviada ao provider (mesma pessoa);
+ *   avatar_description     = avatar salvo SEM foto: só a descrição (a aparência pode variar);
+ *   synthetic              = pessoa gerada pelo sistema.
+ * Um avatar com foto NUNCA vira silenciosamente uma pessoa sintética.
+ */
+export const UGC_IDENTITY_STRATEGIES = ["avatar_reference_image", "avatar_description", "synthetic"] as const;
+export const UgcIdentityStrategySchema = z.enum(UGC_IDENTITY_STRATEGIES);
+export type UgcIdentityStrategy = z.infer<typeof UgcIdentityStrategySchema>;
+
+/** Foto de referência do avatar (pasta/arquivo gerados pelo servidor; nunca caminho vindo do browser). */
+export const AvatarReferenceAssetSchema = z.object({ ownerId: nonEmpty, imageId: nonEmpty, uri: nonEmpty });
+export type AvatarReferenceAsset = z.infer<typeof AvatarReferenceAssetSchema>;
+
+/** Mensagem única quando o provider não consegue usar a foto do avatar (bloqueio antes de pagar). */
+export const AVATAR_IDENTITY_UNSUPPORTED = "Este provider ainda não consegue preservar este avatar.";
+
 export const UgcCharacterIdentitySchema = z.object({
   id: nonEmpty,
   revision: z.int().positive(),
@@ -87,8 +105,24 @@ export const UgcCharacterIdentitySchema = z.object({
   avatarName: z.string().optional(),
   identityImageUri: z.string().optional(),
   voiceDescription: z.string().optional(),
+  /** Correção Lote 6: estratégia de identidade e a foto do avatar usada (ausentes em jobs antigos). */
+  identityStrategy: UgcIdentityStrategySchema.optional(),
+  avatarReferenceAsset: AvatarReferenceAssetSchema.optional(),
 });
 export type UgcCharacterIdentity = z.infer<typeof UgcCharacterIdentitySchema>;
+
+/** Estratégia efetiva (jobs antigos sem o campo: derivada do que já estava gravado). */
+export function identityStrategyOf(identity: Pick<UgcCharacterIdentity, "source" | "identityStrategy" | "identityImageUri">): UgcIdentityStrategy {
+  if (identity.identityStrategy) return identity.identityStrategy;
+  if (identity.source === "library") return identity.identityImageUri ? "avatar_reference_image" : "avatar_description";
+  return "synthetic";
+}
+
+/** URI da foto do avatar que PRECISA chegar ao provider (undefined = não há foto a preservar). */
+export function avatarIdentityImageUri(identity: Pick<UgcCharacterIdentity, "source" | "identityStrategy" | "identityImageUri" | "avatarReferenceAsset">): string | undefined {
+  if (identityStrategyOf(identity) !== "avatar_reference_image") return undefined;
+  return identity.avatarReferenceAsset?.uri ?? identity.identityImageUri;
+}
 
 /** Estrutura para a FUTURA biblioteca de personagens (sem nichos definidos agora). */
 export const UgcCharacterProfileSchema = z.object({
@@ -153,6 +187,9 @@ export const UgcReferenceSchema = z.object({
   diagnostic: ProviderDiagnosticSchema.optional(),
   /** Product Fidelity Gate (Lote 5.6). Ausente em referências antigas = pendente de revisão. */
   fidelity: ReferenceFidelitySchema.optional(),
+  /** Correção Lote 6: como a pessoa desta referência foi obtida e qual foto de avatar foi enviada. */
+  identityStrategy: UgcIdentityStrategySchema.optional(),
+  avatarReferenceAsset: AvatarReferenceAssetSchema.optional(),
   createdAt: nonEmpty,
   reviewedAt: z.string().optional(),
 });

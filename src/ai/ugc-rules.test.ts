@@ -117,7 +117,7 @@ describe("identidade, produto e biblioteca futura", () => {
 describe("prompt campaign-plan@1.5.0 / 1.6.x", () => {
   const input = { product: p, styles: ["ugc"] as const, creativeCount: 1, settings: SIMPLE_UGC_QUALITY_PRESETS.high };
   it("1.6.1 é o ativo, mantém o Editor V2 e explicita os campos derivados", () => {
-    expect(ACTIVE_PROMPTS.campaignPlan.version).toBe("1.8.0");
+    expect(ACTIVE_PROMPTS.campaignPlan.version).toBe("1.8.1");
     expect(campaignPlanPromptV1_6_0.system).toMatch(/uso há meses/);
     expect(campaignPlanPromptV1_6_0.system).toMatch(/A-ROLL/);
     expect(campaignPlanPromptV1_6_0.system).toMatch(/reference_detail/);

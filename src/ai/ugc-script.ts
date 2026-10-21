@@ -3,7 +3,7 @@ import { PRESENTER_POLICY } from "@/config/edit-policy";
 const PRESENTER_WORDS = PRESENTER_POLICY.words;
 import type { ScenePlanDraft } from "@/domain/creative";
 import { wordWindow, type DurationTarget } from "@/config/duration-targets";
-import { isUgcPersonSource, UGC_PERSON_SOURCES, type UgcAudioStrategy, type UgcCharacterIdentity, type UgcProductAnchor } from "@/domain/ugc";
+import { identityStrategyOf, isUgcPersonSource, UGC_PERSON_SOURCES, type UgcAudioStrategy, type UgcCharacterIdentity, type UgcProductAnchor } from "@/domain/ugc";
 
 /**
  * Regras do roteiro AI UGC (puras, usadas pelo prompt, pelo mock e pela validação).
@@ -73,14 +73,18 @@ export function validateUgcScenes(scenes: readonly ScenePlanDraft[], audioStrate
 /** Prompt da imagem de REFERÊNCIA: pessoa realista segurando o produto real, 9:16, sem distorcer o produto. */
 export function buildUgcReferencePrompt(identity: UgcCharacterIdentity, product: UgcProductAnchor, fidelityLines: readonly string[] = []): string {
   // Editor V2: a referência é o PRIMEIRO FRAME real do vídeo, não uma peça de anúncio.
+  // Correção Lote 6: avatar salvo com foto = a pessoa É a da foto (nunca uma pessoa sintética nova).
+  const avatarPhoto = identityStrategyOf(identity) === "avatar_reference_image";
   return [
     `Candid UGC smartphone photo, vertical 9:16, ${identity.visualStyle.replace(/_/g, " ")} look, natural domestic light, natural skin texture.`,
-    `${identity.appearance}, wearing a ${identity.wardrobe}, in a ${identity.environmentDescription}.`,
-    `The person holds the product from the reference image at chest height in the right hand, relaxed and natural, looking at the camera; framed like a real video frame, not a posed ad.`,
-    `The product is exactly the one in the reference photo: keep ${product.preserve.join(", ")}.`,
+    avatarPhoto
+      ? `The person is exactly the presenter from the supplied avatar photo (same face, facial features, skin tone, hair and apparent age); ${identity.appearance}, wearing a ${identity.wardrobe}, in a ${identity.environmentDescription}.`
+      : `${identity.appearance}, wearing a ${identity.wardrobe}, in a ${identity.environmentDescription}.`,
+    `The person holds the product from the product photo at chest height in the right hand, relaxed and natural, looking at the camera; framed like a real video frame, not a posed ad.`,
+    `The original product photo is the single source of truth for the product: keep ${product.preserve.join(", ")}.`,
     ...fidelityLines,
-    `Product: ${product.name}.`,
-    `Fictional synthetic adult person, not a celebrity.`,
+    `Product name for context only (do not print it as new text): ${product.name}.`,
+    avatarPhoto ? `Adult person, not a celebrity; do not replace the avatar with a different person.` : `Fictional synthetic adult person, not a celebrity.`,
     `No text overlays, no slogans, no captions, no invented numbers or specifications, no changed or extra logos, no ad layout, no graphic elements, no watermarks.`,
   ].join(" ");
 }

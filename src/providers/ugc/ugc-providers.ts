@@ -17,6 +17,11 @@ export interface UgcReferenceRequest {
   /** Prompt montado por `buildUgcReferencePrompt` (determinístico, versionado no job). */
   prompt: string;
   aspectRatio: "9:16";
+  /**
+   * Correção Lote 6: foto do AVATAR salvo (URI local autorizada). Presente = a pessoa da
+   * referência TEM de ser a desta foto; só provider com `supportsIdentityReference` recebe.
+   */
+  identityImage?: { uri: string };
 }
 
 export interface UgcImageResult {
@@ -42,6 +47,11 @@ export interface UgcPreparedReference {
 /** UGCReferenceProvider: gera a imagem pessoa + produto. */
 export interface UgcReferenceProvider {
   readonly descriptor: ProviderDescriptor;
+  /**
+   * Capacidade DECLARADA: aceita a foto do avatar como referência de identidade (pessoa) além da
+   * foto do produto. Ausente/false = avatar com foto é bloqueado antes de qualquer chamada paga.
+   */
+  readonly supportsIdentityReference?: boolean;
   estimateCost(): CostQuote;
   /** Opcional: upload/validação não paga, persistida pelo pipeline antes do POST de geração. */
   prepare?(request: UgcReferenceRequest, previous?: Record<string, string | number | boolean>): Promise<UgcPreparedReference>;

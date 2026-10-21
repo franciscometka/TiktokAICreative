@@ -9,8 +9,12 @@ import type { Campaign, GenerationJob, MediaAttempt } from "@/domain/pipeline";
 import { fidelityPromptLines, initialFidelity } from "@/domain/fidelity";
 import {
   approvedReference,
+  AVATAR_IDENTITY_UNSUPPORTED,
+  avatarIdentityImageUri,
   fidelityReleasesVideo,
+  identityStrategyOf,
   isUgcPersonSource,
+  type UgcCharacterIdentity,
   UgcRequestSchema,
   type UgcAudioStrategy,
   type UgcJobState,
@@ -44,12 +48,27 @@ export class UgcReferenceRequiredError extends Error {
 export class UgcFidelityError extends Error {
   override name = "UgcFidelityError";
 }
+/**
+ * Avatar salvo com foto + provider que não aceita referência de identidade: bloqueia ANTES de
+ * qualquer chamada paga. Nunca troca a pessoa do avatar por uma identidade sintética.
+ */
+export class UgcIdentityUnsupportedError extends Error {
+  override name = "UgcIdentityUnsupportedError";
+  constructor(message = AVATAR_IDENTITY_UNSUPPORTED) { super(message); }
+}
+
+/** O provider consegue preservar a identidade pedida? (undefined = sim; string = motivo do bloqueio). */
+export function identityBlockReason(identity: UgcCharacterIdentity, provider: Pick<UgcReferenceProvider, "supportsIdentityReference">): string | undefined {
+  return avatarIdentityImageUri(identity) && provider.supportsIdentityReference !== true ? AVATAR_IDENTITY_UNSUPPORTED : undefined;
+}
 
 /** Revisão humana da referência (Product Fidelity Gate). */
 export interface UgcFidelityReview {
   fidelityConfirmed: boolean;
   /** Textos/números divergentes vistos na imagem (ex.: "3900"). */
   observedTexts?: string[];
+  /** Especificações exatas conferidas uma a uma (ex.: ["2100W", "220V"]); obrigatórias quando existem. */
+  confirmedSpecs?: string[];
   note?: string;
 }
 
@@ -131,6 +150,11 @@ export async function generateUgcReference(
   if (uncertain && (uncertain.state === "uncertain" || (!uncertain.providerJobId && (!provider.prepare || paidSubmissionStarted)))) {
     throw new UgcPendingError("Envio anterior da referência sem ID confirmado; possível cobrança. Nenhum novo envio será feito.");
   }
+  // Avatar salvo com foto: o provider PRECISA receber a foto; sem suporte, nada é enviado/cobrado.
+  const blockedIdentity = identityBlockReason(state.identity, provider);
+  if (blockedIdentity) throw new UgcIdentityUnsupportedError(blockedIdentity);
+  const identityImageUri = avatarIdentityImageUri(state.identity);
+  const identityStrategy = identityStrategyOf(state.identity);
   const constraints = state.product.fidelityConstraints ?? [];
   const prompt = buildUgcReferencePrompt(state.identity, state.product, fidelityPromptLines(constraints));
   const estimatedCostUsd = provider.estimateCost().costUsd;
@@ -158,7 +182,9 @@ export async function generateUgcReference(
       product: state.product,
       estimatedCostUsd,
       fidelity: initialFidelity(constraints),
-      inputHash: ugcInputHash({ stage: "ugc_reference", jobId: job.id, model: provider.descriptor.model, prompt, productImageId: state.product.imageId, identityId: state.identity.id, identityRevision: state.identity.revision }),
+      identityStrategy,
+      ...(state.identity.avatarReferenceAsset && identityImageUri ? { avatarReferenceAsset: state.identity.avatarReferenceAsset } : {}),
+      inputHash: ugcInputHash({ stage: "ugc_reference", jobId: job.id, model: provider.descriptor.model, prompt, productImageId: state.product.imageId, identityId: state.identity.id, identityRevision: state.identity.revision, ...(identityImageUri ? { identityImageUri } : {}) }),
       ...(input.maxCostUsd === undefined ? {} : { maxApprovedCostUsd: input.maxCostUsd }),
       createdAt: deps.clock(),
     }));
@@ -177,7 +203,7 @@ export async function generateUgcReference(
 
   try {
     if (!reference.providerJobId) {
-      const request = { product: state.product, identity: state.identity, prompt: reference.prompt, aspectRatio: "9:16" as const };
+      const request = { product: state.product, identity: state.identity, prompt: reference.prompt, aspectRatio: "9:16" as const, ...(identityImageUri ? { identityImage: { uri: identityImageUri } } : {}) };
       let prepared;
       if (provider.prepare) {
         prepared = await provider.prepare(request, reference.metadata);

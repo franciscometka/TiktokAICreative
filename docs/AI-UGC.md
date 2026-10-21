@@ -9,6 +9,13 @@ Modo "AI UGC" (Lote 5.3): foto real do produto → pessoa sintética segurando/a
 - O roteiro é criado como master script antes de ser dividido em A-rolls (D97): 30s ≈ 70–90 palavras, 45s ≈ 100–125, 60s ≈ 130–160; CTA natural é a última frase; mesma persona em todos os segmentos.
 - Voice Lock é usado apenas quando o provider suporta áudio externo/lip-sync de forma real (D98). Krea/Veo atuais só têm áudio nativo: o projeto registra "Voice Lock indisponível com este provider." e usa a fala nativa, repetindo a descrição da voz do avatar em todos os trechos. Com um provider de lip-sync, uma única narração ElevenLabs vira o áudio mestre e cada trecho usa a sua fatia.
 
+## Correção do Lote 6 — avatar salvo é a pessoa da foto (D99)
+
+- Avatar com foto: a foto vai ao provider de referência junto com a do produto. Na Krea, as duas imagens vão em `image_urls` (produto = fonte de verdade, avatar = a pessoa). O Veo parte da referência aprovada, que já contém o avatar.
+- Provider sem suporte (`supportsIdentityReference` ausente/false, ex.: Google atual): "Este provider ainda não consegue preservar este avatar." é mostrado antes de qualquer chamada paga. Nunca é gerada uma pessoa sintética no lugar.
+- Avatar sem foto: aparência pela descrição, declarado na tela.
+- Fidelidade: cada especificação exata do produto (ex.: 2100W) é conferida uma a uma antes de aprovar.
+
 ## Presenter Only (Lote 5.7, padrão)
 
 Por enquanto, o modo AI UGC prioriza Presenter Only. B-roll gerado/estático permanece disponível arquiteturalmente, mas não participa dos presets padrão.

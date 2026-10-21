@@ -5,7 +5,7 @@ import { loadAppConfig } from "@/config/env";
 import { kreaUgcPricingRefs } from "@/config/krea-ugc-models";
 import { kreaUgcReadiness } from "@/config/krea-ugc-readiness";
 import { productAnchor, resolveUgcIdentity } from "@/config/ugc";
-import { decideFidelity, deriveFidelityConstraints, fidelityPromptLines, findFidelityConflicts, initialFidelity } from "@/domain/fidelity";
+import { decideFidelity, deriveFidelityConstraints, exactSpecs, fidelityPromptLines, findFidelityConflicts, initialFidelity } from "@/domain/fidelity";
 import { CreativePlanSchema } from "@/domain/creative";
 import { RenderManifestSchema } from "@/domain/render";
 import { fidelityReleasesVideo, UgcReferenceSchema } from "@/domain/ugc";
@@ -15,7 +15,7 @@ import { FileCostLedger } from "@/storage/file-cost-ledger";
 import { product } from "@/test/fixtures";
 import { PNG_1X1 } from "@/test/google-fake";
 import { FAKE_KREA_KEY, kreaFake } from "@/test/krea-fake";
-import { ugcHarness } from "@/test/ugc-harness";
+import { ugcHarness, FULL_REVIEW } from "@/test/ugc-harness";
 
 const dryer = product({ name: "Secador Turbo SC-2100", description: "Secador de cabelo 2100W com bico concentrador.", features: ["2100W", "3 temperaturas", "Cabo de 1,8 m"], benefits: ["Seca rápido"] });
 
@@ -37,7 +37,10 @@ describe("Product Fidelity Gate — regras puras", () => {
   it("status: pending por padrão; humano aprova; conflito vira needs_review; reprovar = rejected; nunca aprova sozinho", () => {
     const start = initialFidelity(deriveFidelityConstraints(dryer));
     expect(start.status).toBe("pending");
-    expect(decideFidelity(start, { confirmed: true, reviewedAt: "t" })).toMatchObject({ status: "approved", checkedBy: "human" });
+    // Especificação conhecida (2100W...) sem conferência individual: continua pendente.
+    expect(decideFidelity(start, { confirmed: true, reviewedAt: "t" })).toMatchObject({ status: "pending" });
+    expect(decideFidelity(start, { confirmed: true, confirmedSpecs: ["2100W", "3 temperaturas"], reviewedAt: "t" }).status).toBe("pending");
+    expect(decideFidelity(start, { confirmed: true, confirmedSpecs: exactSpecs(start.constraints), reviewedAt: "t" })).toMatchObject({ status: "approved", checkedBy: "human" });
     expect(decideFidelity(start, { confirmed: true, observedTexts: ["3900"], reviewedAt: "t" })).toMatchObject({ status: "needs_review", checkedBy: "rules" });
     expect(decideFidelity(start, { confirmed: false, reviewedAt: "t" }).status).toBe("rejected");
   });
@@ -132,7 +135,7 @@ describe("Editor V2 no pipeline (Krea com fetch falso, zero rede)", () => {
 
   it("fidelidade aprovada libera: continuidade e fidelidade chegam ao prompt Veo; render Presenter Only (V3) usa só A-rolls", async () => {
     const h = await harness();
-    const resumed = await h.service.approveUgcReference(h.jobId, h.reference.id, { fidelityConfirmed: true });
+    const resumed = await h.service.approveUgcReference(h.jobId, h.reference.id, FULL_REVIEW);
     expect((await resumed.completion!).kind).not.toBe("FAILED");
     const posts = h.fake.calls.filter((c) => c.method === "POST" && c.url.includes("/generate/video/"));
     const plan = (await h.service.getCampaign(h.campaign.id)).plan!.creatives[0]!;
@@ -176,7 +179,7 @@ describe("compatibilidade com dados antigos", () => {
     const legacy = { ...ref, fidelity: undefined };
     await h.service["deps"].store.saveJob({ ...job, ugc: { ...job.ugc!, references: [{ ...legacy, review: "approved" }] } });
     expect((await h.service.quoteStage(h.jobId, "ugc_video")).blocked).toMatch(/fiéis/);
-    const confirmed = await h.service.approveUgcReference(h.jobId, ref.id, { fidelityConfirmed: true });
+    const confirmed = await h.service.approveUgcReference(h.jobId, ref.id, FULL_REVIEW);
     expect((await h.service.getJob(h.jobId)).ugc!.references.at(-1)!.fidelity!.status).toBe("approved");
     expect(confirmed.job.id).toBe(h.jobId);
   });
