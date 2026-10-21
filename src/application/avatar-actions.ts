@@ -13,7 +13,7 @@ import {
 } from "@/domain/avatar";
 import type { UgcEnvironment } from "@/domain/ugc";
 import type { AvatarLibraryStore } from "@/storage/avatar-store";
-import type { LocalUploadStore } from "@/storage/upload-store";
+import type { UploadStore } from "@/storage/upload-store";
 import { imagePreviewUrl } from "./campaign-view";
 import { toUserError, type UserError } from "./user-errors";
 
@@ -24,7 +24,7 @@ import { toUserError, type UserError } from "./user-errors";
 
 export interface AvatarDeps {
   avatars?: AvatarLibraryStore;
-  uploads: LocalUploadStore;
+  uploads: UploadStore;
   clock?: () => string;
 }
 

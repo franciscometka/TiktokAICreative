@@ -12,7 +12,7 @@ import type { PipelineService } from "@/pipeline/pipeline-service";
 import { StaleEstimateError } from "@/pipeline/guards";
 import { FINAL_FILE, RENDER_ID, renderDir, SAFE_ENTITY_ID } from "@/render/output-paths";
 import { LocalAudioAssetStore } from "@/storage/audio-asset-store";
-import type { LocalUploadStore } from "@/storage/upload-store";
+import type { UploadStore } from "@/storage/upload-store";
 import type { AvatarLibraryStore } from "@/storage/avatar-store";
 import { parseCampaignForm, toCampaignRequest, type FieldErrors } from "./campaign-form";
 import { recommendedNextAction } from "./job-workflow";
@@ -36,7 +36,7 @@ import { toUserError, type UserError } from "./user-errors";
 export interface AppDeps {
   service: PipelineService;
   offlineOnly?: boolean;
-  uploads: LocalUploadStore;
+  uploads: UploadStore;
   /** Pasta dos renders (RENDERS_DIR), para servir os MP4 por ID. */
   rendersDir: string;
   /** Pasta das narrações (AUDIO_DIR), para servir o áudio por ID. */

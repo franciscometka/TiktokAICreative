@@ -22,6 +22,18 @@ export interface StoredImage {
   size: number;
 }
 
+/**
+ * Contrato usado pela aplicação (Lote 7): LocalUploadStore (disco) ou CloudUploadStore
+ * (Supabase Storage + tabela product_assets). Sempre por IDs gerados, nunca caminhos do browser.
+ */
+export interface UploadStore {
+  save(productId: string, file: { bytes: Uint8Array; size: number; declaredType: string }): Promise<StoredImage>;
+  list(productId: string): Promise<StoredImage[]>;
+  resolve(productId: string, imageIds: readonly string[]): Promise<StoredImage[]>;
+  read(productId: string, imageId: string): Promise<{ bytes: Uint8Array; contentType: ImageContentType } | undefined>;
+  remove(productId: string, imageId: string): Promise<boolean>;
+}
+
 export class InvalidUploadPathError extends Error {
   override name = "InvalidUploadPathError";
 }
@@ -33,7 +45,7 @@ export class InvalidUploadPathError extends Error {
  *   dentro de rootDir (defesa dupla contra path traversal).
  * - Uploads do mesmo produto são serializados para o limite de quantidade valer.
  */
-export class LocalUploadStore {
+export class LocalUploadStore implements UploadStore {
   private readonly root: string;
   private readonly locks = new KeyedMutex();
 
