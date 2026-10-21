@@ -566,3 +566,56 @@ Os 5–6 A-rolls do Presenter Only são editados como UM vídeo de TikTok: junç
   - Manifests V2/V3 sem `transitionSpec` continuam válidos e viram corte seco no Remotion (`transitionFx: null`).
   - Planos antigos sem ações de continuidade usam o engine com fallback seguro.
   - A composição passa para `tiktok-creative@1.5.0`.
+
+## D101 — Cloud Runtime: Vercel (UI) + Render API + Render Worker + Supabase (Lote 7)
+- O computador do usuário não precisa ficar ligado. A Vercel só renderiza a interface. A Render API valida, autentica, orça, persiste e enfileira. O Render Worker executa o pipeline. O Supabase guarda estado (Postgres) e arquivos (Storage).
+- Nada é reescrito: o `PipelineService` e a camada `application/` são os mesmos nos dois modos. Só trocam as implementações injetadas (stores Postgres, `CloudUploadStore`, dispatcher, locks e activity), em `src/cloud/runtime.ts`.
+- `PERSISTENCE_DRIVER=local` (padrão) mantém o modo local intacto; `supabase` liga o cloud. Jobs locais antigos não são migrados automaticamente (procedimento em DEPLOYMENT.md).
+- Disco do worker = temporário. Fonte de verdade = Supabase.
+
+## D102 — Auth e ownership
+- Supabase Auth. O Next guarda access e refresh token em cookies httpOnly e envia `Authorization: Bearer` à API.
+- A API valida assinatura (ES256/RS256 via JWKS; HS256 legado opcional), `iss`, `aud`, `exp` e `role`. O userId vem só do `sub`.
+- Repositórios são construídos POR USUÁRIO e filtram toda query por `user_id`. Um job só entra em campanha do mesmo dono. URL assinada só sai para arquivo registrado do dono.
+- `DEV_AUTH_USER_ID` (usuário fixo) existe só fora de produção. Login mínimo por e-mail e senha, sem cadastro público.
+
+## D103 — Fila durável no próprio Postgres
+- Escolha: tabela `job_queue` no Supabase Postgres. Não há serviço novo (Redis/SQS); a fila fica na mesma transação e infraestrutura do estado.
+- Claim: `UPDATE … WHERE id = (SELECT … FOR UPDATE SKIP LOCKED LIMIT 1)`, mais um índice único parcial "uma running por campanha" (operações da campanha continuam serializadas).
+- Dedupe: uma tarefa ativa por chave. Lease com heartbeat; só o dono do lease encerra a tarefa.
+- Ponto único no pipeline: `dispatchJob`/`dispatchPlanning` com `JobRun` serializável (`src/pipeline/dispatch.ts`). Sem dispatcher, o comportamento é idêntico ao anterior.
+- O "está ativo?" passa a considerar a fila: fechar o navegador ou reiniciar a API não deixa o job "interrompido". Lock por campanha entre processos usa advisory lock (API espera no máx. 5s e responde "em andamento").
+
+## D104 — Worker, retomada e "sem auto-retry pago"
+- Uma tarefa por processo. O cwd da tarefa é `{WORKER_TMP_ROOT}/{jobId}/`, hidratado do Storage com as mesmas URIs relativas do documento. Ao terminar, sobe os arquivos novos e limpa.
+- Retomada de lease expirado:
+  - operação paga em voo (marcador gravado antes do POST e sem confirmação) → `blocked`, nada reenviado;
+  - planejamento pago → `blocked`;
+  - render interrompido → `failed` (re-render grátis explícito);
+  - nada em voo → requeue, continuando a sequência já aprovada.
+- `job_attempts` projeta as operações pagas: attemptId, jobId, stage, provider e status (started/submitted/confirmed/failed/uncertain).
+
+## D105 — Ledger no Postgres
+- `ledger_entries` é append-only também no banco (trigger recusa UPDATE/DELETE). Colunas: job, attempt, stage, provider, model, custo estimado, custo confirmado, moeda, status e timestamp; o registro completo fica em `entry`.
+- Valor vem só do servidor (usage/preço). Nada do browser entra no ledger.
+
+## D106 — Storage e upload direto
+- Bucket privado `tiktok-media`, com chaves `users/{userId}/uploads/...` e `users/{userId}/projects/{campaignId}/{references|clips|audio|renders}/...`.
+- `AssetStore` (put/get/delete/exists/getSignedUrl/createSignedUpload/downloadToTemp) tem duas implementações: Local (HMAC) e Supabase (REST).
+- O banco guarda bucket + path; URL assinada é sob demanda (10 min) e nunca persistida.
+- Upload: authorize na API → PUT direto ao Storage → complete na API, que confere os bytes reais. O arquivo não passa pela Vercel nem pela API.
+
+## D107 — Idempotência e proteção
+- `Idempotency-Key` (tabela `idempotency_keys`) em criar projeto e gerar job: mesmo corpo → mesma resposta; corpo diferente → 422; em execução → 409.
+- O Next deriva a chave do conteúdo do pedido numa janela de 10 min (clique duplo).
+- Rate limit de escrita por usuário. Dedupe da fila contra spam de geração. CORS por lista explícita ("*" recusado no startup).
+
+## D108 — Frontend cloud, config e segredos
+- `NEXT_PUBLIC_RUNTIME_MODE=cloud`: as telas V2 leem da API pelos mesmos view models (`src/server/backend.ts`); as Server Actions V2 viram chamadas HTTPS.
+- A tela técnica antiga fica só no modo local ("Disponível no modo local").
+- Arquivos: as rotas do Next redirecionam para URL assinada.
+- API fora do ar: "Serviço temporariamente indisponível.", sem detalhe técnico.
+- Config validada no startup e separada por serviço (frontend/API/worker), com erro mostrando só os nomes das variáveis.
+- `NEXT_PUBLIC_*` com cara de segredo, ou com o valor de um segredo do servidor, é recusado. Um teste estático garante que nenhum módulo do client lê variável não pública.
+- Logger estruturado com redação (tokens, authorization, segredos, query de URL assinada).
+- Testes cloud: Postgres REAL em WASM (PGlite) via `npm run test:cloud` (incluído no `check`), sem rede e sem API paga.

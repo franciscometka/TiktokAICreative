@@ -95,3 +95,9 @@ Executar o protocolo acima com instrução explícita, confirmar no primeiro uso
 UGC é editado como narrativa contínua, não concatenação de cenas independentes. A-rolls (ugc_*) formam a espinha de áudio; B-rolls `reference_detail` (recorte do frame aprovado, custo zero) cobrem as junções enquanto o áudio da apresentadora continua. A referência agora é pedida como frame real de UGC (sem texto, slogan, números inventados ou layout de anúncio) e os prompts de vídeo pedem realismo de smartphone, continuidade da cena anterior e fidelidade do produto. Antes das cenas, confirme na interface: "Verifique se produto, logo, textos e especificações continuam fiéis." Se algum texto ou número divergir (ex.: 3900 no lugar de 2100W), informe-o: a referência fica em revisão e nenhuma cena é gerada. Detalhes em D91.
 
 Na auditoria D92, os handles planejados passaram a ser ajustados por pausas encontradas no áudio real com FFmpeg local. Sem pausa segura próxima, o A-roll permanece inteiro e o B-roll não entra naquela junção. B-roll estático dura no máximo 1,6s e continua mudo. As legendas seguem estimadas pelo roteiro (`estimated_from_script`), sem alegar timing de palavra real. O CTA ocupa os últimos 1,8s sobre a apresentadora, sem substituir o vídeo por um card.
+
+## Lote 7 — AI UGC na nuvem
+- O fluxo AI UGC (referência → aprovação → trechos → edição → render) roda no Render Worker. As regras de custo e de fidelidade não mudam.
+- A pausa "Esta será a pessoa…" fica no banco (`progress_stage = awaiting_reference_approval`, tarefa `awaiting_approval`). Aprovar enfileira a continuação com a MESMA autorização do job.
+- Krea/Veo em voo quando o worker cai (operação `submitting`/`uncertain`, intenção `running`): a tarefa vira `blocked` e nada é reenviado. A retomada continua explícita (operation ID / nova aprovação).
+- Foto do produto e do avatar: upload direto ao Storage. O worker hidrata no workspace temporário e envia ao provider como antes.

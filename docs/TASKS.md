@@ -322,3 +322,14 @@ Guia: [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md).
 - [ ] Rodar `npm run test:render` numa máquina com o navegador do Remotion (não instalado neste PC)
 - [ ] Validação REAL: 1 referência Krea + revisão de fidelidade; depois 1 vídeo Equilibrado completo e revisão visual (handles, L/J cut, legibilidade, CTA)
 - [ ] Futuro: verificador visual/OCR preenchendo `observedTexts`; ASR local para legendas word-level reais (cortes em silêncio já usam medição local); B-roll gerado contextual via provider UGC a partir do frame aprovado
+
+## Lote 7 — Cloud Runtime ✅ (sem chamada paga; nada publicado)
+- [x] 7A Foundations: config validada por serviço, logger com redação, AssetStore Local/Supabase, workspace temporário, SqlClient + migrations versionadas (D101)
+- [x] 7B Supabase: PostgresPipelineStore (documento Zod + progresso + projeções + eventos), ledger append-only, avatares/revisões, índice de arquivos, upload direto seguro, JWT Supabase (D102, D105, D106)
+- [x] 7C Render API + fila durável no Postgres: claim exclusivo, dedupe, lease/heartbeat, CORS, rate limit, Idempotency-Key, /health e /ready (D103, D107)
+- [x] 7D Render Worker: hidratação/publicação no Storage, retomada sem reenvio pago, `worker:check` (D104)
+- [x] 7E Vercel: Backend local/remoto, login mínimo, upload direto, redirect para URL assinada, "Serviço temporariamente indisponível." (D108)
+- [x] 7F Dockerfile, render.yaml, DEPLOYMENT.md, CLOUD-RUNTIME.md, testes de navegador fechado, restart, ownership e segredos
+- [ ] Manual: criar projeto Supabase, aplicar migration, criar usuário; criar Render Web + Worker; criar projeto Vercel (ver docs/DEPLOYMENT.md)
+- [ ] Manual: primeiro teste na nuvem com mocks (ALLOW_MOCKS=true só nesse teste) e depois UMA validação REAL aprovada na tela
+- [ ] Futuro: migração dos jobs locais (script dry-run), tela técnica antiga no cloud, mais de uma tarefa por processo no worker

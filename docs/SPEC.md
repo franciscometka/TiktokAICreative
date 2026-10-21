@@ -132,3 +132,10 @@ A UX principal esconde a complexidade do pipeline: foto + ideia + avatar + dura�
 
 ## Lote 5.6 — Creative Editor V2
 UGC é editado como narrativa contínua, não concatenação de cenas independentes. A-roll (apresentadora falando, áudio nativo) é a espinha do vídeo; B-roll (detalhe contextual do frame de referência aprovado ou clipe gerado mudo) entra por cima do áudio, numa junção entre A-rolls, sempre com motivo de corte. Clipes IA usam handles: a janela usada é menor que a gerada, o custo continua pelo gerado e o storyboard mostra "8s gerados · 7,3s usados". Catálogo (fundo branco, produto flutuando, card) é proibido por padrão. Legenda única de até 2 linhas, hook textual só deliberado e CTA pequeno sobre a apresentadora. Antes de qualquer cena UGC, a referência passa pelo Product Fidelity Gate: revisão humana obrigatória de produto, logo, textos e números (constraints dos dados do produto); divergência conhecida bloqueia. Presets: Econômico 2 A-rolls + 1 B-roll (15–20s), Equilibrado 3 + 2 (20–30s), Premium 4 + 3 (25–40s). Ver D91.
+
+## Lote 7 — Cloud Runtime
+- O computador do usuário não precisa ficar ligado depois do envio. Vercel = interface; Render Web = API; Render Worker = pipeline pesado; Supabase = banco e arquivos.
+- A API responde rápido (202) e nunca espera vídeo: persiste e enfileira. O worker executa Claude, Krea/Veo, ElevenLabs, FFmpeg e Remotion, e sobe o resultado ao Storage.
+- Fechar o navegador, reiniciar a API ou fazer deploy não perde estado. Worker que cai: o sistema distingue etapa concluída, não iniciada e paga incerta, e nunca refaz chamada paga sozinho.
+- A UX continua igual (Produto, Ideia, Avatar, Duração → Gerar vídeo; 4 passos de progresso). A infraestrutura é invisível, e backend fora do ar mostra "Serviço temporariamente indisponível.".
+- Fora do escopo: pagamentos/Stripe, créditos, planos SaaS, multi-tenant complexo, autoscaling sofisticado, CDN e domínio custom obrigatório.

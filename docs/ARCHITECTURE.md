@@ -285,3 +285,21 @@ render        → storage/video-asset-store (silencedetect local; pausas reais p
 - `render/audio-silence.ts`: análise FFmpeg local e determinística; sem pausa segura o corte visual permanece no A-roll.
 - `config/edit-policy.ts`: handles, tolerância de pausa, limite de B-roll estático, fades, punch-in, janela do CTA, legenda e presets editoriais (`UGC_EDITORIAL_PLANS`).
 - Compatibilidade: sem `editPlanVersion`/`manifest.edit`, tudo segue pela montagem linear do Lote 3; `external_lipsync` também.
+
+## Cloud Runtime (Lote 7 / D101–D108)
+Detalhes em `docs/CLOUD-RUNTIME.md`; deploy em `docs/DEPLOYMENT.md`.
+- `src/pipeline/dispatch.ts` é o ponto único entre execução no processo (local) e fila durável (cloud): `JobRun` serializável, `runJobTask`/`runPlanningTask` no worker, `deps.locks` (advisory lock) e `deps.activity` (fila).
+- `src/cloud/`:
+  - `config.ts`: env por serviço;
+  - `logger.ts`;
+  - `db/`: SqlClient pg, migrations;
+  - `repos/`: Postgres por usuário;
+  - `assets/`: AssetStore Local/Supabase, layout do Storage, CloudUploadStore;
+  - `auth/jwt.ts`;
+  - `queue/job-queue.ts`;
+  - `api/`: Render Web Service;
+  - `worker/`: Render Background Worker;
+  - `runtime.ts`: AppDeps por usuário;
+  - `infra.ts`.
+- `src/server/backend.ts` (Local × Remote), `session.ts` (Supabase Auth em cookies httpOnly) e `asset-redirect.ts`.
+- Banco: `supabase/migrations/`. Imagem: `Dockerfile` (mesma para API e worker). Blueprint: `render.yaml`.

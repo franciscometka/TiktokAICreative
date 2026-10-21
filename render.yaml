@@ -1,0 +1,85 @@
+# Lote 7 — Render Blueprint (opcional: também dá para criar os serviços à mão; ver docs/DEPLOYMENT.md).
+# Segredos com `sync: false`: o Render pede o valor no painel; nunca ficam no Git.
+services:
+  - type: web
+    name: tiktok-ai-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: npm run start:api
+    healthCheckPath: /health
+    autoDeploy: false
+    envVars:
+      - key: PERSISTENCE_DRIVER
+        value: supabase
+      - key: ASSET_STORE
+        value: supabase
+      - key: SUPABASE_STORAGE_BUCKET
+        value: tiktok-media
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: LLM_PROVIDER
+        value: anthropic
+      - key: ALLOW_MOCKS
+        value: "false"
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: UGC_PROVIDER
+        value: krea
+      - key: UGC_REAL_ALLOWED
+        sync: false
+      - key: KREA_API_KEY
+        sync: false
+      - key: AUDIO_PROVIDER
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: RENDERER
+        value: remotion
+
+  - type: worker
+    name: tiktok-ai-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: npm run worker
+    autoDeploy: false
+    envVars:
+      - key: PERSISTENCE_DRIVER
+        value: supabase
+      - key: ASSET_STORE
+        value: supabase
+      - key: SUPABASE_STORAGE_BUCKET
+        value: tiktok-media
+      - key: WORKER_TMP_ROOT
+        value: /tmp/tiktok-ai
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: LLM_PROVIDER
+        value: anthropic
+      - key: ALLOW_MOCKS
+        value: "false"
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: UGC_PROVIDER
+        value: krea
+      - key: UGC_REAL_ALLOWED
+        sync: false
+      - key: KREA_API_KEY
+        sync: false
+      - key: AUDIO_PROVIDER
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: RUNWAYML_API_SECRET
+        sync: false
+      - key: RENDERER
+        value: remotion
