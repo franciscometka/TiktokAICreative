@@ -238,14 +238,18 @@ describe("\"Não conseguimos preparar o roteiro\" — Secador 2100W, Cristina, 3
 
   it("causa: na 1.8.0 a fala com o nome completo estoura o limite POR TRECHO (18 palavras em 6,6s)", async () => {
     const { request } = await createWithClaude(1);
-    const draft = buildMockDraft(request);
+    // Rascunho no formato observado no Lote 6: trechos de 6,6s e o nome completo numa fala só.
+    const mock = buildMockDraft(request);
+    const creative = mock.creatives[0]!;
+    const scenes = creative.scenes.map((s, i) => ({ ...s, duration: 6.6, estimatedGenerationSeconds: 6.6, ...(i === 1 ? { narration: `Esse é o ${SECADOR}. Deixa eu mostrar ele de pertinho pra vocês.` } : {}) }));
+    const draft = { ...mock, creatives: [{ ...creative, scenes, duration: 33, script: scenes.map((s) => s.narration).join(" ") }] };
     const old = PROMPTS.campaignPlan["1.8.0"].validationSchemaFor(request).safeParse(draft);
     expect(old.success).toBe(false);
     if (!old.success) expect(old.error.issues.map((i) => i.message)).toContain("Fala longa demais para 6.6s (máx. 18 palavras).");
   });
 
   it("1.8.1: re-divisão determinística antes da validação — UMA chamada, sem reparo por LLM, plano com 5 trechos que cabem", async () => {
-    expect(ACTIVE_PROMPTS.campaignPlan.version).toBe("1.8.1");
+    expect(ACTIVE_PROMPTS.campaignPlan.version).toBe("1.9.0");
     const { campaign, llm } = await createWithClaude(1);
     expect(campaign.status).toBe("planned");
     expect(llm.requests).toHaveLength(1);

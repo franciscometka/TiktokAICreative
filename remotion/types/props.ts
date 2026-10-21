@@ -5,7 +5,7 @@
  */
 
 export const COMPOSITION_ID = "TikTokCreative";
-export const COMPOSITION_VERSION = "tiktok-creative@1.4.0";
+export const COMPOSITION_VERSION = "tiktok-creative@1.5.0";
 
 /** Mesmos valores de SceneAssetKind / VisualSource / Motion / Transition do domínio. */
 export type SceneKind = "generated_video" | "product_image" | "text_card";
@@ -54,7 +54,20 @@ export interface CaptionProps {
 }
 
 /** Creative Editor V2 (Lote 5.6): espelho serializável do Edit Plan, já em frames. */
-export type EditTransitionName = "straight_cut" | "match_cut" | "cut_on_action" | "object_wipe" | "punch_in" | "crossfade";
+export type EditTransitionName = "straight_cut" | "match_cut" | "cut_on_action" | "object_wipe" | "punch_in" | "crossfade"
+  | "direct_match_cut" | "micro_punch" | "directional_motion_blur" | "micro_dissolve";
+
+/**
+ * Lote 6.2 — efeito de ENTRADA do trecho (frames). blendFrames > 0: o trecho anterior continua por
+ * baixo e este entra em opacidade (match cut/dissolve, ≤ 4). punch: escala em `frames` (≤ 6).
+ * blurDirection: blur direcional curto (2–4). null = corte seco.
+ */
+export interface EditTransitionFx {
+  frames: number;
+  blendFrames: number;
+  punch: { fromScale: number; toScale: number } | null;
+  blurDirection: "left" | "right" | "up" | "down" | null;
+}
 
 export interface EditVisualProps {
   id: string;
@@ -73,6 +86,7 @@ export interface EditVisualProps {
   /** Recorte do frame de referência (B-roll de detalhe) com push-in lento. */
   crop: { focusX: number; focusY: number; scaleFrom: number; scaleTo: number } | null;
   transition: EditTransitionName;
+  transitionFx: EditTransitionFx | null;
   placeholderLabel: string | null;
 }
 

@@ -1,4 +1,4 @@
-import { AbsoluteFill, Audio, Img, interpolate, OffthreadVideo, Sequence, useCurrentFrame } from "remotion";
+import { AbsoluteFill, Audio, Easing, Img, interpolate, OffthreadVideo, Sequence, useCurrentFrame } from "remotion";
 import { GeneratedVideoPlaceholder } from "../components/GeneratedVideoPlaceholder";
 import { CaptionV3 } from "../components/CaptionV3";
 import { enter } from "../styles/animation";
@@ -13,10 +13,44 @@ import type { CreativeProps, EditAudioProps, EditVisualProps } from "../types/pr
 
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
 
+/** Lote 6.2: frames em que o trecho anterior continua por baixo deste (blend curtíssimo). */
+export function overlapFrames(next: EditVisualProps | undefined): number {
+  if (!next) return 0;
+  if (next.transition === "crossfade") return MOTION.crossfadeFrames;
+  return next.transitionFx?.blendFrames ?? 0;
+}
+
+/**
+ * Natural Transition Engine (Lote 6.2), só no início do trecho e por ≤ 6 frames:
+ * micro punch (escala 100%↔103,5%), blur direcional (2–4 frames) e blend (≤ 4 frames). Nunca
+ * flash/spin/slide/wipe; nenhum efeito toca o áudio.
+ */
+function entryEffect(visual: EditVisualProps, frame: number): { opacity: number; scale: number; blurPx: number } {
+  const fx = visual.transitionFx;
+  // Crossfade legado (V2): só quando o plano pediu explicitamente.
+  if (!fx) return { opacity: visual.transition === "crossfade" ? interpolate(frame, [0, MOTION.crossfadeFrames], [0, 1], clamp) : 1, scale: visual.scale, blurPx: 0 };
+  const opacity = fx.blendFrames > 0 ? interpolate(frame, [0, fx.blendFrames], [0, 1], clamp) : 1;
+  const scale = fx.punch ? interpolate(frame, [0, Math.max(1, fx.frames)], [fx.punch.fromScale, fx.punch.toScale], { ...clamp, easing: Easing.out(Easing.cubic) }) : visual.scale;
+  const blurPx = fx.blurDirection ? interpolate(frame, [0, Math.max(1, fx.frames)], [10, 0], clamp) : 0;
+  return { opacity, scale, blurPx };
+}
+
+/** Blur DIRECIONAL de verdade (SVG feGaussianBlur com desvio só no eixo do movimento). */
+function DirectionalBlur({ id, direction, px }: { id: string; direction: NonNullable<NonNullable<EditVisualProps["transitionFx"]>["blurDirection"]>; px: number }) {
+  const horizontal = direction === "left" || direction === "right";
+  return (
+    <svg width={0} height={0} style={{ position: "absolute" }} aria-hidden>
+      <filter id={id} x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation={horizontal ? `${px} 0` : `0 ${px}`} /></filter>
+    </svg>
+  );
+}
+
 function EditVisual({ visual }: { visual: EditVisualProps }) {
   const frame = useCurrentFrame();
-  // Crossfade só quando o plano pediu explicitamente; o resto é corte seco.
-  const opacity = visual.transition === "crossfade" ? interpolate(frame, [0, MOTION.crossfadeFrames], [0, 1], clamp) : 1;
+  const effect = entryEffect(visual, frame);
+  const opacity = effect.opacity;
+  const blurId = `blur-${visual.id}`;
+  const blur = effect.blurPx > 0.05 && visual.transitionFx?.blurDirection ? visual.transitionFx.blurDirection : null;
   if (visual.kind === "placeholder" || !visual.src) {
     return (
       <AbsoluteFill style={{ opacity }}>
@@ -37,11 +71,12 @@ function EditVisual({ visual }: { visual: EditVisualProps }) {
   }
   return (
     <AbsoluteFill style={{ backgroundColor: COLORS.ink, overflow: "hidden", opacity }}>
+      {blur && <DirectionalBlur id={blurId} direction={blur} px={effect.blurPx} />}
       <OffthreadVideo
         src={visual.src}
         muted
         trimBefore={visual.trimBeforeFrames}
-        style={{ width: "100%", height: "100%", objectFit: "cover", transform: `scale(${visual.scale})`, transformOrigin: "50% 42%" }}
+        style={{ width: "100%", height: "100%", objectFit: "cover", transform: `scale(${effect.scale})`, transformOrigin: "50% 42%", ...(blur ? { filter: `url(#${blurId})` } : {}) }}
       />
     </AbsoluteFill>
   );
@@ -88,9 +123,8 @@ export function EditedCreative(props: CreativeProps) {
   return (
     <AbsoluteFill style={{ backgroundColor: COLORS.ink, fontFamily: FONT.family }}>
       {edit.visuals.map((visual, i) => {
-        // Crossfade (exceção): o trecho anterior continua por baixo por poucos frames.
-        const next = edit.visuals[i + 1];
-        const overlap = next?.transition === "crossfade" ? MOTION.crossfadeFrames : 0;
+        // Crossfade legado / blend do Lote 6.2 (≤ 4 frames): o trecho anterior continua por baixo.
+        const overlap = overlapFrames(edit.visuals[i + 1]);
         return (
           <Sequence key={visual.id} from={visual.startFrame} durationInFrames={Math.min(visual.durationFrames + overlap, props.durationInFrames - visual.startFrame)} name={`${visual.role === "aroll" ? "A-roll" : "B-roll"} ${i + 1}`}>
             <EditVisual visual={visual} />

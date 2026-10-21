@@ -281,6 +281,15 @@ Guia: [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md).
 - [ ] Provider real de lip-sync com áudio externo (adapter já preparado) e referência de identidade por imagem
 - [ ] Usar tags da análise do Claude na seleção automática (hoje: texto do produto × tags do usuário)
 
+## Lote 6.2 — Natural UGC Editing + Script V2 ✅ (sem chamada paga, D100)
+- [x] Natural Transition Engine: match cut > cut on action > micro punch > motion blur direcional > micro dissolve (≤ 6 frames; dissolve ≤ 4; nada chamativo)
+- [x] Transição só em fronteira válida; áudio intocado (uma faixa por vez, microfade só em pausa medida)
+- [x] Continuidade: entryAction/exitAction/handPosition/gazeDirection encadeados; prompts com cut on action e cauda final natural
+- [x] Script V2 (`campaign-plan@1.9.0`): FEATURE → CONTEXTO → AÇÃO; bloqueio de ficha técnica/muletas; estrutura por tempo
+- [x] Segmentação por pensamento/frase/ação; segmentos com visualAction/entry/exit/transitionIntent
+- [x] 30s = 32–38s final; diagnóstico "Trecho N → transição" só no avançado
+- [ ] Validação REAL: 1 vídeo de 30s e revisão visual das junções (sobretudo 3→4 e 4→5)
+
 ## Correção do Lote 6 — avatar real, fidelidade e roteiro ✅ (sem chamada paga, D99)
 - [x] Avatar salvo com foto: foto enviada à Krea (Nano Banana 2, `image_urls` = produto + avatar); `identityStrategy`/`avatarReferenceAsset` persistidos no job e na referência
 - [x] Provider sem referência de identidade: bloqueio antes de qualquer chamada paga ("Este provider ainda não consegue preservar este avatar."); nunca fallback sintético

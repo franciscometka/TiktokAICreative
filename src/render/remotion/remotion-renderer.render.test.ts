@@ -213,6 +213,10 @@ describe("RemotionRenderer (render real curto)", () => {
     expect(audio.at(-1)!.startFrame + audio.at(-1)!.durationFrames).toBe(saved.props.durationInFrames);
     expect(manifest.edit!.finalTailSeconds).toBeGreaterThanOrEqual(0.8);
     expect(saved.props.edit.captions.every((c: { lines: string[] }) => c.lines.length <= 2)).toBe(true);
+    // Lote 6.2: junções renderizadas com transição natural (≤ 6 frames); abertura sem efeito.
+    const fx = (saved.props.edit.visuals as { transitionFx: { frames: number; blendFrames: number } | null }[]).map((v) => v.transitionFx);
+    expect(fx[0]).toBeNull();
+    expect(fx.slice(1).every((f) => f !== null && f.frames <= 6 && f.blendFrames <= 4)).toBe(true);
   }, 900_000);
 
   it("recusa asset fora das pastas autorizadas sem gerar arquivo", async () => {

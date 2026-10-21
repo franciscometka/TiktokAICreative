@@ -1,4 +1,4 @@
-import type { CutReason, DetailCrop, SceneContinuity } from "@/domain/edit";
+import type { ContinuityAction, CutReason, DetailCrop, SceneContinuity } from "@/domain/edit";
 import type { UgcPersonSource } from "@/domain/ugc";
 import type { PresetQuality } from "./quality-presets";
 
@@ -163,14 +163,17 @@ export const UGC_EDITORIAL_PLANS: Record<PresetQuality, readonly EditorialPlanEn
 
 export const DEFAULT_DETAIL_CROP: DetailCrop = CROPS.productInHand;
 
-type ContinuityPose = Pick<SceneContinuity, "productPosition" | "motionDirection" | "exitPose" | "eyeDirection">;
+type ContinuityPose = Pick<SceneContinuity, "productPosition" | "motionDirection" | "exitPose" | "eyeDirection"> & {
+  /** Lote 6.2 (cut on action): ação física em curso no FIM do trecho; o próximo começa continuando-a. */
+  exitAction: ContinuityAction;
+};
 
 /** Pose de SAÍDA de cada papel de A-roll; a entrada do próximo é a saída do anterior. */
 export const AROLL_POSES: Record<UgcPersonSource, ContinuityPose> = {
-  ugc_hook: { productPosition: "chest", motionDirection: "upward", eyeDirection: "camera", exitPose: "raises the product slightly from chest toward the camera" },
-  ugc_demo: { productPosition: "chest", motionDirection: "rotate", eyeDirection: "product_then_camera", exitPose: "product turned a little to show its side, held at chest height" },
-  ugc_benefit: { productPosition: "chest", motionDirection: "none", eyeDirection: "camera_then_product", exitPose: "points at one detail of the product with the free hand, product at chest height" },
-  ugc_cta: { productPosition: "near_face", motionDirection: "toward_camera", eyeDirection: "camera", exitPose: "holds the product a bit closer to the camera, relaxed" },
+  ugc_hook: { productPosition: "chest", motionDirection: "upward", eyeDirection: "camera", exitPose: "raises the product slightly from chest toward the camera", exitAction: "raise_product" },
+  ugc_demo: { productPosition: "chest", motionDirection: "rotate", eyeDirection: "product_then_camera", exitPose: "product turned a little to show its side, held at chest height", exitAction: "rotate_product" },
+  ugc_benefit: { productPosition: "chest", motionDirection: "none", eyeDirection: "camera_then_product", exitPose: "points at one detail of the product with the free hand, product at chest height", exitAction: "point_detail" },
+  ugc_cta: { productPosition: "near_face", motionDirection: "toward_camera", eyeDirection: "camera", exitPose: "holds the product a bit closer to the camera, relaxed", exitAction: "move_product_closer" },
 };
 
 export const AROLL_OPENING_POSE = "holds the product at chest height in the right hand, looking at the camera";

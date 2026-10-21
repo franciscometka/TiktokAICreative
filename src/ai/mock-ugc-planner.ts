@@ -7,7 +7,7 @@ import type { ProductInput } from "@/domain/product";
 import type { QualitySettings } from "@/domain/quality";
 import type { UgcAudioStrategy, UgcPersonSource } from "@/domain/ugc";
 import { UGC_ROLE_ACTIONS } from "./ugc-script";
-import { splitMasterScript, splitSentences } from "./master-script";
+import { shortProductName, splitMasterScript, splitSentences } from "./master-script";
 import { DURATION_TARGETS, type DurationTarget, type TargetDuration } from "@/config/duration-targets";
 
 /**
@@ -136,22 +136,24 @@ function buildMockPresenterCreative(product: ProductInput, quality: PresetQualit
  * fechamento → CTA) com só fatos fornecidos; depois dividido em trechos consecutivos.
  */
 export function buildMockMasterScriptText(product: ProductInput, target: DurationTarget, personalization?: { cta?: string }): string {
+  // Lote 6.2 (Script V2): FEATURE → CONTEXTO → AÇÃO VISUAL, só com fatos fornecidos, sem muletas
+  // repetidas e sem linguagem de catálogo; o nome longo do anúncio vira um nome curto na fala.
   const facts = [...product.features, ...product.benefits].map(stripDot).filter(Boolean);
   const benefit = product.benefits[0] ? lowerFirst(stripDot(product.benefits[0])) : undefined;
-  const hook = benefit ? `Se você está procurando ${benefit}, olha esse modelo aqui.` : "Olha esse modelo aqui que eu quero mostrar pra vocês.";
+  const short = shortProductName(product.name);
+  const hook = benefit ? `Se você procura ${benefit}, repara nesse ${short} aqui.` : `Deixa eu te mostrar esse ${short} de pertinho.`;
   const body = [
     `Esse é o ${product.name}.`,
-    "Deixa eu mostrar ele de pertinho pra vocês.",
-    ...facts.slice(0, 3).map((fact, i) => (i === 0 ? `Um detalhe que chama atenção: ${lowerFirst(fact)}.` : `E também ${lowerFirst(fact)}.`)),
+    "Vou girar devagar pra você ver o formato.",
+    ...facts.slice(0, 3).flatMap((fact, i) => (i === 0 ? [`Uma coisa importante: ${lowerFirst(fact)}.`, "Dá pra ver isso aqui enquanto eu viro na mão."] : i === 1 ? [`Ele também tem ${lowerFirst(fact)}, repara nessa parte.`] : [`Vale conferir mais um ponto: ${lowerFirst(fact)}.`])),
   ];
-  const demo = ["Olha aqui de lado, girando devagar.", "Repara no formato e no tamanho dele na mão.", "Dá pra ver bem o acabamento daqui."];
+  const demo = ["Aqui de lado dá pra notar o acabamento com calma.", "Na mão dá pra ter uma boa noção do tamanho real."];
   const filler = [
-    "Repara nos detalhes, com calma.", "Aqui de frente dá pra ter uma boa noção do tamanho.", "Agora mais de perto, pra vocês verem melhor.",
-    "Olha como ele fica na mão.", "Vou virar de novo pra mostrar o outro lado.", "Esse ângulo mostra bem o acabamento.",
-    "Dá pra ver cada parte com clareza.", "Aqui em cima tem mais um detalhe.", "Repara nesse lado também.", "E aqui embaixo, olha só.",
+    "De frente o formato fica bem claro.", "Mais de perto dá pra reparar em cada parte.", "Virando de novo, aparece o outro lado.",
+    "Daqui de cima dá pra ver mais um detalhe.", "Por esse ângulo o acabamento aparece melhor.", "Embaixo também tem uma parte que vale notar.",
   ];
-  const closing = "Então é isso, esse é o modelo.";
-  const cta = personalization?.cta?.trim() ? `${stripDot(personalization.cta)}.` : "Se você curtiu esse modelo, dá uma olhada no carrinho e confere os detalhes.";
+  const closing = `Então, esse é o ${short} que eu queria te mostrar.`;
+  const cta = personalization?.cta?.trim() ? `${stripDot(personalization.cta)}.` : "Se fez sentido pra você, dá uma olhada no carrinho e vale conferir os detalhes.";
   const sentences = [hook, ...body, ...demo];
   const words = (list: readonly string[]) => list.join(" ").split(/\s+/).length;
   for (const line of filler) {

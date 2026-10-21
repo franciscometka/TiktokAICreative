@@ -18,7 +18,8 @@ export interface DurationTarget {
 }
 
 export const DURATION_TARGETS: Record<TargetDuration, DurationTarget> = {
-  30: { seconds: 30, label: "30s", words: { min: 70, max: 90 }, clips: 5, clipSeconds: 6.6, finalVideoSeconds: { min: 30, max: 36 } },
+  // Lote 6.2: 30s padrão termina REAL entre 32 e 38s (nunca < 30s; fala em ritmo natural, sem acelerar).
+  30: { seconds: 30, label: "30s", words: { min: 80, max: 95 }, clips: 5, clipSeconds: 7, finalVideoSeconds: { min: 32, max: 38 } },
   45: { seconds: 45, label: "45s", words: { min: 100, max: 125 }, clips: 7, clipSeconds: 6.7, finalVideoSeconds: { min: 44, max: 50 } },
   60: { seconds: 60, label: "60s", words: { min: 130, max: 160 }, clips: 9, clipSeconds: 6.8, finalVideoSeconds: { min: 58, max: 64 } },
 };

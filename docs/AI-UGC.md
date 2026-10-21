@@ -9,6 +9,12 @@ Modo "AI UGC" (Lote 5.3): foto real do produto → pessoa sintética segurando/a
 - O roteiro é criado como master script antes de ser dividido em A-rolls (D97): 30s ≈ 70–90 palavras, 45s ≈ 100–125, 60s ≈ 130–160; CTA natural é a última frase; mesma persona em todos os segmentos.
 - Voice Lock é usado apenas quando o provider suporta áudio externo/lip-sync de forma real (D98). Krea/Veo atuais só têm áudio nativo: o projeto registra "Voice Lock indisponível com este provider." e usa a fala nativa, repetindo a descrição da voz do avatar em todos os trechos. Com um provider de lip-sync, uma única narração ElevenLabs vira o áudio mestre e cada trecho usa a sua fatia.
 
+## Lote 6.2 — edição natural e Script V2 (D100)
+
+- Junções entre trechos: corte direto quando a pose bate (match cut), corte no meio de uma ação compartilhada (cut on action), micro punch de 3,5%, blur direcional curto ou micro dissolve. Tudo dura no máximo 6 frames e nenhum efeito toca o áudio.
+- Cada trecho começa continuando a ação com que o anterior terminou; o último termina com ~1s de comportamento natural.
+- O roteiro segue FEATURE → CONTEXTO → AÇÃO VISUAL, sem ficha técnica nem muletas repetidas. O vídeo de 30s termina entre 32 e 38s.
+
 ## Correção do Lote 6 — avatar salvo é a pessoa da foto (D99)
 
 - Avatar com foto: a foto vai ao provider de referência junto com a do produto. Na Krea, as duas imagens vão em `image_urls` (produto = fonte de verdade, avatar = a pessoa). O Veo parte da referência aprovada, que já contém o avatar.

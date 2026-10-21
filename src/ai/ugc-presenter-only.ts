@@ -1,6 +1,6 @@
 import { AROLL_OPENING_POSE, AROLL_POSES, PRESENTER_POLICY } from "@/config/edit-policy";
 import { CreativePlanSchema, type CreativePlan, type ScenePlan } from "@/domain/creative";
-import { PRESENTER_EDIT_PLAN_VERSION, type SceneContinuity } from "@/domain/edit";
+import { PRESENTER_EDIT_PLAN_VERSION, type ContinuityAction, type SceneContinuity } from "@/domain/edit";
 import { isUgcPersonSource, type UgcPersonSource } from "@/domain/ugc";
 
 /**
@@ -18,9 +18,14 @@ export const MAX_PRESENTER_CLIP_SECONDS = 8;
 
 const round = (x: number) => Math.round(x * 100) / 100;
 
-function continuityFor(source: UgcPersonSource, entryPose: string, revision: number): SceneContinuity {
+function continuityFor(source: UgcPersonSource, entryPose: string, revision: number, actions: { entryAction: ContinuityAction; exitAction?: ContinuityAction }): SceneContinuity {
   const pose = AROLL_POSES[source];
   return {
+    // Lote 6.2 (cut on action): a entrada continua a ação com que o trecho anterior terminou.
+    entryAction: actions.entryAction,
+    exitAction: actions.exitAction ?? pose.exitAction,
+    handPosition: "right",
+    gazeDirection: pose.eyeDirection,
     continuityGroup: "presenter",
     presenterPosition: "center",
     productPosition: pose.productPosition,
@@ -58,10 +63,14 @@ export function applyPresenterOnly(creative: CreativePlan, options: { identityRe
   }
 
   let entryPose = AROLL_OPENING_POSE;
+  let entryAction: ContinuityAction = "hold_still";
   let scale = 1;
+  const segments = new Map((creative.masterScript?.segments ?? []).map((s) => [s.sceneId, s]));
   const scenes = arolls.map((scene, order): ScenePlan => {
-    const continuity = continuityFor(scene.visualSource as UgcPersonSource, entryPose, revision);
+    const segment = segments.get(scene.id);
+    const continuity = continuityFor(scene.visualSource as UgcPersonSource, entryPose, revision, { entryAction, ...(segment?.exitAction ? { exitAction: segment.exitAction } : {}) });
     entryPose = continuity.exitPose;
+    entryAction = continuity.exitAction ?? "hold_still";
     const last = order === arolls.length - 1;
     const duration = durations[order]!;
     scale = order === 0 ? 1 : scale > 1 ? 1 : PRESENTER_POLICY.punchInScale;

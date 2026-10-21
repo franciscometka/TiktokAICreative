@@ -1,4 +1,4 @@
-import type { SceneContinuity } from "@/domain/edit";
+import type { ContinuityAction, SceneContinuity } from "@/domain/edit";
 import type { UgcCharacterIdentity } from "@/domain/ugc";
 
 /**
@@ -27,7 +27,7 @@ export const UGC_AVOID_LINES = [
 export interface UgcVideoPromptInput {
   action: string;
   speech: string;
-  continuity?: Pick<SceneContinuity, "entryPose" | "exitPose" | "productHand" | "productPosition" | "cameraPosition" | "cameraDistance" | "motionDirection" | "eyeDirection" | "presenterPosition">;
+  continuity?: Pick<SceneContinuity, "entryPose" | "exitPose" | "productHand" | "productPosition" | "cameraPosition" | "cameraDistance" | "motionDirection" | "eyeDirection" | "presenterPosition"> & Partial<Pick<SceneContinuity, "entryAction" | "exitAction">>;
   identity?: Pick<UgcCharacterIdentity, "appearance" | "wardrobe" | "environmentDescription" | "voiceDescription">;
   /** Linhas de fidelidade do produto (textos/números/logo não mudam). */
   fidelity?: readonly string[];
@@ -38,6 +38,18 @@ export interface UgcVideoPromptInput {
 const sentence = (text: string) => {
   const t = text.trim().replace(/\s+/g, " ").replace(/[.\s]+$/, "");
   return t ? `${t[0]!.toUpperCase()}${t.slice(1)}.` : "";
+};
+
+/** Lote 6.2 (cut on action): ações físicas descritas para o modelo de vídeo. */
+export const ACTION_TEXT: Record<ContinuityAction, string> = {
+  raise_product: "raising the product slightly toward the camera",
+  rotate_product: "slowly rotating the product in the hand",
+  point_detail: "pointing at a detail of the product with the free hand",
+  look_product_to_camera: "looking down at the product and back up to the camera",
+  move_product_closer: "bringing the product a little closer to the camera",
+  lower_product: "lowering the product slightly",
+  shift_body: "a small natural shift of the body",
+  hold_still: "holding the product still",
 };
 
 const EYES: Record<NonNullable<UgcVideoPromptInput["continuity"]>["eyeDirection"], string> = {
@@ -53,8 +65,11 @@ export function buildUgcVideoPrompt(input: UgcVideoPromptInput): string {
   const parts = [
     ...UGC_REALISM_LINES,
     c ? `Starts exactly where the previous shot ended: the person ${c.entryPose}, product in the ${c.productHand === "both" ? "both hands" : `${c.productHand} hand`} at ${c.productPosition.replaceAll("_", " ")}, camera ${c.cameraPosition.replaceAll("_", " ")} in ${c.cameraDistance.replaceAll("_", " ")} framing, person ${c.presenterPosition.replaceAll("_", " ")}, movement ${c.motionDirection.replaceAll("_", " ")}.` : "",
+    // Lote 6.2: o início continua a ação em curso do trecho anterior (a junção cai no meio do movimento).
+    c?.entryAction && c.entryAction !== "hold_still" ? `The shot opens already in motion, continuing the previous action: ${ACTION_TEXT[c.entryAction]}.` : "",
     sentence(input.action),
     c ? `Ends with the person: ${c.exitPose}.` : "",
+    c?.exitAction && c.exitAction !== "hold_still" && !input.finalTail ? `In the last second the person starts ${ACTION_TEXT[c.exitAction]} and is still in the middle of that movement when the shot ends.` : "",
     c ? EYES[c.eyeDirection] : "",
     input.identity ? `Keep the same adult synthetic person (${input.identity.appearance}), wardrobe (${input.identity.wardrobe}) and environment (${input.identity.environmentDescription}) as the approved reference frame, and the exact same product.`
       : "Keep the same adult synthetic person, face, hair, wardrobe and environment as the approved reference frame, and the exact same product.",
@@ -62,7 +77,7 @@ export function buildUgcVideoPrompt(input: UgcVideoPromptInput): string {
     // Lote 6: fala nativa não trava a voz; a MESMA descrição em todos os trechos reduz a variação.
     input.identity?.voiceDescription ? `Voice: ${input.identity.voiceDescription}; exactly the same voice, accent, pitch and pace as in every other clip of this video.` : "",
     `The person says naturally in Brazilian Portuguese, casual and unhurried, with short pauses: "${input.speech.trim()}"`,
-    input.finalTail ? "After the last word, the person stays in frame for about one second without speaking, still holding the product and looking at the camera with a relaxed expression." : "",
+    input.finalTail ? "After the last word, the person stays in frame for about one second without speaking, with natural behavior (a small smile, a glance at the product, lowering the product slightly); never frozen, never cut right after the last syllable." : "",
     ...UGC_AVOID_LINES,
   ];
   return parts.filter(Boolean).join(" ");

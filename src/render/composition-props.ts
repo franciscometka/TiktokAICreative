@@ -218,6 +218,10 @@ function buildEditedProps({ manifest, assets, urlFor, debug = false }: BuildProp
       kind: media ?? "placeholder", src: media ? urlFor(segment.uri) : null,
       trimBeforeFrames: Math.max(0, synchronizedTrim),
       scale: segment.scale, crop: segment.crop ?? null, transition: segment.transition,
+      transitionFx: segment.transitionSpec ? {
+        frames: segment.transitionSpec.frames, blendFrames: segment.transitionSpec.blendFrames,
+        punch: segment.transitionSpec.punch ?? null, blurDirection: segment.transitionSpec.blurDirection ?? null,
+      } : null,
       placeholderLabel: media ? null : segment.role === "aroll" ? UGC_PLACEHOLDER_LABEL : `MOCK · B-ROLL${debug ? ` · ${segment.cutReason}` : ""}`,
     };
   });

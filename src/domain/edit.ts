@@ -45,10 +45,48 @@ export const CUT_REASONS = [
 export const CutReasonSchema = z.enum(CUT_REASONS);
 export type CutReason = z.infer<typeof CutReasonSchema>;
 
-/** Transições discretas. `crossfade` é exceção e só existe quando o plano pede explicitamente. */
-export const EDIT_TRANSITIONS = ["straight_cut", "match_cut", "cut_on_action", "object_wipe", "punch_in", "crossfade"] as const;
+/**
+ * Transições discretas. `crossfade` é exceção e só existe quando o plano pede explicitamente.
+ * Lote 6.2 — Natural Transition Engine (V3): `direct_match_cut`, `cut_on_action`, `micro_punch`,
+ * `directional_motion_blur`, `micro_dissolve` (ordem de prioridade). Os antigos continuam válidos
+ * para manifests já persistidos.
+ */
+export const NATURAL_TRANSITIONS = ["direct_match_cut", "cut_on_action", "micro_punch", "directional_motion_blur", "micro_dissolve"] as const;
+export type NaturalTransition = (typeof NATURAL_TRANSITIONS)[number];
+export const EDIT_TRANSITIONS = ["straight_cut", "match_cut", "cut_on_action", "object_wipe", "punch_in", "crossfade", "direct_match_cut", "micro_punch", "directional_motion_blur", "micro_dissolve"] as const;
 export const EditTransitionSchema = z.enum(EDIT_TRANSITIONS);
 export type EditTransition = z.infer<typeof EditTransitionSchema>;
+
+/** Limites do engine (frames a 30 fps): nada chamativo, nada longo. */
+export const TRANSITION_LIMITS = { maxFrames: 6, maxDissolveFrames: 4, maxBlendFrames: 4, blurFrames: { min: 2, max: 4 }, punchFrames: { min: 3, max: 6 }, maxPunchScale: 1.04 } as const;
+
+/** Ações físicas que escondem a junção (cut on action): o fim de um trecho e o início do próximo compartilham uma delas. */
+export const CONTINUITY_ACTIONS = ["raise_product", "rotate_product", "point_detail", "look_product_to_camera", "move_product_closer", "lower_product", "shift_body", "hold_still"] as const;
+export const ContinuityActionSchema = z.enum(CONTINUITY_ACTIONS);
+export type ContinuityAction = z.infer<typeof ContinuityActionSchema>;
+
+/**
+ * Transição escolhida para a ENTRADA de um trecho (Lote 6.2). `frames` = duração visual do efeito;
+ * 0 = corte direto. Só visual: o áudio nunca é tocado pela transição.
+ */
+export const TransitionSpecSchema = z.object({
+  type: z.enum(NATURAL_TRANSITIONS),
+  frames: z.int().min(0).max(TRANSITION_LIMITS.maxFrames),
+  /** Blend curtíssimo (match cut) ou dissolve: o trecho anterior continua por baixo por N frames. */
+  blendFrames: z.int().min(0).max(TRANSITION_LIMITS.maxBlendFrames).default(0),
+  punch: z.object({ fromScale: z.number().min(1).max(TRANSITION_LIMITS.maxPunchScale), toScale: z.number().min(1).max(TRANSITION_LIMITS.maxPunchScale) }).optional(),
+  blurDirection: z.enum(["left", "right", "up", "down"]).optional(),
+  /** Por que este tipo (auditoria/diagnóstico avançado). */
+  reason: nonEmpty,
+  /** Similaridade pose/framing (0–1) entre a saída do anterior e a entrada deste. */
+  similarity: z.number().min(0).max(1),
+}).superRefine((t, ctx) => {
+  if (t.type === "micro_dissolve" && (t.blendFrames < 2 || t.blendFrames > TRANSITION_LIMITS.maxDissolveFrames)) ctx.addIssue({ code: "custom", message: "micro_dissolve: 2–4 frames." });
+  if (t.type === "directional_motion_blur" && (t.frames < TRANSITION_LIMITS.blurFrames.min || t.frames > TRANSITION_LIMITS.blurFrames.max || !t.blurDirection)) ctx.addIssue({ code: "custom", message: "Motion blur: 2–4 frames com direção." });
+  if (t.type === "micro_punch" && (!t.punch || t.frames < TRANSITION_LIMITS.punchFrames.min)) ctx.addIssue({ code: "custom", message: "Micro punch: 3–6 frames com escala." });
+  if (t.blendFrames > t.frames && t.type !== "direct_match_cut") ctx.addIssue({ code: "custom", message: "Blend maior que a transição." });
+});
+export type TransitionSpec = z.infer<typeof TransitionSpecSchema>;
 
 /**
  * Tipos de B-roll.
@@ -78,6 +116,11 @@ export const SceneContinuitySchema = z.object({
   environmentRevision: z.int().positive(),
   outfitRevision: z.int().positive(),
   identityRevision: z.int().positive(),
+  /** Lote 6.2 (cut on action): ação em curso na entrada/saída; a entrada continua a saída anterior. */
+  entryAction: ContinuityActionSchema.optional(),
+  exitAction: ContinuityActionSchema.optional(),
+  handPosition: z.enum(["right", "left", "both", "none"]).optional(),
+  gazeDirection: z.enum(["camera", "product", "camera_then_product", "product_then_camera"]).optional(),
 });
 export type SceneContinuity = z.infer<typeof SceneContinuitySchema>;
 
@@ -163,6 +206,8 @@ export const EditVisualSegmentSchema = z.object({
   pauseBoundaries: z.array(AudioSilenceIntervalSchema).optional(),
   continuity: SceneContinuitySchema.optional(),
   finalTailSeconds: z.number().nonnegative().optional(),
+  /** Lote 6.2: transição natural de ENTRADA deste trecho (ausente = corte seco; manifests antigos). */
+  transitionSpec: TransitionSpecSchema.optional(),
 }).superRefine((segment, ctx) => {
   if (!(segment.endSeconds > segment.startSeconds && segment.sourceOutSeconds > segment.sourceInSeconds)) {
     ctx.addIssue({ code: "custom", message: "Trecho com duração inválida." });
@@ -241,6 +286,9 @@ export class EditPlanError extends Error {
 
 const EPS = 1e-6;
 
+/** Fronteiras em que uma transição natural pode acontecer (nunca no meio de uma fala). */
+export const VALID_TRANSITION_BOUNDARIES: readonly CutReason[] = ["sentence_boundary", "natural_pause", "action_match"];
+
 /**
  * Invariantes do Edit Plan (puras): visuais contíguos cobrindo o vídeo inteiro, todo trecho com
  * motivo de corte, nenhum áudio sobreposto (nunca duas vozes), B-roll nunca fonte de áudio e
@@ -253,6 +301,9 @@ export function assertValidEditPlan(plan: EditPlan): EditPlan {
     if (Math.abs(segment.startSeconds - cursor) > EPS) throw new EditPlanError(`Trecho ${index + 1} não começa onde o anterior termina (buraco ou sobreposição).`);
     if (index === 0 && segment.cutReason !== "opening") throw new EditPlanError("O primeiro trecho é a abertura (cutReason=opening).");
     if (index > 0 && segment.cutReason === "opening") throw new EditPlanError(`Trecho ${index + 1}: todo corte precisa de motivo editorial.`);
+    // Lote 6.2: transição natural só na junção, e só em fronteira válida (fim de frase, pausa medida, ação).
+    if (segment.transitionSpec && index === 0) throw new EditPlanError("A abertura não tem transição.");
+    if (segment.transitionSpec && !VALID_TRANSITION_BOUNDARIES.includes(segment.cutReason)) throw new EditPlanError(`Trecho ${index + 1}: transição fora de fronteira válida (${segment.cutReason}).`);
     cursor = segment.endSeconds;
   }
   if (Math.abs(cursor - parsed.durationSeconds) > EPS) throw new EditPlanError("Os visuais não cobrem o vídeo inteiro.");

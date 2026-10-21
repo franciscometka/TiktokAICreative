@@ -11,6 +11,7 @@ import {
   type EditVisualSegment,
 } from "@/domain/edit";
 import type { EditClip } from "./edit-plan";
+import { chooseTransition, continuitySide } from "./natural-transitions";
 
 /**
  * Edit Plan V3 — Presenter Only (Lote 5.7). Função PURA: A-rolls da apresentadora → timeline.
@@ -52,6 +53,8 @@ interface Span {
   pauses: AudioSilenceInterval[];
   measured: boolean;
   continuity?: NonNullable<CreativePlan["scenes"][number]["edit"]>["continuity"];
+  /** Frames de mídia disponíveis no clipe (para blend sem congelar o último frame). */
+  mediaF: number;
 }
 
 /** Janela adaptativa (segundos do clipe), antes da quantização. */
@@ -180,7 +183,7 @@ export function buildPresenterEditPlan(input: BuildPresenterEditPlanInput): Edit
     if (outF - inF < Math.round(1.5 * fps)) { inF = 0; outF = Math.floor(clip.actualSeconds * fps + 1e-6); }
     spans.push({ sceneId: scene.id, uri: clip.uri, speech: scene.narration, inF, outF, startF: cursorF, generated: clip.generatedSeconds,
       leadSilent: w.leadSilent && inF > 0, trailSilent: w.trailSilent, ...(w.speechEnd !== undefined ? { speechEndSeconds: w.speechEnd } : {}),
-      pauses: clip.audioSilence?.intervals ?? [], measured: !!clip.audioSilence, continuity: scene.edit?.continuity });
+      pauses: clip.audioSilence?.intervals ?? [], measured: !!clip.audioSilence, continuity: scene.edit?.continuity, mediaF: Math.floor(clip.actualSeconds * fps + 1e-6) });
     cursorF += outF - inF;
   });
   const totalF = cursorF;
@@ -194,14 +197,21 @@ export function buildPresenterEditPlan(input: BuildPresenterEditPlanInput): Edit
     const last = i === spans.length - 1;
     const previous = spans[i - 1];
     const pausedCut = !!previous && (previous.trailSilent || span.leadSilent);
-    scale = i === 0 ? 1 : scale > 1 ? 1 : policy.punchInScale;
+    // Lote 6.2 — Natural Transition Engine: match cut > cut on action > micro punch > blur > dissolve.
+    // Só VISUAL e só na junção (fim de frase/pausa medida); o áudio abaixo continua contíguo.
+    const transitionSpec = previous ? chooseTransition({
+      previous: continuitySide(previous.continuity), next: continuitySide(span.continuity),
+      previousScale: scale, previousSpareFrames: previous.mediaF - previous.outF,
+    }) : undefined;
+    scale = !transitionSpec ? 1 : transitionSpec.punch ? transitionSpec.punch.toScale : scale;
     const endF = span.startF + span.outF - span.inF;
     const tail = last && span.speechEndSeconds !== undefined ? Math.max(0, span.outF / fps - span.speechEndSeconds) : undefined;
     visuals.push({
       id: `seg_${i + 1}`, startSeconds: s(span.startF), endSeconds: s(endF), role: "aroll", sceneId: span.sceneId, media: "video", uri: span.uri,
       sourceInSeconds: s(span.inF), sourceOutSeconds: s(span.outF), muted: true,
       cutReason: i === 0 ? "opening" : pausedCut ? "natural_pause" : "sentence_boundary",
-      transition: i === 0 ? "straight_cut" : scale > 1 ? "punch_in" : "straight_cut",
+      transition: transitionSpec?.type ?? "straight_cut",
+      ...(transitionSpec ? { transitionSpec } : {}),
       continuityGroup: "presenter", scale, audioSceneId: span.sceneId, audioSceneIds: [span.sceneId],
       speech: span.speech, pauseBoundaries: span.pauses.filter((p) => p.endSeconds > s(span.inF) && p.startSeconds < s(span.outF)),
       ...(span.continuity ? { continuity: span.continuity } : {}),

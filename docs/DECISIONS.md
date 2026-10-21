@@ -535,3 +535,34 @@ Avatar salvo nunca é substituído silenciosamente por uma identidade sintética
   - Correção em `campaign-plan@1.8.1`: re-divisão determinística do roteiro mestre antes da validação (`normalizeMasterScriptDraft`), com duração por trecho na medida da fala (até 8s), e instrução de nome curto do produto na fala. `applyMasterScript` usa a mesma regra.
   - Sem reparo por LLM para erro determinístico.
   - "Ver detalhes" mostra a causa real sanitizada (`planningErrorDetails`: trecho e motivo, sem chaves, caminhos ou URLs).
+
+## D100 — Natural UGC Editing + Script V2 (Lote 6.2)
+
+Os 5–6 A-rolls do Presenter Only são editados como UM vídeo de TikTok: junções escondidas por continuidade e ação, nunca por efeitos chamativos.
+
+- Natural Transition Engine (`render/natural-transitions.ts`, puro). Escolhe a transição de ENTRADA de cada trecho, em ordem de prioridade:
+  1. `direct_match_cut`: similaridade de continuidade ≥ 0,9, com corte direto, ou blend de 2 frames só se quase idêntico e houver vídeo sobrando.
+  2. `cut_on_action`: a ação de saída do trecho N é a de entrada do N+1, é um movimento, e o enquadramento é igual.
+  3. `micro_punch`: enquadramento igual com pose diferente. Vai de 100% para 103,5% em 4 frames e volta para 100% no trecho seguinte.
+  4. `directional_motion_blur`: mesma direção de movimento nos dois lados. Blur só no eixo do movimento (SVG `feGaussianBlur`), 3 frames.
+  5. `micro_dissolve`: último recurso, só com câmera, mão e posição do produto alinhadas e vídeo sobrando. Dura 3 frames.
+  - Sem metadados ou alinhamento, o padrão é o micro punch, nunca um blend às cegas.
+- Limites no schema (`TransitionSpecSchema`, `TRANSITION_LIMITS`): ≤ 6 frames, dissolve/blend ≤ 4, punch ≤ 1,04. Os tipos flash, spin, slide, 3D, wipe gráfico e crossfade longo não existem.
+- A transição só acontece em fronteira válida (`sentence_boundary`, `natural_pause` ou `action_match`) e nunca na abertura (`assertValidEditPlan`).
+- O efeito é só visual. O áudio continua com uma faixa por vez, contígua e alinhada aos frames, e só recebe um microfade de 2 frames dentro de pausa medida. Saída em AAC 48 kHz estéreo, como antes.
+- Continuidade (cut on action): `SceneContinuity` ganha `entryAction`, `exitAction`, `handPosition` e `gazeDirection`.
+  - A entrada de cada trecho é a ação de saída do anterior.
+  - O prompt de vídeo pede que o trecho abra já em movimento, continuando a ação anterior, e termine no meio da próxima ação.
+  - O último trecho termina com 0,8–1,2s de comportamento natural (sorriso, olhar para o produto, baixar o produto), sem congelar.
+- Script V2 (`campaign-plan@1.9.0` + `checkScriptV2`):
+  - Cada característica segue FEATURE → CONTEXTO → AÇÃO VISUAL, sem benefício técnico inventado.
+  - A validação bloqueia: linguagem de catálogo ("é vendido como", "este produto possui/oferece"); 3 ou mais frases curtas seguidas de especificação solta; muleta repetida mais de 2× ou mais de 4 no total; mais de 3 frases começando com "Ele".
+  - Estrutura por tempo: hook, característica principal, segunda característica com demonstração, informação importante e CTA.
+- Segmentação: a divisão dinâmica (DP) penaliza cortar no meio de um pensamento (próxima frase começando com "E/Então/Porque…"), cortar em vírgula, e trecho acima de 22 palavras (8s em ritmo natural).
+  - Cada segmento guarda `beat`, `visualAction` (vira a ação do vídeo), `entryAction`, `exitAction`, `transitionIntent` e `splitReason`.
+- Duração: o alvo de 30s passa a ser 80–95 palavras, 5 trechos de ~7s e vídeo final de 32–38s. Nunca abaixo de 30s, e a fala não é acelerada.
+- Diagnóstico: "Trecho N → tipo" aparece só em `?view=advanced` (prevista pela continuidade antes do render, real depois). A tela V2 não mostra.
+- Compatibilidade:
+  - Manifests V2/V3 sem `transitionSpec` continuam válidos e viram corte seco no Remotion (`transitionFx: null`).
+  - Planos antigos sem ações de continuidade usam o engine com fallback seguro.
+  - A composição passa para `tiktok-creative@1.5.0`.

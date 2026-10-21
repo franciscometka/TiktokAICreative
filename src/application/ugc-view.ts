@@ -1,4 +1,5 @@
 import { previewPresenterTimeline } from "@/ai/ugc-presenter-only";
+import { plannedTransitions } from "@/render/natural-transitions";
 import { veoRequestedDuration } from "@/config/ugc-models";
 import { previewEditorialTimeline } from "@/ai/ugc-editorial";
 import { UGC_ROLE_ACTIONS } from "@/ai/ugc-script";
@@ -96,6 +97,8 @@ export interface EditorialItemView {
   audioNote: string | null;
   continuity: string | null;
   status: string;
+  /** Lote 6.2 (só diagnóstico avançado): transição de entrada do trecho, ex.: "cut_on_action". */
+  transition: string | null;
 }
 
 const CUT_REASON_LABELS: Record<CutReason, string> = {
@@ -163,6 +166,9 @@ export function buildUgcView(input: {
   };
   // Lote 5.7: Presenter Only — "Trecho N · Apresentadora · fala"; o último leva o CTA.
   const presenterOnly = plan?.editPlanVersion === 3;
+  // Transição: a do Edit Plan renderizado (quando existe) ou a prevista pela continuidade planejada.
+  const rendered = new Map((job.manifest?.edit?.visuals ?? []).map((v) => [v.sceneId, v.transitionSpec?.type ?? (v.cutReason === "opening" ? "opening" : v.transition)]));
+  const planned = plan && presenterOnly ? plannedTransitions(plan.scenes) : new Map<string, string>();
   const editorial: EditorialItemView[] = plan && presenterOnly ? previewPresenterTimeline(plan).map((item) => ({
     sceneId: item.sceneId,
     roleLabel: item.label,
@@ -174,6 +180,7 @@ export function buildUgcView(input: {
     audioNote: null,
     continuity: item.continuity,
     status: sceneState(item.sceneId),
+    transition: rendered.get(item.sceneId) ?? planned.get(item.sceneId) ?? null,
   })) : plan ? previewEditorialTimeline(plan).map((item) => ({
     sceneId: item.sceneId,
     roleLabel: item.role === "aroll" ? "A-ROLL" : "B-ROLL",
@@ -185,6 +192,7 @@ export function buildUgcView(input: {
     audioNote: item.role === "broll" ? "Áudio continua da apresentadora" : null,
     continuity: item.continuity ?? null,
     status: item.role === "broll" ? "Sem custo extra (frame da referência)" : sceneState(item.sceneId),
+    transition: rendered.get(item.sceneId) ?? null,
   })) : [];
   const usage = (job.manifest?.edit?.usage ?? []).map((u) => ({ sceneId: u.sceneId, label: `${seconds(u.generatedSeconds)} gerados · ${seconds(u.usedSeconds)} usados` }));
   // Cotação: segundos gerados (cobrados, 8s por trecho Veo) × usados estimados (duração editorial).

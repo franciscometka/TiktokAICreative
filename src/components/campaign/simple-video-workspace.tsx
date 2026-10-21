@@ -53,6 +53,7 @@ function EditorialTimeline({ ugc }: { ugc: UgcView }) {
             {item.speech && <p className="text-xs text-zinc-500">{item.visual}</p>}
             {item.audioNote && <p className="text-xs text-zinc-500">{item.audioNote}</p>}
             <p className="text-xs text-zinc-500">Corte: {item.cutReasonLabel} · {item.durationLabel} · {item.status}</p>
+            {item.transition && <p className="text-xs text-zinc-400" data-testid="transition">→ {item.transition}</p>}
             {item.continuity && <p className="text-xs text-zinc-400">Continuidade: {item.continuity}</p>}
             {ugc.usage.find((u) => u.sceneId === item.sceneId) && <p className="text-xs text-zinc-500 tabular">{ugc.usage.find((u) => u.sceneId === item.sceneId)!.label}</p>}
           </div>
