@@ -21,11 +21,11 @@ import { detectRemotionBrowser } from "@/render/remotion/browser-readiness";
 import { createOfflinePipelineService, VersionedMockRenderer } from "./offline-service";
 import type { PipelineDeps } from "./pipeline-service";
 
-export function hybridCapabilities(config: AppConfig, env: Record<string, string | undefined> = process.env, issues: readonly ConfigIssue[] = []): StageCapabilities {
+export function hybridCapabilities(config: AppConfig, env: Record<string, string | undefined> = process.env, issues: readonly ConfigIssue[] = [], projectRoot?: string): StageCapabilities {
   // Lote 5.5: configuração inválida NÃO cai em MOCK no fluxo normal; bloqueia todas as etapas.
   const invalid = !mocksAllowed(config) && issues.length > 0 ? `Configuração inválida: ${issues.map(issue => issue.variable).join(", ")}. Corrija .env.local; nenhuma geração até lá.` : undefined;
   const available = (ok: boolean, provider: string, reason: string) => invalid ? { available: false, provider, reason: invalid } : ({ available: ok, provider, reason: ok ? undefined : reason });
-  const browser = detectRemotionBrowser(config.renderer.browserExecutable);
+  const browser = detectRemotionBrowser(config.renderer.browserExecutable, projectRoot);
   const krea = config.ugc.provider === "krea";
   const ugc = krea ? kreaUgcReadiness(config, env) : googleUgcReadiness(config, env);
   return {
@@ -40,13 +40,17 @@ export function hybridCapabilities(config: AppConfig, env: Record<string, string
   };
 }
 /** Defaults sempre MOCK. As implementações reais só são instanciadas na etapa selecionada. */
-export function createHybridPipelineService(config: AppConfig, overrides: Partial<PipelineDeps> = {}, env: Record<string, string | undefined> = process.env, issues: readonly ConfigIssue[] = []) {
+/**
+ * `roots` (Lote 7, worker): código do Remotion na raiz do app; assets relativos ao workspace
+ * temporário do job (cwd da tarefa). Ausente = tudo relativo ao cwd, como no local.
+ */
+export function createHybridPipelineService(config: AppConfig, overrides: Partial<PipelineDeps> = {}, env: Record<string, string | undefined> = process.env, issues: readonly ConfigIssue[] = [], roots: { projectRoot?: string; assetRoot?: string } = {}) {
   const ids = overrides.ids ?? randomId;
   const mockPlanner = new MockCreativePlanner(ids, config.mockPlannerDelayMs);
   const mockRenderer = new VersionedMockRenderer();
-  const renderer = createRenderer("remotion", { rendersDir: config.rendersDir, allowedAssetRoots: [config.uploadsDir, config.audioDir, config.videosDir, config.ugcDir], concurrency: config.renderer.concurrency, debug: config.renderer.debug, browserExecutable: config.renderer.browserExecutable, licenseKey: readRemotionLicenseKey(env) });
+  const renderer = createRenderer("remotion", { rendersDir: config.rendersDir, allowedAssetRoots: [config.uploadsDir, config.audioDir, config.videosDir, config.ugcDir], concurrency: config.renderer.concurrency, debug: config.renderer.debug, browserExecutable: config.renderer.browserExecutable, licenseKey: readRemotionLicenseKey(env), ...roots });
   const hybrid: NonNullable<PipelineDeps["hybrid"]> = {
-    capabilities: hybridCapabilities(config, env, issues),
+    capabilities: hybridCapabilities(config, env, issues, roots.projectRoot),
     allowMocks: mocksAllowed(config),
     planner: mode => mode === "mock" ? mockPlanner : new LlmCreativePlanner(createAnthropicLlmClient({ llmPolicy: { ...config.llmPolicy, maxTransportRetries: 0 } }, env), ids, { maxValidationAttempts: 1 }),
     audio: (pricing, mode) => createAudioProviderFactory(mode === "real" ? "elevenlabs" : "mock", { elevenLabsApiKey: readElevenLabsApiKey(env), ttsTimeoutMs: config.ttsTimeoutMs })(pricing),

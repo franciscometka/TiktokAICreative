@@ -167,6 +167,10 @@ export class PostgresPipelineStore implements PipelineStore {
   async refreshProgress(jobId: string): Promise<void> {
     const job = await this.getJob(jobId).catch(() => undefined);
     if (!job) return;
-    await this.db.query("update jobs set progress_stage = $3 where id = $1 and user_id = $2", [jobId, this.userId, progressStageOf(job)]);
+    const progress = progressStageOf(job);
+    await this.db.transaction(async (tx) => {
+      const r = await tx.query("update jobs set progress_stage = $3 where id = $1 and user_id = $2 and progress_stage <> $3", [jobId, this.userId, progress]);
+      if (r.rowCount > 0) await tx.query("insert into job_events (user_id, campaign_id, job_id, type, stage, message) values ($1, $2, $3, 'progress', $4, $5)", [this.userId, job.campaignId, jobId, progress, `arquivos salvos; ${job.status}`]);
+    });
   }
 }

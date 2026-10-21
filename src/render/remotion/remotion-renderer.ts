@@ -35,6 +35,8 @@ export interface RemotionRendererOptions {
   /** Entrada do bundle Remotion. Padrão: remotion/index.ts na raiz do projeto. */
   entryPoint?: string;
   projectRoot?: string;
+  /** Lote 7: raiz das URIs relativas dos assets (worker: workspace temporário do job). Padrão: projectRoot. */
+  assetRoot?: string;
   /** null = Remotion decide. */
   concurrency?: number | null;
   /** Qualidade H.264 (menor = melhor/maior). 20 equilibra tamanho e qualidade para social. */
@@ -47,6 +49,8 @@ export interface RemotionRendererOptions {
   browserExecutable?: string | null;
 }
 
+const BUNDLES = new Map<string, Promise<string>>();
+
 export class RemotionRenderer implements Renderer {
   readonly id = "remotion";
   readonly isMock = false;
@@ -56,23 +60,28 @@ export class RemotionRenderer implements Renderer {
 
   constructor(private readonly options: RemotionRendererOptions) {
     this.projectRoot = options.projectRoot ?? process.cwd();
-    this.resolver = new AssetResolver(options.allowedAssetRoots, this.projectRoot);
+    this.resolver = new AssetResolver(options.allowedAssetRoots, options.assetRoot ?? this.projectRoot);
   }
 
   /** Bundle webpack uma vez por processo (cache técnico em memória). Falha → próxima chamada tenta de novo. */
   private getBundle(): Promise<string> {
+    // Lote 7: cache por processo (não por instância): o worker cria um serviço por tarefa.
+    const entryPoint = this.options.entryPoint ?? resolve(this.projectRoot, "remotion", "index.ts");
+    this.bundlePromise ??= BUNDLES.get(entryPoint);
     this.bundlePromise ??= (async () => {
       await ensureBrowser({ logLevel: "error", browserExecutable: this.options.browserExecutable ?? null });
       return bundle({
-        entryPoint: this.options.entryPoint ?? resolve(this.projectRoot, "remotion", "index.ts"),
+        entryPoint,
         rootDir: this.projectRoot,
         enableCaching: true,
         onProgress: () => {},
       });
     })().catch((error: unknown) => {
       this.bundlePromise = undefined;
+      BUNDLES.delete(entryPoint);
       throw error;
     });
+    BUNDLES.set(entryPoint, this.bundlePromise);
     return this.bundlePromise;
   }
 

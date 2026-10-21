@@ -117,6 +117,7 @@ import {
 import type { VideoAssetStore } from "@/storage/video-asset-store";
 import type { PricingRef } from "@/domain/quality";
 import { transitionCampaign, transitionJob } from "./states";
+import { jobKey, planningKey, type ActivitySnapshot, type CampaignLocks, type JobRun, type WorkDispatcher } from "./dispatch";
 
 export interface PipelineDeps {
   planner: CreativePlanner;
@@ -157,6 +158,12 @@ export interface PipelineDeps {
   outputDir: string;
   clock: Clock;
   ids: IdGenerator;
+  /** Lote 7: fila durável (cloud). Ausente = trabalho no próprio processo, como no local. */
+  dispatcher?: WorkDispatcher;
+  /** Lote 7: execuções ativas na fila (queued/running), carregadas por request no cloud. */
+  activity?: ActivitySnapshot;
+  /** Lote 7: lock por campanha ENTRE processos (advisory lock no Postgres). Ausente = mutex local. */
+  locks?: CampaignLocks;
 }
 
 export class PlanningBudgetError extends Error {
@@ -179,10 +186,13 @@ export type GenerationOutcome =
   /** Narração real bem mais longa que o planejado: espera decisão explícita (nada é regerado sozinho). */
   | { kind: "AUDIO_REVIEW"; job: GenerationJob }
   | { kind: "FAILED"; job: GenerationJob; error: string }
+  /** Lote 7 (cloud): a tarefa foi persistida na fila durável; o worker executa. */
+  | { kind: "QUEUED"; job: GenerationJob }
   | BudgetExceededOutcome;
 export type RegenerationOutcome =
   | { kind: "WAITING_STAGE"; job: GenerationJob }
   | { kind: "REGENERATED"; job: GenerationJob }
+  | { kind: "QUEUED"; job: GenerationJob }
   | { kind: "AUDIO_REVIEW"; job: GenerationJob }
   | { kind: "FAILED"; job: GenerationJob; error: string }
   | BudgetExceededOutcome;
@@ -219,7 +229,7 @@ const JOB_STAGE_ORDER = ["ugc_reference", "narration", "ugc_video", "avatar", "s
 
 export class PipelineService {
   private readonly hybridInvocations = new Set<string>();
-  private readonly campaignLocks = new KeyedMutex();
+  private readonly campaignLocks: CampaignLocks;
   /**
    * Planejamentos em execução NESTE processo. Não é fila durável: se o processo cair, a campanha
    * fica em "planning" sem entrada aqui e passa a ser vista como interrompida.
@@ -229,7 +239,9 @@ export class PipelineService {
   private readonly activeJobs = new Map<string, Promise<GenerationOutcome>>();
   private readonly renderProgress = new Map<string, RenderProgress>();
 
-  constructor(private readonly deps: PipelineDeps) {}
+  constructor(private readonly deps: PipelineDeps) {
+    this.campaignLocks = deps.locks ?? new KeyedMutex();
+  }
 
   // Execução híbrida: uma ação autoriza somente uma unidade da etapa escolhida.
   private fingerprint(value: unknown): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
@@ -370,7 +382,7 @@ export class PipelineService {
       await this.deps.store.saveCampaign(campaign);
       return campaign;
     });
-    return { campaign, completion: withRealStageAuthorization("planning", () => this.launchPlanning(campaign)) };
+    return { campaign, completion: (await this.dispatchPlanning(campaign, true)).completion };
   }
   async quoteStage(jobId: string, stage: ExecutionStage, internal = false, regenerate = false, targetSceneId?: string): Promise<StageQuote> {
     if (stage === "planning") return this.quotePlanning((await this.getJob(jobId)).campaignId);
@@ -597,7 +609,7 @@ export class PipelineService {
       await this.deps.store.saveJob(job);
       return job;
     });
-    return { job: prepared, completion: this.launchJob(jobId, () => this.runAuthorizedJob(jobId)) };
+    return { job: prepared, completion: (await this.dispatchJob(jobId, { kind: "authorized" })).completion };
   }
 
   private async pauseAuthorizedJob(jobId: string, reason: string, waitingFor?: GenerationJob["waitingForStage"]): Promise<GenerationOutcome> {
@@ -676,11 +688,17 @@ export class PipelineService {
     }
     return { kind: 'WAITING_STAGE', job: await this.getJob(jobId) };
   }
-  async executeStage(jobId: string, stage: ExecutionStage, token: string, options: { regenerate?: boolean; authorizeOverBudget?: boolean; sceneId?: string } = {}) {
+  async executeStage(jobId: string, stage: ExecutionStage, token: string, options: { regenerate?: boolean; authorizeOverBudget?: boolean; sceneId?: string; thenFreeRender?: boolean } = {}) {
+    const { job, budgetStillBlocked } = await this.prepareStage(jobId, stage, token, options);
+    if (budgetStillBlocked) return { job, completion: Promise.resolve({ kind: "WAITING_STAGE" as const, job }) };
+    return { job, completion: (await this.dispatchJob(jobId, { kind: "hybrid_stage", stage, ...(options.regenerate ? { regenerate: true } : {}), ...(options.sceneId ? { sceneId: options.sceneId } : {}), ...(options.thenFreeRender ? { thenFreeRender: true } : {}) })).completion };
+  }
+  /** Aprovação da etapa sob lock (sem executar). `inTask` = já dentro da tarefa do worker/processo. */
+  private async prepareStage(jobId: string, stage: ExecutionStage, token: string, options: { regenerate?: boolean; authorizeOverBudget?: boolean; sceneId?: string } = {}, inTask = false) {
     if (stage === "planning") throw new Error("Use a ação de planejamento do projeto.");
     let budgetStillBlocked = false;
     const job = await this.withJobLock(jobId, async () => {
-      this.assertJobIdle(jobId);
+      if (!inTask) this.assertJobIdle(jobId);
       const quote = await this.quoteStage(jobId, stage, false, options.regenerate, options.sceneId);
       if (token !== quote.token || (!quote.ready && !(options.authorizeOverBudget && quote.budgetDecision?.canAuthorizeOverBudget))) throw new Error(quote.blocked ?? "Estimativa alterada ou etapa concluída; revise novamente.");
       await this.adoptOfflineCampaign(await this.getCampaign((await this.getJob(jobId)).campaignId));
@@ -697,8 +715,7 @@ export class PipelineService {
       if (job.status !== "generating") throw new Error("Resolva a revisão/orçamento antes de executar outra etapa.");
       await this.deps.store.saveJob(job); return job;
     });
-    if (budgetStillBlocked) return { job, completion: Promise.resolve({ kind: "WAITING_STAGE" as const, job }) };
-    return { job, completion: this.launchJob(jobId, () => this.performHybridStage(jobId, stage, options.regenerate, options.sceneId)) };
+    return { job, budgetStillBlocked };
   }
   private async performHybridStage(jobId: string, stage: ExecutionStage, regenerate = false, targetSceneId?: string): Promise<GenerationOutcome> {
     this.hybridInvocations.add(jobId);
@@ -855,7 +872,7 @@ export class PipelineService {
     if (this.deps.hybrid && planningMode === "real") return { campaign, completion: Promise.resolve(campaign) };
     campaign = this.beginPlanningRun(campaign);
     await store.saveCampaign(campaign);
-    return { campaign, completion: this.launchPlanning(campaign) };
+    return { campaign, completion: (await this.dispatchPlanning(campaign, false)).completion };
   }
 
   /**
@@ -881,7 +898,7 @@ export class PipelineService {
 
       campaign = this.beginPlanningRun({ ...campaign, error: undefined, errorCode: undefined });
       await this.deps.store.saveCampaign(campaign);
-      return { campaign, completion: this.launchPlanning(campaign) };
+      return { campaign, completion: (await this.dispatchPlanning(campaign, false)).completion };
     });
   }
 
@@ -892,7 +909,7 @@ export class PipelineService {
 
   /** true se ESTE processo está executando o planejamento da campanha. */
   isPlanningActive(campaignId: string): boolean {
-    return this.activePlanning.has(campaignId);
+    return this.activePlanning.has(campaignId) || this.deps.activity?.isActive(planningKey(campaignId)) === true;
   }
 
   /**
@@ -1107,7 +1124,7 @@ export class PipelineService {
       await this.deps.store.saveJob(next);
       return next;
     });
-    return { job: resumed, resumed: true, completion: this.launchJob(job.id, () => this.runAuthorizedJob(job.id)) };
+    return { job: resumed, resumed: true, completion: (await this.dispatchJob(job.id, { kind: "authorized" })).completion };
   }
 
   private assertPlannerAvailable(): void {
@@ -1383,7 +1400,7 @@ export class PipelineService {
       await this.deps.store.saveJob(next);
       return next;
     });
-    return { job, completion: this.launchJob(jobId, () => this.deps.hybrid ? this.runHybridMocks(jobId) : this.continueGeneration(jobId)) };
+    return { job, completion: (await this.dispatchJob(jobId, this.deps.hybrid ? { kind: "hybrid_mocks" } : { kind: "continue" })).completion };
   }
 
   /** Como startGeneration, mas espera o desfecho (scripts e testes). */
@@ -1423,7 +1440,7 @@ export class PipelineService {
       const cancelled: GenerationOutcome = { kind: "FAILED", job, error: "Cancelado pelo usuário por orçamento" };
       return { job, completion: Promise.resolve(cancelled) };
     }
-    return { job, completion: this.launchJob(jobId, () => this.deps.hybrid ? this.runHybridMocks(jobId) : this.continueGeneration(jobId)) };
+    return { job, completion: (await this.dispatchJob(jobId, this.deps.hybrid ? { kind: "hybrid_mocks" } : { kind: "continue" })).completion };
   }
 
   async resolveBudgetDecision(jobId: string, choice: "cancel" | "authorize"): Promise<GenerationOutcome> {
@@ -1443,7 +1460,7 @@ export class PipelineService {
       if (!job.stageModes) throw new Error("Crie uma cópia híbrida para continuar.");
       if (job.status !== "generating") throw new Error("Use a execução ou nova versão no painel de etapas.");
       this.assertJobIdle(jobId);
-      return { job, completion: this.launchJob(jobId, () => this.runHybridMocks(jobId)) };
+      return { job, completion: (await this.dispatchJob(jobId, { kind: "hybrid_mocks" })).completion };
     }
     let resumeGeneration = false;
     const job = await this.withJobLock(jobId, async () => {
@@ -1467,8 +1484,8 @@ export class PipelineService {
       await this.deps.store.saveJob(next);
       return next;
     });
-    const run = this.deps.hybrid ? () => this.runHybridMocks(jobId) : resumeGeneration ? () => this.continueGeneration(jobId) : () => this.renderPhase(jobId);
-    return { job, completion: this.launchJob(jobId, run) };
+    const run: JobRun = this.deps.hybrid ? { kind: "hybrid_mocks" } : resumeGeneration ? { kind: "continue" } : { kind: "render" };
+    return { job, completion: (await this.dispatchJob(jobId, run)).completion };
   }
 
   /**
@@ -1493,7 +1510,7 @@ export class PipelineService {
       await this.deps.store.saveJob(next);
       return next;
     });
-    return { job, completion: this.launchJob(jobId, () => this.deps.hybrid ? this.runHybridMocks(jobId) : job.status === "generating" ? this.continueGeneration(jobId) : this.renderPhase(jobId)) };
+    return { job, completion: (await this.dispatchJob(jobId, this.deps.hybrid ? { kind: "hybrid_mocks" } : job.status === "generating" ? { kind: "continue" } : { kind: "render" })).completion };
   }
 
   /**
@@ -1533,7 +1550,7 @@ export class PipelineService {
       return { kind: "started" as const, job, previousStatus };
     });
     if (prepared.kind === "BUDGET_EXCEEDED") return prepared;
-    const completion = this.launchJob(jobId, () => this.regenerateNarrationNow(jobId, prepared.previousStatus));
+    const completion = (await this.dispatchJob(jobId, { kind: "narration_regen", previousStatus: prepared.previousStatus })).completion;
     return { kind: "started", job: prepared.job, completion };
   }
 
@@ -1558,7 +1575,7 @@ export class PipelineService {
 
   /** true se ESTE processo está gerando/renderizando o job. */
   isJobActive(jobId: string): boolean {
-    return this.activeJobs.has(jobId);
+    return this.activeJobs.has(jobId) || this.deps.activity?.isActive(jobKey(jobId)) === true;
   }
 
   /** Job em "generating"/"rendering" sem execução neste processo = interrompido (derivado). */
@@ -1580,6 +1597,8 @@ export class PipelineService {
     sceneId: string,
     options: { authorizeOverBudget?: boolean } = {},
   ): Promise<RegenerationOutcome> {
+    // Fluxo legado síncrono (chamada paga dentro do request): indisponível no cloud.
+    if (this.deps.dispatcher) throw new UnexpectedStatusError("Use a regeneração do painel de etapas (com aprovação da etapa).");
     const generated = await this.withJobLock(jobId, async (): Promise<RegenerationOutcome | { kind: "READY_TO_RENDER" }> => {
       this.assertJobIdle(jobId);
       const ctx = await this.load(jobId);
@@ -2383,7 +2402,59 @@ export class PipelineService {
   }
 
   private assertJobIdle(jobId: string): void {
-    if (this.activeJobs.has(jobId)) throw new JobInProgressError("Este criativo já está sendo gerado ou renderizado");
+    // Lote 7: inclui tarefas na fila durável (queued/running) quando o runtime informa a atividade.
+    if (this.isJobActive(jobId)) throw new JobInProgressError("Este criativo já está sendo gerado ou renderizado");
+  }
+
+  /** Lote 7: local = executa neste processo; cloud = persiste na fila e volta (o worker executa). */
+  private async dispatchJob(jobId: string, run: JobRun): Promise<{ completion: Promise<GenerationOutcome> }> {
+    if (!this.deps.dispatcher) return { completion: this.launchJob(jobId, () => this.runJob(jobId, run)) };
+    const job = await this.getJob(jobId);
+    await this.deps.dispatcher.enqueueJob(job, run);
+    return { completion: Promise.resolve({ kind: "QUEUED", job }) };
+  }
+
+  private async dispatchPlanning(campaign: Campaign, realAuthorized: boolean): Promise<{ completion: Promise<Campaign> }> {
+    if (this.deps.dispatcher) {
+      await this.deps.dispatcher.enqueuePlanning(campaign, realAuthorized);
+      return { completion: Promise.resolve(campaign) };
+    }
+    return { completion: realAuthorized ? withRealStageAuthorization("planning", () => this.launchPlanning(campaign)) : this.launchPlanning(campaign) };
+  }
+
+  /** Executa a descrição serializável de uma tarefa (mesmo código no processo local e no worker). */
+  private async runJob(jobId: string, run: JobRun): Promise<GenerationOutcome> {
+    switch (run.kind) {
+      case "authorized": return this.runAuthorizedJob(jobId);
+      case "hybrid_mocks": return this.runHybridMocks(jobId);
+      case "continue": return this.continueGeneration(jobId);
+      case "render": return this.renderPhase(jobId);
+      case "narration_regen": return this.regenerateNarrationNow(jobId, run.previousStatus);
+      case "hybrid_stage": {
+        const outcome = await this.performHybridStage(jobId, run.stage, run.regenerate, run.sceneId);
+        if (!run.thenFreeRender || outcome.kind !== "WAITING_STAGE") return outcome;
+        // Recomposição local só segue sozinha quando custa zero (mesma regra de antes, agora no servidor).
+        const render = await this.quoteStage(jobId, "render", true);
+        if (!render.ready || render.estimatedBrl !== 0) return outcome;
+        const prepared = await this.prepareStage(jobId, "render", render.token, {}, true);
+        return prepared.budgetStillBlocked ? outcome : this.performHybridStage(jobId, "render");
+      }
+    }
+  }
+
+  /**
+   * Worker (cloud): executa UMA tarefa da fila neste processo. Mesmo registro de execução ativa
+   * do modo local (assertJobIdle continua valendo dentro do processo).
+   */
+  runJobTask(jobId: string, run: JobRun): Promise<GenerationOutcome> {
+    return this.launchJob(jobId, () => this.runJob(jobId, run));
+  }
+
+  /** Worker (cloud): planejamento persistido. Execução substituída/antiga é descartada sem custo. */
+  async runPlanningTask(campaignId: string, planningRunId: string, realAuthorized: boolean): Promise<Campaign> {
+    const campaign = await this.deps.store.getCampaign(campaignId);
+    if (campaign.status !== "planning" || campaign.planningRunId !== planningRunId) return campaign;
+    return realAuthorized ? withRealStageAuthorization("planning", () => this.launchPlanning(campaign)) : this.launchPlanning(campaign);
   }
 
   private launchJob(jobId: string, fn: () => Promise<GenerationOutcome>): Promise<GenerationOutcome> {

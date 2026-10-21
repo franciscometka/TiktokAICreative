@@ -105,6 +105,12 @@ const BaseBackendSchema = z.object({
   SUPABASE_STORAGE_BUCKET: z.preprocess(emptyToUndefined, z.string().regex(/^[a-z0-9][a-z0-9-]{2,62}$/).default("tiktok-media")),
   /** Validade das URLs assinadas (segundos). Curta por padrão: 10 min. */
   SIGNED_URL_TTL_SECONDS: z.preprocess(emptyToUndefined, z.coerce.number().int().min(30).max(3600).default(600)),
+  /** "supabase" (cloud) ou "local" (dev: disco + URL assinada por HMAC servida pela própria API). */
+  ASSET_STORE: z.preprocess(emptyToUndefined, z.enum(["supabase", "local"]).default("supabase")),
+  LOCAL_ASSET_DIR: z.preprocess(emptyToUndefined, z.string().default("outputs/cloud-storage")),
+  LOCAL_ASSET_SIGNING_SECRET: optional(z.string().min(16)),
+  /** URL pública desta API (base das URLs locais assinadas em dev). */
+  PUBLIC_API_URL: z.preprocess(emptyToUndefined, httpsUrl.default("http://localhost:4000")),
   /** Modo local de desenvolvimento sem Supabase Auth: um usuário fixo (NUNCA em produção). */
   DEV_AUTH_USER_ID: optional(z.string().uuid()),
   NODE_ENV: z.preprocess(emptyToUndefined, z.string().default("development")),
@@ -112,11 +118,14 @@ const BaseBackendSchema = z.object({
 
 function requireSupabase(env: z.infer<typeof BaseBackendSchema>, ctx: z.RefinementCtx): void {
   if (env.PERSISTENCE_DRIVER !== "supabase") return;
-  for (const name of ["DATABASE_URL", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"] as const) {
-    if (!env[name]) ctx.addIssue({ code: "custom", path: [name], message: "obrigatória com PERSISTENCE_DRIVER=supabase" });
-  }
-  if (env.NODE_ENV === "production" && env.DEV_AUTH_USER_ID) {
-    ctx.addIssue({ code: "custom", path: ["DEV_AUTH_USER_ID"], message: "proibida em produção" });
+  const need = (name: keyof typeof env, why: string) => { if (!env[name]) ctx.addIssue({ code: "custom", path: [name], message: `obrigatória ${why}` }); };
+  need("DATABASE_URL", "com PERSISTENCE_DRIVER=supabase");
+  if (env.ASSET_STORE === "supabase") { need("SUPABASE_URL", "com ASSET_STORE=supabase"); need("SUPABASE_SERVICE_ROLE_KEY", "com ASSET_STORE=supabase"); }
+  else need("LOCAL_ASSET_SIGNING_SECRET", "com ASSET_STORE=local");
+  if (!env.DEV_AUTH_USER_ID) need("SUPABASE_URL", "para validar a sessão (Supabase Auth)");
+  if (env.NODE_ENV === "production") {
+    if (env.DEV_AUTH_USER_ID) ctx.addIssue({ code: "custom", path: ["DEV_AUTH_USER_ID"], message: "proibida em produção" });
+    if (env.ASSET_STORE === "local") ctx.addIssue({ code: "custom", path: ["ASSET_STORE"], message: "\"local\" é só para desenvolvimento" });
   }
 }
 
@@ -157,6 +166,10 @@ export interface BackendEnv {
   jwtSecret?: string;
   bucket: string;
   signedUrlTtlSeconds: number;
+  assetStore: "supabase" | "local";
+  localAssetDir: string;
+  localAssetSigningSecret?: string;
+  publicApiUrl: string;
   devAuthUserId?: string;
   production: boolean;
 }
@@ -185,6 +198,10 @@ function backend(e: z.infer<typeof BaseBackendSchema>): BackendEnv {
     ...(e.SUPABASE_JWT_SECRET ? { jwtSecret: String(e.SUPABASE_JWT_SECRET) } : {}),
     bucket: e.SUPABASE_STORAGE_BUCKET,
     signedUrlTtlSeconds: e.SIGNED_URL_TTL_SECONDS,
+    assetStore: e.ASSET_STORE,
+    localAssetDir: e.LOCAL_ASSET_DIR,
+    ...(e.LOCAL_ASSET_SIGNING_SECRET ? { localAssetSigningSecret: String(e.LOCAL_ASSET_SIGNING_SECRET) } : {}),
+    publicApiUrl: String(e.PUBLIC_API_URL).replace(/\/+$/, ""),
     ...(e.DEV_AUTH_USER_ID ? { devAuthUserId: String(e.DEV_AUTH_USER_ID) } : {}),
     production: e.NODE_ENV === "production",
   };
