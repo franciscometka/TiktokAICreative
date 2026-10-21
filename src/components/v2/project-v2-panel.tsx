@@ -153,9 +153,11 @@ export function ProjectV2Panel({ view, campaignId, handlers, advancedHref }: { v
       {view.error ? (
         <Card className="p-6 sm:p-8" id="error">
           <h2 className="text-xl font-semibold text-zinc-950">{view.error.message}</h2>
+          {view.estimate && <p className="mt-2 text-sm text-zinc-600">{view.estimate.label}</p>}
           <div className="mt-4 flex flex-wrap gap-2">
-            <button type="button" className={v2Button("primary")} disabled={pending} onClick={() => run(() => {
+            <button type="button" className={v2Button("primary")} disabled={pending || (view.error?.retry === "planning_approval" && !view.quoteToken)} onClick={() => run(() => {
               const e = view.error!;
+              if (e.retry === "planning_approval" && view.quoteToken) return handlers.startPlanning(view.quoteToken);
               if (e.retry === "planning") return handlers.retryPlanning();
               if (e.retry === "scene" && e.sceneId && e.sceneToken && view.jobId) return handlers.retryScene(view.jobId, e.sceneId, e.sceneToken);
               return view.jobId && view.quoteToken ? handlers.authorize(view.jobId, view.quoteToken) : Promise.resolve({ ok: false, error: { message: "Abra os detalhes técnicos para continuar." } });

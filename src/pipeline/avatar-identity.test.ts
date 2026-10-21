@@ -7,6 +7,8 @@ import { buildUgcReferencePrompt, speechFitsDuration } from "@/ai/ugc-script";
 import { saveAvatar } from "@/application/avatar-actions";
 import { startVideoV2 } from "@/application/create-v2";
 import { planningErrorDetails } from "@/application/user-errors";
+import { executeHybridPlanning, getCampaignView } from "@/application/campaign-actions";
+import { buildProjectV2View } from "@/application/project-v2-view";
 import { loadAppConfig } from "@/config/env";
 import { kreaUgcPricingRefs } from "@/config/krea-ugc-models";
 import { kreaUgcReadiness } from "@/config/krea-ugc-readiness";
@@ -157,6 +159,56 @@ describe("fidelidade do produto — 2100W", () => {
 });
 
 describe("\"Não conseguimos preparar o roteiro\" — Secador 2100W, Cristina, 30s, Presenter Only", () => {
+  it("retomada REAL usa nova cotação, não o handler legado que rejeita a UX V2", async () => {
+    const h = await ugcHarness();
+    const service = h.build({ allowMocks: false });
+    const { uploads } = await tempUploads();
+    const avatars = new InMemoryAvatarLibraryStore();
+    const deps = { service, uploads, avatars, rendersDir: h.config.rendersDir, audioDir: h.config.audioDir, defaultBudget: budget };
+    const face = await uploads.save("avatar_photos", { bytes: PNG_BYTES, size: PNG_BYTES.length, declaredType: "image/png" });
+    const saved = await saveAvatar(deps, { name: "Cristina", gender: "woman", personality: "Natural e simpática", referenceImage: { ownerId: "avatar_photos", imageId: face.id } });
+    if (!saved.ok) throw new Error(saved.error.message);
+    const photo = await uploads.save("prod_v2", { bytes: PNG_BYTES, size: PNG_BYTES.length, declaredType: "image/png" });
+    const started = await startVideoV2(deps, { productId: "prod_v2", name: SECADOR, imageIds: [photo.id], idea: "Cristina apresentando o secador no quarto", duration: 30, avatar: saved.value.id });
+    if (!started.ok) throw new Error(started.error.message);
+    const id = started.value.campaignId;
+    // A primeira execução falha na validação; a retomada recebe JSON equivalente ao caso real.
+    const spy = vi.spyOn(MockCreativePlanner.prototype, "plan").mockImplementationOnce(async (req) => {
+      return new LlmCreativePlanner(new ScriptedLlm([response("{}")]), randomId, { maxValidationAttempts: 1 }).plan(req);
+    }).mockImplementation(async function (req) {
+      return new LlmCreativePlanner(new ScriptedLlm([response(JSON.stringify(buildMockDraft(req)))]), randomId, { maxValidationAttempts: 1 }).plan(req);
+    });
+    try {
+      const first = await service.executePlanning(id, (await service.quotePlanning(id)).token);
+      expect((await first.completion).status).toBe("failed");
+      await expect(service.retryPlanning(id)).rejects.toThrow("Use a aprovação explícita da etapa de planejamento.");
+      const full = await getCampaignView(deps, id);
+      if (!full.ok) throw new Error(full.error.message);
+      const view = buildProjectV2View(full.value);
+      expect(view.error?.retry).toBe("planning_approval");
+      expect(view.quoteToken).toBe(full.value.planningQuote!.token);
+      expect(view.estimate?.brl).toBe(full.value.planningQuote!.estimatedBrl);
+      expect(view.error?.details).toContain("schema");
+      const blocked = buildProjectV2View({ ...full.value, planningQuote: { ...full.value.planningQuote!, ready: false, blocked: "Limite de tentativas de planejamento atingido" } });
+      expect(blocked.error?.retry).toBe("planning_approval");
+      expect(blocked.quoteToken).toBeNull();
+      expect(blocked.error?.details).toContain("Limite de tentativas");
+      const interrupted = buildProjectV2View({ ...full.value, state: "interrupted" });
+      expect(interrupted.error?.retry).toBe("planning_approval");
+      expect(interrupted.quoteToken).toBe(view.quoteToken);
+      const resumed = await executeHybridPlanning(deps, { campaignId: id, token: view.quoteToken! });
+      expect(resumed.ok).toBe(true);
+      const deadline = Date.now() + 10_000;
+      while (service.isPlanningActive(id) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+      const campaign = await service.getCampaign(id);
+      expect(campaign.status).toBe("planned");
+      expect(campaign.plan!.creatives[0]!.masterScript!.persona.avatarName).toBe("Cristina");
+      expect(campaign.plan!.creatives[0]!.scenes).toHaveLength(5);
+      expect(campaign.planningRuns).toBe(2);
+    } finally {
+      spy.mockRestore();
+    }
+  });
   async function createWithClaude(responses: number) {
     const requests: PlanningRequest[] = [];
     const llms: ScriptedLlm[] = [];

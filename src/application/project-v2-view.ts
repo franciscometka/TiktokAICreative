@@ -39,7 +39,7 @@ export interface ProjectV2View {
     canGenerateOther: boolean;
     simulated: boolean;
   } | null;
-  error: { message: string; details: string; retry: "job" | "scene" | "planning"; sceneId?: string; sceneToken?: string } | null;
+  error: { message: string; details: string; retry: "job" | "scene" | "planning" | "planning_approval"; sceneId?: string; sceneToken?: string } | null;
   result: { videoUrl: string; downloadUrl: string; durationLabel: string; costLabel: string } | null;
   /** `label` é o que a tela afirma; só diz "Apresentado por X" quando a foto de X é usada de fato. */
   avatar: { name: string | null; label: string; reason: string } | null;
@@ -120,10 +120,13 @@ export function buildProjectV2View(view: CampaignView): ProjectV2View {
   }
   if (view.state === "planning") return { ...base, phase: "planning", headline: "Escrevendo o roteiro do seu vídeo.", progress: steps(["current", "pending", "pending", "pending"]) };
   if (view.state === "failed" || view.state === "interrupted") {
+    const q = view.planningQuote?.mode === "real" ? view.planningQuote : undefined;
     return {
       ...base, phase: "planning_failed", headline: "Não conseguimos preparar o roteiro.",
+      quoteToken: q?.ready ? q.token : null,
+      estimate: q ? { label: `Nova tentativa do roteiro: ${formatBrl(q.estimatedBrl)}`, brl: q.estimatedBrl, lines: [{ label: "Roteiro (Claude)", value: formatBrl(q.estimatedBrl) }] } : null,
       // Erro simples na tela; "Ver detalhes" mostra a causa real sanitizada (ex.: qual trecho e por quê).
-      error: { message: "Não conseguimos preparar o roteiro.", details: planningFailureDetails(view.error), retry: "planning" },
+      error: { message: "Não conseguimos preparar o roteiro.", details: [planningFailureDetails(view.error), q?.blocked].filter(Boolean).join(" · "), retry: q ? "planning_approval" : "planning" },
       progress: steps(["error", "pending", "pending", "pending"]),
     };
   }

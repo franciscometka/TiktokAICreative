@@ -18,6 +18,16 @@ const baseView: ProjectV2View = {
 };
 
 describe("UI V2 (Lote 6)", () => {
+  it("retomada do roteiro mostra o custo; cotação bloqueada desabilita a nova execução", () => {
+    const view: ProjectV2View = { ...baseView, phase: "planning_failed", jobId: null, quoteToken: null,
+      estimate: { label: "Nova tentativa do roteiro: R$ 0,35", brl: 0.35, lines: [] },
+      error: { message: "Não conseguimos preparar o roteiro.", details: "Limite de tentativas", retry: "planning_approval" } };
+    const html = renderToStaticMarkup(createElement(ProjectV2Panel, { view, campaignId: "c", advancedHref: "/advanced", handlers }));
+    expect(html).toContain("Nova tentativa do roteiro: R$ 0,35");
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Tentar novamente<\/button>/);
+    const ready = renderToStaticMarkup(createElement(ProjectV2Panel, { view: { ...view, quoteToken: "fresh-quote" }, campaignId: "c", advancedHref: "/advanced", handlers }));
+    expect(ready).not.toMatch(/<button[^>]*disabled=""[^>]*>Tentar novamente<\/button>/);
+  });
   it("navegação: Início, Criar vídeo, Projetos, Avatares | Configurações", () => {
     expect(NAV_MAIN.map((n) => n.label)).toEqual(["Início", "Criar vídeo", "Projetos", "Avatares"]);
     expect(NAV_FOOTER.map((n) => n.label)).toEqual(["Configurações"]);
