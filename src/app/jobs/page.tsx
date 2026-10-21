@@ -1,9 +1,12 @@
 import Link from "next/link";
 import { getRuntime } from "@/server/runtime";
+import { runtimeMode } from "@/server/session";
+import { LocalOnly } from "@/components/v2/service-unavailable";
 import { JOB_STATUS_NAMES } from "@/application/labels";
 import { Badge, buttonClasses, Panel } from "@/components/ui/primitives";
 export const dynamic = "force-dynamic";
 export default async function JobsPage() {
+  if (runtimeMode() === "cloud") return <LocalOnly title="Lista técnica de jobs disponível no modo local" />;
   const { service } = getRuntime().deps;
   const ids = await service.listCampaignIds();
   const projects = await Promise.all(ids.map(async id => {

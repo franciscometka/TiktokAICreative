@@ -20,11 +20,14 @@ import { ReadinessPanel } from "@/components/readiness-panel";
 import { SimpleVideoWorkspace } from "@/components/campaign/simple-video-workspace";
 import { buildProjectV2View } from "@/application/project-v2-view";
 import { ProjectV2 } from "@/components/v2/project-v2";
+import { runtimeMode } from "@/server/session";
+import { CloudProjectPage } from "./cloud-project";
 
 export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
+  if (runtimeMode() === "cloud") return { title: "Projeto · Creative Factory" };
   const result = await getCampaignView(getRuntime().deps, id);
   return { title: `${result.ok ? result.value.product.name : "Campanha"} · Creative Factory` };
 }
@@ -48,6 +51,8 @@ function stepStates(view: CampaignView): StepState[] {
 export default async function CampaignPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ view?: string }> }) {
   const { id } = await params;
   const { view: viewMode } = await searchParams;
+  // Lote 7: no cloud a página lê da Render API (o Next não executa pipeline nem lê disco).
+  if (runtimeMode() === "cloud") return <CloudProjectPage id={id} viewMode={viewMode} />;
   const publicConfig = getPublicConfig();
   const result = await getCampaignView(getRuntime().deps, id);
 

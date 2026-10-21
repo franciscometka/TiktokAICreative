@@ -1,12 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { listVoiceProfileViews } from "@/application/avatar-actions";
 import { ReadinessPanel } from "@/components/readiness-panel";
 import { Card, Chip, PageHeader, v2Button } from "@/components/v2/ui";
 import { VoiceProfileForm } from "@/components/v2/voice-profile-form";
 import { SPEAKER_PROFILES } from "@/config/voices";
 import { VOICE_LOCK_UNAVAILABLE, supportsVoiceLock } from "@/domain/video-speech";
-import { getPresetSummaries, getPublicConfig, getRuntime } from "@/server/runtime";
+import { ServiceUnavailable } from "@/components/v2/service-unavailable";
+import { getBackend, loadOr } from "@/server/backend";
+import { runtimeMode } from "@/server/session";
+import { logoutAction } from "@/app/auth-actions";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Configurações · Creative Factory" };
@@ -23,14 +25,14 @@ const CAPABILITY_LABELS = {
  * jobs/IDs e criação avançada vivem em "Avançado / Diagnóstico". Nenhum segredo é exibido.
  */
 export default async function SettingsPage() {
-  const { deps } = getRuntime();
-  const config = getPublicConfig();
-  const voices = await listVoiceProfileViews(deps);
-  const matrix = deps.service.ugcSpeechMatrix();
-  const presets = getPresetSummaries();
+  const backend = await getBackend("/settings");
+  const loaded = await loadOr(() => backend.settings());
+  if (!loaded.ok) return <ServiceUnavailable />;
+  const { config, voices, matrix, presets } = loaded.value;
+  const cloud = runtimeMode() === "cloud";
   return (
     <main className="mx-auto max-w-5xl space-y-6 px-4 py-8 sm:px-8 sm:py-12">
-      <PageHeader title="Configurações" />
+      <PageHeader title="Configurações" action={cloud ? <form action={logoutAction}><button type="submit" className={v2Button("ghost", "sm")}>Sair</button></form> : undefined} />
 
       <Card className="p-6">
         <h2 className="text-base font-semibold text-zinc-950">Vozes</h2>

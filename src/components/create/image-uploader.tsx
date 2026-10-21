@@ -9,6 +9,17 @@ import { buttonClasses, cx, Spinner } from "../ui/primitives";
 
 const ACCEPT = Object.keys(IMAGE_TYPES).join(",");
 const MB = 1024 * 1024;
+/** Lote 7: no modo cloud o arquivo vai DIRETO ao Storage (URL assinada); nunca passa pelo Vercel. */
+const DIRECT_UPLOAD = process.env.NEXT_PUBLIC_RUNTIME_MODE === "cloud";
+
+async function directUpload(productId: string, file: File): Promise<ActionResult<UploadedImageView>> {
+  const step = async <T,>(body: Record<string, unknown>) => (await (await fetch("/api/uploads/direct", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json()) as ActionResult<T>;
+  const authorized = await step<{ imageId: string; uploadUrl: string }>({ step: "authorize", ownerId: productId, contentType: file.type, size: file.size });
+  if (!authorized.ok) return authorized;
+  const put = await fetch(authorized.value.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type, "x-upsert": "false" }, body: file });
+  if (!put.ok) return { ok: false, error: { code: "upload", title: "Imagem recusada", message: "Falha no envio.", retryable: true } };
+  return step<UploadedImageView>({ step: "complete", ownerId: productId, imageId: authorized.value.imageId });
+}
 
 /**
  * Upload local das imagens do produto. A checagem aqui é só conveniência; o servidor valida
@@ -54,8 +65,7 @@ export function ImageUploader({
       body.set("file", file);
       body.set("productId", productId);
       try {
-        const response = await fetch("/api/uploads", { method: "POST", body });
-        const result = (await response.json()) as ActionResult<UploadedImageView>;
+        const result = DIRECT_UPLOAD ? await directUpload(productId, file) : ((await (await fetch("/api/uploads", { method: "POST", body })).json()) as ActionResult<UploadedImageView>);
         if (result.ok) {
           current = [...current, { id: result.value.id, previewUrl: result.value.previewUrl }];
           onChange(current);

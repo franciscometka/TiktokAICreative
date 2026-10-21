@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { uploadProductImage } from "@/application/campaign-actions";
 import { UPLOAD_LIMITS } from "@/domain/upload";
 import { getRuntime } from "@/server/runtime";
+import { runtimeMode } from "@/server/session";
 
 export const runtime = "nodejs";
 
@@ -11,6 +12,8 @@ export const runtime = "nodejs";
  * Nunca recebe caminhos: o servidor gera o nome e decide a pasta.
  */
 export async function POST(request: Request) {
+  // Lote 7: no cloud o upload é direto ao Storage (/api/uploads/direct); arquivo não passa por aqui.
+  if (runtimeMode() === "cloud") return new Response("Not found", { status: 404 });
   // Mesmo critério dos Server Actions: só aceita envio da própria origem (anti-CSRF).
   const origin = request.headers.get("origin");
   const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");

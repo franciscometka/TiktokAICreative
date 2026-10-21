@@ -19,7 +19,11 @@ export type UserErrorCode =
   | "corrupted"
   | "upload"
   | "job_in_progress"
-  | "render_security";
+  | "render_security"
+  /** Lote 7: backend cloud fora do ar ("Serviço temporariamente indisponível."). */
+  | "unavailable"
+  /** Lote 7: sessão ausente/expirada no modo cloud. */
+  | "auth";
 
 export interface UserError {
   code: UserErrorCode;

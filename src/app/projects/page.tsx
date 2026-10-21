@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { listProjectCards, matchesFilter, type ProjectFilter } from "@/application/project-v2-view";
+import type { ProjectFilter } from "@/application/project-v2-view";
 import { ProjectCards } from "@/components/v2/project-cards";
 import { PageHeader, v2Button } from "@/components/v2/ui";
 import { cx } from "@/components/ui/primitives";
-import { getRuntime } from "@/server/runtime";
+import { ServiceUnavailable } from "@/components/v2/service-unavailable";
+import { getBackend, loadOr } from "@/server/backend";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Projetos · Creative Factory" };
@@ -16,7 +17,10 @@ const FILTERS: { id: ProjectFilter; label: string }[] = [
 export default async function ProjectsPage({ searchParams }: { searchParams: Promise<{ filter?: string }> }) {
   const { filter } = await searchParams;
   const active: ProjectFilter = FILTERS.some((f) => f.id === filter) ? (filter as ProjectFilter) : "all";
-  const cards = (await listProjectCards(getRuntime().deps)).filter((c) => matchesFilter(c, active));
+  const backend = await getBackend(active === "all" ? "/projects" : `/projects?filter=${active}`);
+  const loaded = await loadOr(() => backend.projects(active));
+  if (!loaded.ok) return <ServiceUnavailable />;
+  const cards = loaded.value;
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 sm:px-8 sm:py-12">
       <PageHeader title="Projetos" description="Seus vídeos, do mais recente ao mais antigo." action={<Link href="/create" className={v2Button("primary")}>Criar vídeo</Link>} />

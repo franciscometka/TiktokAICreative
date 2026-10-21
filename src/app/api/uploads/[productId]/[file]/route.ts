@@ -1,5 +1,7 @@
 import { SAFE_PRODUCT_ID, STORED_IMAGE_NAME } from "@/domain/upload";
 import { getRuntime } from "@/server/runtime";
+import { cloudAssetRedirect } from "@/server/asset-redirect";
+import { runtimeMode } from "@/server/session";
 
 export const runtime = "nodejs";
 
@@ -12,6 +14,7 @@ export async function GET(_request: Request, ctx: { params: Promise<{ productId:
   if (!SAFE_PRODUCT_ID.test(productId) || !STORED_IMAGE_NAME.test(file)) {
     return new Response("Not found", { status: 404 });
   }
+  if (runtimeMode() === "cloud") return cloudAssetRedirect({ kind: "upload", ownerId: productId, imageId: file });
   const image = await getRuntime().deps.uploads.read(productId, file);
   if (!image) return new Response("Not found", { status: 404 });
   return new Response(new Uint8Array(image.bytes), {

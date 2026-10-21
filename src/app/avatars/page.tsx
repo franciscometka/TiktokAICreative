@@ -1,15 +1,18 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { listAvatarViews } from "@/application/avatar-actions";
 import { Card, Chip, PageHeader, v2Button } from "@/components/v2/ui";
-import { getRuntime } from "@/server/runtime";
+import { ServiceUnavailable } from "@/components/v2/service-unavailable";
+import { getBackend, loadOr } from "@/server/backend";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Avatares · Creative Factory" };
 
 /** Biblioteca de avatares (Lote 6): apresentadores reutilizáveis com identidade e voz próprias. */
 export default async function AvatarsPage() {
-  const avatars = await listAvatarViews(getRuntime().deps);
+  const backend = await getBackend("/avatars");
+  const loaded = await loadOr(() => backend.avatars());
+  if (!loaded.ok) return <ServiceUnavailable />;
+  const avatars = loaded.value;
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 sm:px-8 sm:py-12">
       <PageHeader title="Avatares" description="Apresentadores padrão. No modo Automático, escolhemos o avatar pelas tags do produto." action={<Link href="/avatars/new" className={v2Button("primary")}>Novo avatar</Link>} />

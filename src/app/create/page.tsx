@@ -9,6 +9,9 @@ import { getPresetSummaries, getPublicConfig, getRuntime, getV2Estimates } from 
 import { listAvatarViews } from "@/application/avatar-actions";
 import { CreateVideo } from "@/components/v2/create-video";
 import { PageHeader } from "@/components/v2/ui";
+import { LocalOnly, ServiceUnavailable } from "@/components/v2/service-unavailable";
+import { getBackend, loadOr } from "@/server/backend";
+import { runtimeMode } from "@/server/session";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Criar vídeo · Creative Factory" };
@@ -19,6 +22,22 @@ function toInput(n: number): string {
 
 export default async function CreatePage({ searchParams }: { searchParams: Promise<{ from?: string; edit?: string; mode?: string }> }) {
   const { from, edit, mode } = await searchParams;
+  if (runtimeMode() === "cloud") {
+    // Lote 7: Create V2 pela Render API; o wizard técnico antigo fica no modo local.
+    if (from || mode === "advanced") return <LocalOnly title="Criação avançada disponível no modo local" />;
+    const backend = await getBackend("/create");
+    const data = await loadOr(() => backend.bootstrap(0));
+    if (!data.ok) return <ServiceUnavailable />;
+    return (
+      <main className="mx-auto max-w-5xl px-4 py-8 sm:px-8 sm:py-12">
+        <PageHeader title="Criar vídeo" description="Foto + ideia + avatar + duração. A gente cuida do roteiro, da apresentadora e da edição." />
+        <div className="mt-8">
+          <CreateVideo productId={newProductId()} avatars={data.value.avatars.filter((a) => a.active).map((a) => ({ id: a.id, name: a.name, imageUrl: a.imageUrl, tags: a.tags }))}
+            estimates={data.value.estimates} planningAvailable={data.value.config.planningAvailable} />
+        </div>
+      </main>
+    );
+  }
   const publicConfig = getPublicConfig();
   const { service } = getRuntime().deps;
 
