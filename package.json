@@ -21,7 +21,9 @@
     "video:real": "tsx scripts/video-real.ts",
     "presenter:real": "tsx scripts/presenter-real.ts",
     "ugc:reference:real": "tsx scripts/ugc-reference-real.ts",
-    "ugc:video:real": "tsx scripts/ugc-video-real.ts"
+    "ugc:video:real": "tsx scripts/ugc-video-real.ts",
+    "db:migrate": "tsx scripts/db-migrate.ts",
+    "test:cloud": "vitest run src/cloud"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
@@ -29,15 +31,18 @@
     "@remotion/bundler": "4.0.531",
     "@remotion/renderer": "4.0.531",
     "next": "^16.4.0",
+    "pg": "^8.23.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "remotion": "4.0.531",
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.11",
     "@eslint/js": "^10.0.1",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^26.6.5",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "eslint": "^10.12.0",

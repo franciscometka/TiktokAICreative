@@ -11,6 +11,8 @@ export default defineConfig({
     setupFiles: ["src/test/no-network.ts"],
     // Pipelines completos (Presenter Only: 5–6 trechos) rodam em paralelo; 5s estourava sob carga.
     testTimeout: 20_000,
+    // Lote 7: Postgres real em WASM (PGlite) + migrations no beforeAll; sob carga passa de 10s.
+    hookTimeout: 60_000,
     include: ["src/**/*.test.ts", "remotion/**/*.test.ts"],
     // Fora da suíte padrão: testes PAGOS (npm run test:integration) e renders reais (npm run test:render).
     exclude: ["src/**/*.integration.test.ts", "src/**/*.render.test.ts", "node_modules/**"],
