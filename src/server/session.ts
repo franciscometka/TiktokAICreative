@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { loadFrontendEnv } from "@/cloud/config";
+import { parseRuntimeMode } from "@/lib/runtime-mode";
 
 /**
  * Sessão do modo cloud (Lote 7, D102): Supabase Auth via REST com a ANON key (pública).
@@ -13,7 +14,8 @@ const REFRESH = "cf_rt";
 const EXPIRES = "cf_exp";
 
 export function runtimeMode(): "local" | "cloud" {
-  return process.env.NEXT_PUBLIC_RUNTIME_MODE === "cloud" ? "cloud" : "local";
+  // Leitura única e normalizada (espaços/aspas/maiúsculas não derrubam o modo cloud).
+  return parseRuntimeMode(process.env.NEXT_PUBLIC_RUNTIME_MODE);
 }
 
 /** Caminho interno seguro para redirecionar depois do login (nunca URL externa). */

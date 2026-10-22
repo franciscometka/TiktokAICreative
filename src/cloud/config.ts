@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { parseRuntimeMode } from "@/lib/runtime-mode";
 
 /**
  * Lote 7 (Cloud Runtime): configuração SEPARADA por serviço, validada no startup.
@@ -61,7 +62,7 @@ function parse<T extends z.ZodType>(schema: T, env: Record<string, string | unde
 
 const FrontendEnvSchema = z.object({
   /** "local" = Next executa o runtime no próprio processo (dev). "cloud" = tudo via Render API. */
-  NEXT_PUBLIC_RUNTIME_MODE: z.preprocess(emptyToUndefined, z.enum(["local", "cloud"]).default("local")),
+  NEXT_PUBLIC_RUNTIME_MODE: z.preprocess((v) => (emptyToUndefined(v) === undefined ? undefined : parseRuntimeMode(String(v))), z.enum(["local", "cloud"]).default("local")),
   NEXT_PUBLIC_API_BASE_URL: optional(httpsUrl),
   NEXT_PUBLIC_SUPABASE_URL: optional(httpsUrl),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: optional(z.string().min(20)),

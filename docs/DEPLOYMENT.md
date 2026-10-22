@@ -101,9 +101,12 @@ Variáveis (SÓ públicas):
 
 **Não** coloque na Vercel: chaves de provider, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`. O build cloud tira Remotion, Chrome, pg e PGlite do bundle. O frontend não usa filesystem local.
 
+**Ambientes da Vercel:** as variáveis `NEXT_PUBLIC_*` entram no BUILD. Marque **Production E Preview** (a branch `cloud-runtime` é publicada como Preview; o domínio de produção serve a branch padrão). Variável faltando no ambiente do deploy = build em modo local, que não funciona na Vercel. Depois de mudar variáveis, gere um novo build daquele deploy.
+
 Depois do deploy:
-1. Acesse `/login` e entre com o usuário do passo 1.4.
-2. Coloque o domínio da Vercel em `CORS_ALLOWED_ORIGINS` da API.
+1. Abra `/api/runtime` no MESMO endereço que você usa: precisa mostrar `"mode":"cloud"`, `"ok":true`, o host da API e `supabaseUrlSet/supabaseAnonKeySet = true` (sem segredos na resposta).
+2. Acesse `/login` e entre com o usuário do passo 1.4. O login e a API precisam usar o MESMO projeto Supabase (`NEXT_PUBLIC_SUPABASE_URL` = `SUPABASE_URL` da API = projeto do `DATABASE_URL`); se não, a API responde "o login e o banco usam projetos Supabase diferentes".
+3. Coloque o domínio da Vercel em `CORS_ALLOWED_ORIGINS` da API.
 
 ## 5. Primeiro teste (sem custo)
 1. Configure a API e o worker com `LLM_PROVIDER=mock`, `UGC_PROVIDER=mock`, `RENDERER=mock` e `ALLOW_MOCKS=true` (só para este teste).

@@ -619,3 +619,13 @@ Os 5–6 A-rolls do Presenter Only são editados como UM vídeo de TikTok: junç
 - `NEXT_PUBLIC_*` com cara de segredo, ou com o valor de um segredo do servidor, é recusado. Um teste estático garante que nenhum módulo do client lê variável não pública.
 - Logger estruturado com redação (tokens, authorization, segredos, query de URL assinada).
 - Testes cloud: Postgres REAL em WASM (PGlite) via `npm run test:cloud` (incluído no `check`), sem rede e sem API paga.
+
+## D109 — Deploy da Vercel nunca cai silenciosamente no modo local; upload cloud com erros explícitos
+
+Contexto: o upload de foto (avatar e produto) na Vercel mostrava "Ocorreu um erro inesperado." e nenhum `product_assets` era criado. No banco Supabase do projeto, nenhum login tinha acontecido (`auth.sessions` vazia) e nenhum perfil existia. O fluxo direto (authorize → PUT na URL assinada → complete) funcionou de ponta a ponta contra o mesmo Supabase. O domínio de produção serve uma versão antiga, e a branch `cloud-runtime` é publicada como Preview. Causa: o build em uso foi gerado sem `NEXT_PUBLIC_RUNTIME_MODE=cloud` (variáveis `NEXT_PUBLIC_*` são fixadas no build e por ambiente). O app rodou em modo local na Vercel: o uploader enviou o arquivo para `/api/uploads`, que tentou gravar no disco somente leitura, e a falha virou "erro inesperado".
+
+- `lib/runtime-mode.ts`: leitura ÚNICA e normalizada do modo (espaços, aspas e maiúsculas), usada pelo browser, pelo servidor e pelo `next.config`.
+- `VERCEL=1` com modo local é configuração inválida. `getRuntime()` e `/api/uploads` recusam com a causa e o que configurar. Nada é gravado no disco da Vercel.
+- `/api/runtime`: diagnóstico do deploy (modo, ambiente, host da API e booleanos das variáveis públicas, sem segredo).
+- API: `StorageError`/`AssetPathError` viram erro de upload claro. Um usuário de sessão ausente em `auth.users` do banco (login e `DATABASE_URL` em projetos Supabase diferentes) vira erro de configuração explícito, não "inesperado".
+- O fluxo de upload continua Browser → Supabase Storage direto (URL assinada `/object/upload/sign`, PUT com `Content-Type` e `x-upsert: false`, CORS aceito). Nenhum arquivo passa pela Vercel nem pela Render. As validações de tipo, tamanho, bytes reais, ownership e caminho continuam.

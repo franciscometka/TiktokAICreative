@@ -7,6 +7,7 @@ import { LocalUploadStore } from "@/storage/upload-store";
 import { FileAvatarLibraryStore } from "@/storage/avatar-store";
 import type { V2EstimateView } from "@/application/create-v2";
 import { presetSummariesFor, publicConfigFor, v2EstimatesFor, type PublicAppConfig } from "@/application/public-config";
+import { DeployMisconfiguredError, deployMisconfiguration } from "@/lib/runtime-mode";
 
 /**
  * Runtime do processo Next.js (SERVIDOR). Um único PipelineService por processo: ele guarda os
@@ -26,6 +27,10 @@ const KEY = Symbol.for("tiktok-ai-creative-factory.runtime");
 type GlobalWithRuntime = typeof globalThis & { [KEY]?: Runtime };
 
 export function getRuntime(): Runtime {
+  // Vercel + modo local = build sem as variáveis do modo cloud: nunca tentar gravar no disco nem
+  // rodar o pipeline na Vercel (falha clara em vez de "erro inesperado").
+  const misconfigured = deployMisconfiguration();
+  if (misconfigured) throw new DeployMisconfiguredError(misconfigured);
   const g = globalThis as GlobalWithRuntime;
   if (!g[KEY]) {
     const { config, issues: configIssues } = loadAppConfigSafe();

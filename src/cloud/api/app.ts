@@ -340,7 +340,17 @@ export function createApiHandler(options: ApiOptions): (req: IncomingMessage, re
         }
         if (found.route.write && !limiter.allow(ctx.user.userId)) throw new HttpError(429, "rate_limited", "Muitas ações seguidas. Aguarde um minuto.", true);
         if (!knownProfiles.has(ctx.user.userId)) {
-          await infra.db.query("insert into profiles (user_id) values ($1) on conflict (user_id) do nothing", [ctx.user.userId]);
+          try {
+            await infra.db.query("insert into profiles (user_id) values ($1) on conflict (user_id) do nothing", [ctx.user.userId]);
+          } catch (error) {
+            // 23503 = usuário da sessão não existe em auth.users DESTE banco: SUPABASE_URL (login) e
+            // DATABASE_URL apontam para projetos Supabase diferentes. Falha clara, nunca "erro inesperado".
+            if ((error as { code?: string } | null)?.code === "23503") {
+              log.error("sessão de outro projeto Supabase", { userId: ctx.user.userId });
+              throw new HttpError(500, "config", "Configuração da API: o login e o banco usam projetos Supabase diferentes (SUPABASE_URL × DATABASE_URL).");
+            }
+            throw error;
+          }
           knownProfiles.add(ctx.user.userId);
         }
         ctx.body = found.route.write && !url.pathname.startsWith("/v1/local-assets/") ? await readJson(req) : undefined;

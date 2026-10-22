@@ -5,12 +5,13 @@ import { removeImageAction } from "@/app/actions";
 import type { ActionResult, UploadedImageView } from "@/application/campaign-actions";
 import type { ImageView } from "@/application/campaign-view";
 import { IMAGE_TYPES, UPLOAD_ERROR_MESSAGES, UPLOAD_LIMITS, isImageContentType } from "@/domain/upload";
+import { BUILD_RUNTIME_MODE } from "@/lib/runtime-mode";
 import { buttonClasses, cx, Spinner } from "../ui/primitives";
 
 const ACCEPT = Object.keys(IMAGE_TYPES).join(",");
 const MB = 1024 * 1024;
 /** Lote 7: no modo cloud o arquivo vai DIRETO ao Storage (URL assinada); nunca passa pelo Vercel. */
-const DIRECT_UPLOAD = process.env.NEXT_PUBLIC_RUNTIME_MODE === "cloud";
+const DIRECT_UPLOAD = BUILD_RUNTIME_MODE === "cloud";
 
 async function directUpload(productId: string, file: File): Promise<ActionResult<UploadedImageView>> {
   const step = async <T,>(body: Record<string, unknown>) => (await (await fetch("/api/uploads/direct", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json()) as ActionResult<T>;

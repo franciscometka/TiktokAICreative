@@ -197,6 +197,13 @@ export function toUserError(error: unknown): UserError {
   // Lote 6: Voice Lock pedido sem suporte real do provider — nunca troca de estratégia sozinho.
   if (named(error, "VoiceLockUnavailableError")) return make("validation", "Voice Lock indisponível", error.message);
   if (named(error, "UploadValidationError")) return make("upload", "Imagem recusada", error.message);
+  // Lote 7 (upload cloud): falha do Storage/caminho vira mensagem de upload (causa logada no servidor).
+  if (named(error, "StorageError", "AssetPathError")) {
+    console.error("[upload] storage:", error.message);
+    return make("upload", "Imagem recusada", "Não foi possível falar com o armazenamento de imagens. Tente de novo em instantes.", true);
+  }
+  // Build da Vercel sem modo cloud: a mensagem já diz o que configurar (sem segredo).
+  if (named(error, "DeployMisconfiguredError")) return make("unavailable", "Deploy sem modo cloud", error.message);
   if (named(error, "InvalidUploadPathError")) return make("upload", "Imagem recusada", "Referência de imagem inválida.");
 
   console.error("[erro inesperado]", error);
