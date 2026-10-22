@@ -3,6 +3,7 @@ import { DEFAULT_VIDEOS_DIR } from "./video-models";
 import type { CostBudget, ExchangeRate } from "@/domain/cost";
 import { DEFAULT_EXCHANGE_RATE } from "./pricing";
 import { GEMINI_UGC_REFERENCE_MODEL, VEO_3_1_MODELS } from "./ugc-models";
+import type { CreditsConfig } from "@/costs/credits";
 
 /** Defaults de orçamento quando as variáveis de ambiente não estão definidas. */
 export const DEFAULT_BUDGET: CostBudget = {
@@ -43,6 +44,20 @@ const emptyToUndefined = (value: unknown) =>
   typeof value === "string" && value.trim() === "" ? undefined : value;
 
 const optionalPositiveNumber = z.preprocess(emptyToUndefined, z.coerce.number().positive().optional());
+
+/** Corte mensal dos créditos: horário de Brasília (o negócio opera no Brasil; o banco guarda UTC). */
+export const DEFAULT_CREDITS_TIMEZONE = "America/Sao_Paulo";
+/** Só FORA de produção (dev/teste) e só quando nenhuma das duas variáveis foi definida. */
+export const DEV_CREDITS_DEFAULTS = { perBrl: 100, monthlyAllowance: 10_000 } as const;
+
+function isTimeZone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const EnvSchema = z.object({
   LLM_PROVIDER: z.preprocess(emptyToUndefined, z.enum(LLM_PROVIDER_IDS).default("mock")),
@@ -91,7 +106,26 @@ const EnvSchema = z.object({
     emptyToUndefined,
     z.coerce.number().int().min(1).max(10).default(DEFAULT_MAX_ATTEMPTS_PER_SCENE),
   ),
+  /** L8.2: créditos = custo real (ledger) × CREDITS_PER_BRL; franquia mensal em créditos. */
+  CREDITS_PER_BRL: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(1_000_000).optional()),
+  MONTHLY_CREDIT_ALLOWANCE: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(1_000_000_000).optional()),
+  CREDITS_TIMEZONE: z.preprocess(emptyToUndefined, z.string().refine(isTimeZone, "fuso IANA inválido").default(DEFAULT_CREDITS_TIMEZONE)),
 });
+
+/**
+ * Produção: créditos só com CREDITS_PER_BRL E MONTHLY_CREDIT_ALLOWANCE explícitos (senão a UI
+ * mostra "Créditos indisponíveis" — nunca um saldo inventado). Fora de produção, sem nenhuma das
+ * duas, usa os defaults de dev documentados. Só uma das duas definida = indisponível.
+ */
+function creditsConfig(e: { CREDITS_PER_BRL?: number | undefined; MONTHLY_CREDIT_ALLOWANCE?: number | undefined; CREDITS_TIMEZONE: string }, nodeEnv: string | undefined): CreditsConfig | null {
+  if (e.CREDITS_PER_BRL !== undefined && e.MONTHLY_CREDIT_ALLOWANCE !== undefined) {
+    return { perBrl: e.CREDITS_PER_BRL, monthlyAllowance: e.MONTHLY_CREDIT_ALLOWANCE, timeZone: e.CREDITS_TIMEZONE };
+  }
+  if (e.CREDITS_PER_BRL === undefined && e.MONTHLY_CREDIT_ALLOWANCE === undefined && nodeEnv !== "production") {
+    return { ...DEV_CREDITS_DEFAULTS, timeZone: e.CREDITS_TIMEZONE };
+  }
+  return null;
+}
 
 export interface ConfigIssue {
   variable: string;
@@ -130,6 +164,8 @@ export interface AppConfig {
   maxAttemptsPerScene: number;
   /** false (padrão): nenhuma etapa do fluxo normal pode produzir resultado MOCK. */
   allowMocks: boolean;
+  /** L8.2: null = créditos indisponíveis (não configurados em produção). */
+  credits: CreditsConfig | null;
 }
 
 export class ConfigError extends Error {
@@ -183,6 +219,7 @@ export function loadAppConfig(
     },
     maxAttemptsPerScene: e.MAX_ATTEMPTS_PER_SCENE,
     allowMocks: e.ALLOW_MOCKS === "true",
+    credits: creditsConfig(e, env.NODE_ENV),
   };
 }
 
@@ -194,6 +231,9 @@ const CONFIG_HINTS: Record<string, string> = {
   UGC_PROVIDER: 'Use "mock", "google" ou "krea".',
   ALLOW_MOCKS: 'Use "true" (só dev/teste) ou "false" (padrão).',
   UGC_REAL_ALLOWED: 'Use "true" ou "false" (padrão false).',
+  CREDITS_PER_BRL: "Use um inteiro ≥ 1 (ex.: 100 = R$ 1,00 vira 100 créditos).",
+  MONTHLY_CREDIT_ALLOWANCE: "Use um inteiro ≥ 1 (ex.: 10000).",
+  CREDITS_TIMEZONE: 'Use um fuso IANA (ex.: "America/Sao_Paulo").',
 };
 
 /**

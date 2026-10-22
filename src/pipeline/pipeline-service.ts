@@ -1693,6 +1693,11 @@ export class PipelineService {
     return summarizeActualCosts((await this.getCampaign(campaignId)).executionMode === "hybrid" ? entries.filter(e => !e.simulated) : entries, discarded);
   }
 
+  /** L8.2: leitura do ledger (somente leitura; créditos são derivados dele, nunca gravados). */
+  listCostEntries(): Promise<readonly GenerationCost[]> {
+    return this.deps.ledger.list();
+  }
+
   // ---------------------------------------------------------------- internos
 
   /** Geração (sob o lock da campanha: chamadas pagas + orçamento) e depois render (fora do lock). */

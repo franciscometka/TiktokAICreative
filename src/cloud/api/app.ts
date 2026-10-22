@@ -20,6 +20,7 @@ import { buildProjectV2View, listProjectCards, matchesFilter, type ProjectFilter
 import { presetSummariesFor, publicConfigFor, v2EstimatesFor } from "@/application/public-config";
 import { toUserError, type UserError } from "@/application/user-errors";
 import { workerStatusFrom } from "@/application/worker-status";
+import { creditsSummary, loadCreditsView } from "@/application/credits";
 import { SAFE_AVATAR_ID } from "@/domain/avatar";
 import { parseChangeRequest } from "@/domain/change-request";
 import { SAFE_PRODUCT_ID, STORED_IMAGE_NAME } from "@/domain/upload";
@@ -131,6 +132,11 @@ export function createApiHandler(options: ApiOptions): (req: IncomingMessage, re
     route("GET", "/v1/me", async (ctx) => reply(ctx, 200, { ok: true, value: { userId: ctx.user!.userId } })),
     // L8.1: status do worker para o shell (só estado + último contato; nada do processo).
     route("GET", "/v1/worker", async (ctx) => reply(ctx, 200, { ok: true, value: workerStatusFrom(await new WorkerHeartbeatRepository(infra.db).latest()) })),
+    // L8.2: créditos derivados do ledger do usuário (`?summary=1` = só saldo, para o shell).
+    route("GET", "/v1/credits", async (ctx) => {
+      const view = await loadCreditsView((await ctx.runtime()).deps, infra.config.credits, v2EstimatesFor(infra.config));
+      reply(ctx, 200, { ok: true, value: ctx.url.searchParams.get("summary") === "1" ? creditsSummary(view) : view });
+    }),
     route("GET", "/v1/bootstrap", async (ctx) => {
       const rt = await ctx.runtime();
       const limit = Math.min(Number(ctx.url.searchParams.get("recent") ?? 8) || 8, 100);

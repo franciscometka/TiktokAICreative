@@ -53,6 +53,8 @@ Variáveis de ambiente (backend):
 | `RENDERER` | `remotion` |
 | `ALLOW_MOCKS` | `false` |
 | `SIGNED_URL_TTL_SECONDS` | `600` (opcional) |
+| `CREDITS_PER_BRL`, `MONTHLY_CREDIT_ALLOWANCE` | `100`, `10000` (L8.2). Sem os dois em produção, a tela mostra "Créditos indisponíveis" |
+| `CREDITS_TIMEZONE` | `America/Sao_Paulo` (opcional; é o padrão) |
 
 A API também precisa das variáveis de provider. Ela não chama os providers, mas calcula disponibilidade e cotação com elas. A configuração é validada na subida: variável ausente ou inválida derruba o deploy com o NOME da variável, nunca o valor.
 
@@ -143,6 +145,7 @@ Nenhum teste unitário exige Supabase cloud.
 | `ANTHROPIC_API_KEY`, `KREA_API_KEY`, `ELEVENLABS_API_KEY`, `RUNWAYML_API_SECRET`, `GOOGLE_AI_API_KEY`, `REMOTION_LICENSE_KEY` | | ✓ | ✓ |
 | `LLM_PROVIDER`, `UGC_PROVIDER`, `UGC_REAL_ALLOWED`, `AUDIO_PROVIDER`, `RENDERER`, `ALLOW_MOCKS`, orçamentos | | ✓ | ✓ |
 | `SUPABASE_JWT_SECRET` (só projetos com JWT legado) | | ✓ | |
+| `CREDITS_PER_BRL`, `MONTHLY_CREDIT_ALLOWANCE`, `CREDITS_TIMEZONE` | | ✓ | |
 
 ## Migração futura dos jobs locais (não automática)
 

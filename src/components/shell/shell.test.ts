@@ -12,7 +12,7 @@ import { WorkerStatus } from "./worker-status";
 
 const NOW = new Date("2026-10-22T12:00:00Z");
 const ago = (ms: number) => new Date(NOW.getTime() - ms).toISOString();
-const status = (worker: WorkerStatusView) => ({ mode: "cloud" as const, worker, user: { label: "cisco", initial: "C" } });
+const status = (worker: WorkerStatusView) => ({ mode: "cloud" as const, worker, user: { label: "cisco", initial: "C" }, credits: { remaining: 6760, allowance: 10000, state: "normal" as const, estimatedVideos: { seconds: 30 as const, count: 2, creditsPerVideo: 2272, basis: "estimate" as const } } });
 const currentLinks = (html: string) => [...html.matchAll(/<a[^>]*aria-current="page"[^>]*>([\s\S]*?)<\/a>/g)].map((m) => m[1]!.replace(/<[^>]+>/g, ""));
 
 describe("navegação", () => {
@@ -30,9 +30,11 @@ describe("navegação", () => {
     const html = renderToStaticMarkup(createElement(Sidebar, { pathname: "/campaigns/abc", status: status({ state: "online", lastSeenAt: ago(5_000) }), now: NOW, kbd: "Ctrl K" }));
     for (const text of ["Creative Factory", "AI Video Studio", "Início", "Criar vídeo", "Projetos", "Avatares", "Créditos", "Command Palette", "Configurações", "Ctrl K", "cisco"]) expect(html).toContain(text);
     expect(currentLinks(html)).toEqual(["Projetos"]);
-    // Itens ainda não implementados não são links (sem botão morto).
-    expect(html).not.toMatch(/<a[^>]*>[^<]*Créditos/);
-    expect(html).toMatch(/aria-disabled="true"[^>]*>[\s\S]*?Créditos/);
+    // L8.2: Créditos é rota real; Command Palette segue "em breve" (não é link, sem botão morto).
+    expect(html).toContain('href="/credits"');
+    expect(html).toMatch(/aria-disabled="true"[^>]*>[\s\S]*?Command Palette/);
+    // Saldo real na sidebar (do status), com equivalência e "Ver uso".
+    for (const text of ["6.760", "≈ 2 vídeos de 30s", "Ver uso →"]) expect(html).toContain(text);
   });
 
   it("bottom nav mobile: 4 áreas, Criar em destaque, aria-current na rota", () => {
@@ -79,10 +81,10 @@ describe("worker status", () => {
   });
 });
 
-describe("créditos (até o L8.2)", () => {
-  it("badge reservado, sem nenhum número", () => {
-    const html = renderToStaticMarkup(createElement(CreditsBadge));
-    expect(html).toContain("Créditos");
+describe("créditos no shell", () => {
+  it("sem configuração: 'Créditos indisponíveis', nunca '0 créditos'", () => {
+    const html = renderToStaticMarkup(createElement(CreditsBadge, { summary: null }));
+    expect(html).toContain("Créditos indisponíveis");
     expect(html.replace(/<[^>]+>/g, "")).not.toMatch(/\d/);
   });
 });

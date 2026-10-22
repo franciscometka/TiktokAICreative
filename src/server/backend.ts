@@ -5,6 +5,7 @@ import type { V2EstimateView } from "@/application/create-v2";
 import { buildProjectV2View, listProjectCards, matchesFilter, type ProjectCard, type ProjectFilter, type ProjectV2View } from "@/application/project-v2-view";
 import type { PublicAppConfig } from "@/application/public-config";
 import type { WorkerStatusView } from "@/application/worker-status";
+import { creditsSummary, loadCreditsView, type CreditsResult, type CreditsSummary } from "@/application/credits";
 import { loadFrontendEnv } from "@/cloud/config";
 import type { PresetSummary } from "@/costs/preset-summary";
 import { getPresetSummaries, getPublicConfig, getRuntime, getV2Estimates } from "./runtime";
@@ -43,6 +44,9 @@ export interface ReadBackend {
   settings(): Promise<SettingsData>;
   /** L8.1: presença do worker. Local = o próprio Next gera (estado "local"). */
   worker(): Promise<WorkerStatusView>;
+  /** L8.2: créditos derivados do ledger (não configurado = { configured: false }). */
+  credits(): Promise<CreditsResult>;
+  creditsSummary(): Promise<CreditsSummary | null>;
 }
 
 /** Backend fora do ar: a tela mostra "Serviço temporariamente indisponível." (nada técnico). */
@@ -76,6 +80,8 @@ class LocalBackend implements ReadBackend {
     return { config: getPublicConfig(), voices: await listVoiceProfileViews(this.deps), matrix: this.deps.service.ugcSpeechMatrix() ?? null, presets: getPresetSummaries() };
   }
   async worker(): Promise<WorkerStatusView> { return { state: "local", lastSeenAt: null }; }
+  credits() { return loadCreditsView(this.deps, getRuntime().config.credits, getV2Estimates()); }
+  async creditsSummary() { return creditsSummary(await this.credits()); }
 }
 
 /** Chamada HTTPS à Render API. Erro de rede/5xx de infraestrutura → ServiceUnavailableError. */
@@ -122,6 +128,8 @@ class RemoteBackend implements ReadBackend {
   voices() { return this.read<VoiceProfileView[]>("/v1/voices"); }
   settings() { return this.read<SettingsData>("/v1/settings"); }
   worker() { return this.read<WorkerStatusView>("/v1/worker"); }
+  credits() { return this.read<CreditsResult>("/v1/credits"); }
+  creditsSummary() { return this.read<CreditsSummary | null>("/v1/credits?summary=1"); }
 }
 
 /** Leitura de página: backend fora do ar vira { ok: false } para a tela "indisponível". */
@@ -132,6 +140,11 @@ export async function loadOr<T>(fn: () => Promise<T>): Promise<{ ok: true; value
     if (error instanceof ServiceUnavailableError) return { ok: false };
     throw error;
   }
+}
+
+/** Backend com token já obtido (route handlers): `undefined` = local. */
+export function getBackendFor(token: string | undefined): ReadBackend {
+  return token === undefined || runtimeMode() === "local" ? new LocalBackend() : new RemoteBackend(token);
 }
 
 /** Para Server Components. No cloud, sem sessão → login (redirect). */

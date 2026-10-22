@@ -1,7 +1,8 @@
 import { LogOut } from "lucide-react";
 import type { ShellStatus } from "@/app/api/shell/route";
 import { cx, IconButton } from "../ds";
-import { isActive, NAV_FOOTER, NAV_MAIN, NAV_SOON } from "./nav";
+import { CreditsPanel } from "./credits-badge";
+import { isActive, NAV_CREDITS, NAV_FOOTER, NAV_MAIN, NAV_SOON } from "./nav";
 import { Brand, Kbd, SidebarLink, SoonRow } from "./nav-parts";
 import { WorkerStatus } from "./worker-status";
 
@@ -16,12 +17,14 @@ export function Sidebar({ pathname, status, now, kbd, onLogout }: { pathname: st
       <nav aria-label="Principal" className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3">
         {NAV_MAIN.map((item) => <SidebarLink key={item.href} item={item} active={isActive(pathname, item.href)} />)}
         <div role="separator" className="mx-2.5 my-3 h-px bg-line" />
+        <SidebarLink item={NAV_CREDITS} active={isActive(pathname, NAV_CREDITS.href)} />
         {NAV_SOON.map((item) => <SoonRow key={item.id} item={item} trailing={item.id === "palette" ? <Kbd>{kbd}</Kbd> : undefined} />)}
         {NAV_FOOTER.map((item) => <SidebarLink key={item.href} item={item} active={isActive(pathname, item.href)} />)}
       </nav>
       <div className="space-y-2 p-3">
-        <div className="rounded-xl border border-line bg-surface px-3.5 py-3">
-          <WorkerStatus variant="panel" status={status?.worker ?? null} now={now} />
+        <div className="divide-y divide-line rounded-xl border border-line bg-surface">
+          <div className="px-3.5 py-3"><CreditsPanel summary={status?.credits ?? null} loading={!status} /></div>
+          <div className="px-3.5 py-3"><WorkerStatus variant="panel" status={status?.worker ?? null} now={now} /></div>
         </div>
         <UserRow user={status?.user ?? null} onLogout={onLogout} />
       </div>

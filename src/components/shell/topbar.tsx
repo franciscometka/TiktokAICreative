@@ -7,7 +7,7 @@ import { Brand, Kbd } from "./nav-parts";
 import { WorkerStatus } from "./worker-status";
 
 /**
- * Topbar minimalista. Desktop: contexto da página + worker, créditos (reservado), notificações e
+ * Topbar minimalista. Desktop: contexto da página + worker, saldo de créditos (discreto), notificações e
  * atalho da Command Palette (os dois últimos chegam no L8.8 — aparecem desabilitados).
  * Mobile: marca + ponto do worker + menu das áreas secundárias.
  */
@@ -18,7 +18,7 @@ export function Topbar({ pathname, status, now, kbd, onOpenMenu }: { pathname: s
       <div className="hidden h-14 items-center gap-4 px-6 lg:flex">
         <p className="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-[-0.01em] text-fg">{pageTitle(pathname)}</p>
         <WorkerStatus variant="pill" status={status?.worker ?? null} now={now} />
-        <CreditsBadge />
+        <CreditsBadge summary={status?.credits ?? null} loading={!status} />
         <span className="mx-1 h-5 w-px bg-line" aria-hidden />
         <Tooltip side="bottom" align="end" content="Notificações chegam em breve.">
           <IconButton label="Notificações (em breve)" size="sm" aria-disabled="true" className="cursor-not-allowed opacity-60 hover:bg-transparent"><Bell /></IconButton>

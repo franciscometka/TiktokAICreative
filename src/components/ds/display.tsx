@@ -84,13 +84,13 @@ export function Skeleton({ className, rounded = "md" }: { className?: string; ro
  * Barra de progresso. `value` 0–100 = progresso REAL; omitido = indeterminado (sem número falso).
  * Animação por `transform: scaleX`.
  */
-export function Progress({ value, label, tone = "primary", size = "md", className }: { value?: number; label: string; tone?: "primary" | "ai" | "success" | "danger"; size?: "sm" | "md"; className?: string }) {
+export function Progress({ value, label, tone = "primary", size = "md", className }: { value?: number; label: string; tone?: "primary" | "ai" | "success" | "warning" | "danger"; size?: "sm" | "md" | "xs"; className?: string }) {
   const determinate = typeof value === "number";
   const pct = determinate ? Math.min(100, Math.max(0, value)) : 0;
-  const fill = tone === "ai" ? "bg-(image:--cf-gradient-ai)" : tone === "success" ? "bg-success" : tone === "danger" ? "bg-danger" : "bg-primary-light";
+  const fill = tone === "ai" ? "bg-(image:--cf-gradient-ai)" : tone === "success" ? "bg-success" : tone === "warning" ? "bg-warning" : tone === "danger" ? "bg-danger" : "bg-primary-light";
   return (
     <div role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={determinate ? Math.round(pct) : undefined}
-      className={cx("relative w-full overflow-hidden rounded-full bg-fg/[0.07]", size === "md" ? "h-1.5" : "h-1", className)}>
+      className={cx("relative w-full overflow-hidden rounded-full bg-fg/[0.07]", size === "md" ? "h-1.5" : size === "sm" ? "h-1" : "h-[3px]", className)}>
       {determinate
         ? <span className={cx("absolute inset-0 origin-left rounded-full transition-transform duration-(--dur-emph) ease-cf", fill)} style={{ transform: `scaleX(${pct / 100})` }} />
         : <span className={cx("absolute inset-y-0 left-0 w-2/5 animate-indeterminate rounded-full", fill)} />}

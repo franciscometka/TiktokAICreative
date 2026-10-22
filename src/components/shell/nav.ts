@@ -15,7 +15,7 @@ export interface NavItem {
 }
 
 export interface SoonItem {
-  id: "credits" | "palette";
+  id: "palette";
   label: string;
   icon: LucideIcon;
   hint: string;
@@ -28,8 +28,10 @@ export const NAV_MAIN: readonly NavItem[] = [
   { href: "/avatars", label: "Avatares", short: "Avatares", icon: UserRound },
 ];
 
+/** L8.2: Créditos virou rota real. */
+export const NAV_CREDITS: NavItem = { href: "/credits", label: "Créditos", short: "Créditos", icon: Zap };
+
 export const NAV_SOON: readonly SoonItem[] = [
-  { id: "credits", label: "Créditos", icon: Zap, hint: "Saldo e uso de créditos chegam em breve." },
   { id: "palette", label: "Command Palette", icon: Command, hint: "Busca e atalhos rápidos chegam em breve." },
 ];
 
@@ -43,8 +45,18 @@ export function isActive(pathname: string, href: string): boolean {
 
 const TITLES: readonly [string, string][] = [
   ["/create", "Criar vídeo"], ["/projects", "Projetos"], ["/campaigns", "Projeto"], ["/jobs", "Jobs"],
-  ["/avatars/new", "Novo avatar"], ["/avatars", "Avatares"], ["/settings", "Configurações"], ["/login", "Entrar"],
+  ["/avatars/new", "Novo avatar"], ["/avatars", "Avatares"], ["/settings", "Configurações"], ["/login", "Entrar"], ["/credits", "Créditos"],
 ];
+
+/**
+ * Telas já 100% Cinematic AI Studio (dark nativo, sem a superfície clara temporária).
+ * Cada lote de redesign adiciona a sua rota aqui.
+ */
+export const DARK_ROUTES: readonly string[] = ["/credits"];
+
+export function isDarkRoute(pathname: string): boolean {
+  return DARK_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
+}
 
 /** Título da topbar a partir da rota (contexto curto; o nome longo do projeto fica na página). */
 export function pageTitle(pathname: string): string {

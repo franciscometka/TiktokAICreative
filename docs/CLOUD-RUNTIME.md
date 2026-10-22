@@ -188,6 +188,27 @@ A UX continua com os mesmos quatro passos: Preparando roteiro, Preparando aprese
   - `unknown`: nunca houve sinal. Não é offline: falta evidência.
 - No modo local, o shell mostra "Geração local".
 
+## Créditos (L8.2)
+
+- **Fonte da verdade:** `ledger_entries`, sem mudança. Não há tabela de saldo, débito gravado, carteira nem cron de reset.
+- **Cálculo:**
+  - uso do mês = Σ custo REAL (`status = confirmed`, sem simulados) × `CREDITS_PER_BRL`;
+  - saldo = `max(0, MONTHLY_CREDIT_ALLOWANCE − uso)`;
+  - excedente = `max(0, uso − franquia)`, só informativo.
+- **Período:** é o mês corrente em `CREDITS_TIMEZONE` (padrão `America/Sao_Paulo`).
+  - O banco e o ledger guardam UTC. O corte é sempre explícito nesse fuso, nunca o fuso do servidor.
+  - O PC local está em Brasília; Render, Vercel e Supabase rodam em UTC.
+- **Arredondamento** (`src/costs/credits.ts`):
+  - estimativa: para cima;
+  - real: matemático, somando em micro-reais antes de converter;
+  - partes (categoria, dia, linha): maior resto, somando exatamente o total.
+- **API:** `GET /v1/credits` (autenticado) devolve franquia, uso, saldo, excedente, período, vídeos, `≈ vídeos de 30s`, consumo por serviço, uso diário e histórico agrupado por projeto. `?summary=1` devolve só o saldo, para o shell.
+- **Fora da resposta:** provider, modelo, prompt e ids de entrada/job.
+- **"≈ N vídeos de 30s":**
+  - usa a média real dos últimos 10 vídeos de 30s, quando há pelo menos 3;
+  - senão, usa a estimativa atual de 30s (Balanceado), se não for provisória;
+  - senão, não aparece.
+
 ## Limites conhecidos
 
 - No cloud, a tela técnica antiga (`?view=advanced`, `/create?mode=advanced`, `/jobs`) mostra "Disponível no modo local". A UX V2 inteira funciona.

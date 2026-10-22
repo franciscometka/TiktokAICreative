@@ -6,8 +6,9 @@ import { useState, useSyncExternalStore, useTransition, type ReactNode } from "r
 import { logoutAction } from "@/app/auth-actions";
 import { cx, focusRing, Sheet } from "../ds";
 import { BottomNav } from "../shell/bottom-nav";
-import { isActive, NAV_FOOTER, NAV_SOON } from "../shell/nav";
-import { NavIcon, SoonRow } from "../shell/nav-parts";
+import { CreditsPanel } from "../shell/credits-badge";
+import { isActive, isDarkRoute, NAV_CREDITS, NAV_FOOTER } from "../shell/nav";
+import { NavIcon } from "../shell/nav-parts";
 import { Sidebar, UserRow } from "../shell/sidebar";
 import { Topbar } from "../shell/topbar";
 import { useShellStatus } from "../shell/use-shell-status";
@@ -50,12 +51,17 @@ export function AppShell({ children }: { children: ReactNode }) {
       <Sidebar pathname={pathname} status={status} now={now} kbd={kbd} onLogout={logout} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar pathname={pathname} status={status} now={now} kbd={kbd} onOpenMenu={() => setMenuOpen(true)} />
-        {/* Superfície clara temporária: conteúdo atual isolado, com respiro e cantos (nunca encosta nas bordas). */}
-        <div className="flex flex-1 flex-col px-2 pt-2 pb-[calc(5.5rem+env(safe-area-inset-bottom))] sm:px-3 sm:pt-3 lg:pb-3">
-          <div data-surface="legacy" className="theme-light flex-1 overflow-x-clip rounded-2xl ring-1 ring-white/[0.06]">
-            {children}
+        {isDarkRoute(pathname) ? (
+          // Tela já redesenhada: dark nativo, direto no canvas.
+          <div data-surface="dark" className="flex-1 pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-0">{children}</div>
+        ) : (
+          // Superfície clara temporária: conteúdo atual isolado, com respiro e cantos (nunca encosta nas bordas).
+          <div className="flex flex-1 flex-col px-2 pt-2 pb-[calc(5.5rem+env(safe-area-inset-bottom))] sm:px-3 sm:pt-3 lg:pb-3">
+            <div data-surface="legacy" className="theme-light flex-1 overflow-x-clip rounded-2xl ring-1 ring-white/[0.06]">
+              {children}
+            </div>
           </div>
-        </div>
+        )}
       </div>
       <BottomNav pathname={pathname} />
       <MobileMenu open={menuOpen} onClose={() => setMenuOpen(false)} pathname={pathname} status={status} now={now} onLogout={logout} />
@@ -68,12 +74,12 @@ function MobileMenu({ open, onClose, pathname, status, now, onLogout }: { open: 
   return (
     <Sheet open={open} onClose={onClose} title="Menu">
       <div className="space-y-5">
-        <div className="rounded-xl border border-line bg-surface px-4 py-3.5">
-          <WorkerStatus variant="panel" status={status?.worker ?? null} now={now} />
+        <div className="divide-y divide-line rounded-xl border border-line bg-surface">
+          <div className="px-4 py-3.5"><CreditsPanel summary={status?.credits ?? null} loading={!status} onNavigate={onClose} /></div>
+          <div className="px-4 py-3.5"><WorkerStatus variant="panel" status={status?.worker ?? null} now={now} /></div>
         </div>
         <nav aria-label="Secundária" className="flex flex-col gap-0.5">
-          {NAV_SOON.filter((item) => item.id === "credits").map((item) => <SoonRow key={item.id} item={item} />)}
-          {NAV_FOOTER.map((item) => {
+          {[NAV_CREDITS, ...NAV_FOOTER].map((item) => {
             const active = isActive(pathname, item.href);
             return (
               <Link key={item.href} href={item.href} onClick={onClose} aria-current={active ? "page" : undefined}

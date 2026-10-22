@@ -41,6 +41,13 @@ services:
         sync: false
       - key: RENDERER
         value: remotion
+      # L8.2: créditos derivados do ledger (sem eles: "Créditos indisponíveis").
+      - key: CREDITS_PER_BRL
+        value: "100"
+      - key: MONTHLY_CREDIT_ALLOWANCE
+        value: "10000"
+      - key: CREDITS_TIMEZONE
+        value: America/Sao_Paulo
 
   - type: worker
     name: tiktok-ai-worker

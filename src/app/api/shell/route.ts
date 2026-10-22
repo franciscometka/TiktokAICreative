@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import type { CreditsSummary } from "@/application/credits";
 import type { WorkerStatusView } from "@/application/worker-status";
-import { apiFetch } from "@/server/backend";
+import { apiFetch, getBackendFor } from "@/server/backend";
 import { accessToken, runtimeMode } from "@/server/session";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +16,8 @@ export interface ShellStatus {
   mode: "local" | "cloud";
   worker: WorkerStatusView;
   user: { label: string; initial: string } | null;
+  /** L8.2: saldo do mês. null = indisponível (não configurado ou sem consulta) — nunca "0". */
+  credits: CreditsSummary | null;
 }
 
 const UNKNOWN: WorkerStatusView = { state: "unknown", lastSeenAt: null };
@@ -34,10 +37,12 @@ function userFromToken(token: string): ShellStatus["user"] {
 export async function GET(): Promise<NextResponse<ShellStatus>> {
   const headers = { "Cache-Control": "no-store" };
   if (runtimeMode() === "local") {
-    return NextResponse.json({ mode: "local", worker: { state: "local", lastSeenAt: null }, user: { label: "Modo local", initial: "L" } }, { headers });
+    const credits = await getBackendFor(undefined).creditsSummary().catch(() => null);
+    return NextResponse.json({ mode: "local", worker: { state: "local", lastSeenAt: null }, user: { label: "Modo local", initial: "L" }, credits }, { headers });
   }
   const token = await accessToken();
-  if (!token) return NextResponse.json({ mode: "cloud", worker: UNKNOWN, user: null }, { headers });
+  if (!token) return NextResponse.json({ mode: "cloud", worker: UNKNOWN, user: null, credits: null }, { headers });
+  const credits = await getBackendFor(token).creditsSummary().catch(() => null);
   let worker = UNKNOWN;
   try {
     const { json } = await apiFetch<{ ok: boolean; value: WorkerStatusView }>(token, "GET", "/v1/worker");
@@ -46,5 +51,5 @@ export async function GET(): Promise<NextResponse<ShellStatus>> {
   } catch {
     // API fora do ar: status desconhecido, sem alarmar.
   }
-  return NextResponse.json({ mode: "cloud", worker, user: userFromToken(token) }, { headers });
+  return NextResponse.json({ mode: "cloud", worker, user: userFromToken(token), credits }, { headers });
 }
