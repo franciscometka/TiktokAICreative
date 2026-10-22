@@ -43,7 +43,7 @@ export default async function SettingsPage() {
         <div className="mt-5 border-t border-zinc-100 pt-5"><VoiceProfileForm bases={SPEAKER_PROFILES.map((s) => ({ id: s.id, name: s.name }))} /></div>
       </Card>
 
-      <details className="rounded-2xl border border-zinc-200/80 bg-white p-6" data-section="diagnostics">
+      <details className="theme-light rounded-2xl border border-zinc-200/80 bg-white p-6" data-section="diagnostics">
         <summary className="cursor-pointer text-base font-semibold text-zinc-950">Avançado / Diagnóstico</summary>
         <div className="mt-5 space-y-6">
           <p className="rounded-xl bg-zinc-50 px-4 py-3 text-sm text-zinc-600">

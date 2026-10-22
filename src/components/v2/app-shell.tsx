@@ -8,6 +8,7 @@ import { cx } from "../ui/primitives";
 /**
  * Navegação V2 (Lote 6): Início · Criar vídeo · Projetos · Avatares | Configurações.
  * Telas técnicas (jobs, providers, ledger, diagnóstico) ficam em Configurações → Avançado.
+ * L8.0: o shell inteiro fica na ilha clara (`.theme-light`) até o redesign do L8.1.
  */
 
 export const NAV_MAIN = [
@@ -27,7 +28,7 @@ export function isActive(pathname: string, href: string): boolean {
 function NavLink({ href, label, icon, active }: { href: string; label: string; icon: string; active: boolean }) {
   return (
     <Link href={href} aria-current={active ? "page" : undefined}
-      className={cx("flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition", active ? "bg-zinc-100 text-zinc-950" : "text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900")}>
+      className={cx("flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium whitespace-nowrap transition", active ? "bg-zinc-100 text-zinc-950" : "text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900")}>
       <svg viewBox="0 0 24 24" className="size-[18px] shrink-0" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d={icon} /></svg>
       <span>{label}</span>
     </Link>
@@ -37,7 +38,7 @@ function NavLink({ href, label, icon, active }: { href: string; label: string; i
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? "/";
   return (
-    <div className="min-h-screen bg-[#f7f7f8] lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]">
+    <div className="theme-light min-h-screen bg-[#f7f7f8] lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]">
       <aside className="sticky top-0 z-30 border-b border-zinc-200/70 bg-white lg:h-screen lg:border-r lg:border-b-0">
         <div className="flex items-center gap-2.5 px-5 py-4 lg:py-6">
           <span className="grid size-7 place-items-center rounded-lg bg-zinc-950 text-[11px] font-bold text-white" aria-hidden>CF</span>

@@ -58,7 +58,7 @@ export default async function CampaignPage({ params, searchParams }: { params: P
 
   if (!result.ok) {
     return (
-      <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
+      <main className="theme-light mx-auto max-w-3xl px-4 py-10 sm:px-6">
         <Notice tone={result.error.code === "corrupted" ? "red" : "neutral"} title={result.error.title}>
           {result.error.message}
         </Notice>
@@ -86,7 +86,7 @@ export default async function CampaignPage({ params, searchParams }: { params: P
   const created = new Date(view.createdAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
+    <main className="theme-light mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
       <nav className="text-sm text-zinc-500" aria-label="Navegação">
         <Link href={view.uxVersion === 2 ? `/campaigns/${view.id}` : "/projects"} className="hover:text-zinc-900">
           {view.uxVersion === 2 ? "← Voltar à visão simples" : "Projetos"}

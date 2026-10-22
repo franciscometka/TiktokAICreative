@@ -105,7 +105,7 @@ export default async function CreatePage({ searchParams }: { searchParams: Promi
   }
 
   return (
-    <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
+    <main className="theme-light mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
       <div className="mb-8">
         <p className="text-xs font-semibold tracking-wider text-zinc-500 uppercase">Nova campanha</p>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900">
