@@ -12,6 +12,7 @@ import { ffmpegAvailable } from "@/render/remotion/media-probe";
 import { loadWorkerEnv } from "../config";
 import { createInfra } from "../infra";
 import { createLogger } from "../logger";
+import { startHeartbeat, WorkerHeartbeatRepository, workerKey } from "../repos/worker-heartbeat-repository";
 import { CloudWorker } from "./worker";
 
 const logger = createLogger({ service: "worker" });
@@ -37,18 +38,22 @@ async function main(): Promise<void> {
     process.exit(report.database && report.storage && (infra.config.renderer.id !== "remotion" || (report.browser && report.ffmpeg)) ? 0 : 1);
   }
 
+  const workerId = `${hostname()}-${randomUUID().slice(0, 8)}`;
   const worker = new CloudWorker({
-    infra, projectRoot, workerId: `${hostname()}-${randomUUID().slice(0, 8)}`, tmpRoot: resolve(env.tmpRoot),
+    infra, projectRoot, workerId, tmpRoot: resolve(env.tmpRoot),
     leaseSeconds: env.leaseSeconds, pollIntervalMs: env.pollIntervalMs, staleTmpHours: env.staleTmpHours,
   });
   const shutdown = async (signal: string) => {
     logger.info("encerrando worker (termina a tarefa atual; o lease cobre um kill)", { signal });
+    heartbeat.stop();
     await worker.stop();
     await infra.db.close().catch(() => undefined);
     process.exit(0);
   };
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
   process.on("SIGINT", () => void shutdown("SIGINT"));
+  // L8.1: presença para o status "Worker online" (independente da fila; falha só gera aviso).
+  const heartbeat = startHeartbeat({ repo: new WorkerHeartbeatRepository(infra.db), key: workerKey(workerId), logger });
   // Diagnóstico periódico no log (Render não tem healthcheck para background worker).
   setInterval(() => void infra.queue.counts().then((queue) => logger.info("worker vivo", { queue })).catch((error: unknown) => logger.warn("diagnóstico falhou", { error })), 60_000).unref();
   logger.info("worker pronto", { tmpRoot: env.tmpRoot, leaseSeconds: env.leaseSeconds });

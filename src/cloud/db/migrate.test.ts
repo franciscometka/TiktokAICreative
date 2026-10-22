@@ -7,7 +7,7 @@ describe("migrations do cloud runtime", () => {
     const db = await migratedTestDb();
     expect(await migrate(db)).toEqual([]);
     const tables = (await db.query<{ table_name: string }>("select table_name from information_schema.tables where table_schema = 'public'", [])).rows.map((r) => r.table_name);
-    for (const t of ["projects", "campaigns", "jobs", "job_queue", "job_attempts", "avatars", "avatar_revisions", "voice_profiles", "product_assets", "ugc_references", "generated_assets", "render_jobs", "ledger_entries", "change_requests", "job_events", "idempotency_keys", "profiles"]) {
+    for (const t of ["projects", "campaigns", "jobs", "job_queue", "job_attempts", "avatars", "avatar_revisions", "voice_profiles", "product_assets", "ugc_references", "generated_assets", "render_jobs", "ledger_entries", "change_requests", "job_events", "idempotency_keys", "profiles", "worker_heartbeats"]) {
       expect(tables).toContain(t);
     }
     await db.close();

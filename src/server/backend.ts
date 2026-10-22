@@ -4,6 +4,7 @@ import type { CampaignView } from "@/application/campaign-view";
 import type { V2EstimateView } from "@/application/create-v2";
 import { buildProjectV2View, listProjectCards, matchesFilter, type ProjectCard, type ProjectFilter, type ProjectV2View } from "@/application/project-v2-view";
 import type { PublicAppConfig } from "@/application/public-config";
+import type { WorkerStatusView } from "@/application/worker-status";
 import { loadFrontendEnv } from "@/cloud/config";
 import type { PresetSummary } from "@/costs/preset-summary";
 import { getPresetSummaries, getPublicConfig, getRuntime, getV2Estimates } from "./runtime";
@@ -40,6 +41,8 @@ export interface ReadBackend {
   avatar(id: string): Promise<AvatarView | undefined>;
   voices(): Promise<VoiceProfileView[]>;
   settings(): Promise<SettingsData>;
+  /** L8.1: presença do worker. Local = o próprio Next gera (estado "local"). */
+  worker(): Promise<WorkerStatusView>;
 }
 
 /** Backend fora do ar: a tela mostra "Serviço temporariamente indisponível." (nada técnico). */
@@ -72,6 +75,7 @@ class LocalBackend implements ReadBackend {
   async settings(): Promise<SettingsData> {
     return { config: getPublicConfig(), voices: await listVoiceProfileViews(this.deps), matrix: this.deps.service.ugcSpeechMatrix() ?? null, presets: getPresetSummaries() };
   }
+  async worker(): Promise<WorkerStatusView> { return { state: "local", lastSeenAt: null }; }
 }
 
 /** Chamada HTTPS à Render API. Erro de rede/5xx de infraestrutura → ServiceUnavailableError. */
@@ -117,6 +121,7 @@ class RemoteBackend implements ReadBackend {
   }
   voices() { return this.read<VoiceProfileView[]>("/v1/voices"); }
   settings() { return this.read<SettingsData>("/v1/settings"); }
+  worker() { return this.read<WorkerStatusView>("/v1/worker"); }
 }
 
 /** Leitura de página: backend fora do ar vira { ok: false } para a tela "indisponível". */

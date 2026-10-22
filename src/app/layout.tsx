@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AppShell } from "@/components/v2/app-shell";
 import "./globals.css";
@@ -10,6 +10,9 @@ export const metadata: Metadata = {
   title: "Creative Factory",
   description: "Vídeos UGC para TikTok Shop: foto, ideia, avatar e duração.",
 };
+
+/** L8.1: safe areas (bottom nav no iPhone) e barra do navegador no tom do shell. */
+export const viewport: Viewport = { viewportFit: "cover", themeColor: "#09090b", colorScheme: "dark" };
 
 /**
  * Lote 6: navegação V2 (sidebar). O aviso de modo de execução (MOCK/REAL) saiu da faixa global e

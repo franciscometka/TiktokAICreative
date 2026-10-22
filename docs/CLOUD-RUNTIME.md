@@ -177,6 +177,17 @@ A UX continua com os mesmos quatro passos: Preparando roteiro, Preparando aprese
 - O logger é estruturado e redige `authorization`, tokens, cookies, valores de segredo e a query string das URLs assinadas.
 - O rate limit de escrita é por usuário, além da idempotência.
 
+## Presença do worker (L8.1)
+
+- Tabela `worker_heartbeats` (migration `20261022120000_worker_heartbeats.sql`): uma linha por processo de worker, com chave = hash opaco do id do processo (nunca hostname, path, env ou segredo).
+- O worker faz upsert a cada 30s (`WORKER_HEARTBEAT_INTERVAL_MS`). Sem sinal por 2 min (`WORKER_OFFLINE_AFTER_MS`) vira offline. Os dois limites ficam em `src/application/worker-status.ts`.
+- Totalmente separado da fila: não toca `job_queue`, lease nem processamento. Falha de heartbeat só gera um aviso no log; o worker continua.
+- `GET /v1/worker` (autenticado) responde `{ state, lastSeenAt }`:
+  - `online`: sinal recente;
+  - `offline`: o último sinal ficou velho;
+  - `unknown`: nunca houve sinal. Não é offline: falta evidência.
+- No modo local, o shell mostra "Geração local".
+
 ## Limites conhecidos
 
 - No cloud, a tela técnica antiga (`?view=advanced`, `/create?mode=advanced`, `/jobs`) mostra "Disponível no modo local". A UX V2 inteira funciona.

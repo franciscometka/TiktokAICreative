@@ -19,6 +19,7 @@ import { changeRequestCosts, startVideoV2 } from "@/application/create-v2";
 import { buildProjectV2View, listProjectCards, matchesFilter, type ProjectFilter } from "@/application/project-v2-view";
 import { presetSummariesFor, publicConfigFor, v2EstimatesFor } from "@/application/public-config";
 import { toUserError, type UserError } from "@/application/user-errors";
+import { workerStatusFrom } from "@/application/worker-status";
 import { SAFE_AVATAR_ID } from "@/domain/avatar";
 import { parseChangeRequest } from "@/domain/change-request";
 import { SAFE_PRODUCT_ID, STORED_IMAGE_NAME } from "@/domain/upload";
@@ -29,6 +30,7 @@ import { contentTypeForPath } from "../assets/storage-layout";
 import { AuthError, type AuthUser } from "../auth/jwt";
 import { apiUserRuntime, type CloudInfra, type UserRuntime } from "../runtime";
 import { IDEMPOTENCY_KEY, IdempotencyRepository, requestHash } from "../repos/idempotency-repository";
+import { WorkerHeartbeatRepository } from "../repos/worker-heartbeat-repository";
 import { corsHeaders, HttpError, match, RateLimiter, readJson, route, sendJson, sendText, type Route } from "./http";
 
 /**
@@ -127,6 +129,8 @@ export function createApiHandler(options: ApiOptions): (req: IncomingMessage, re
 
     // ------------------------------------------------------------- leitura
     route("GET", "/v1/me", async (ctx) => reply(ctx, 200, { ok: true, value: { userId: ctx.user!.userId } })),
+    // L8.1: status do worker para o shell (só estado + último contato; nada do processo).
+    route("GET", "/v1/worker", async (ctx) => reply(ctx, 200, { ok: true, value: workerStatusFrom(await new WorkerHeartbeatRepository(infra.db).latest()) })),
     route("GET", "/v1/bootstrap", async (ctx) => {
       const rt = await ctx.runtime();
       const limit = Math.min(Number(ctx.url.searchParams.get("recent") ?? 8) || 8, 100);
