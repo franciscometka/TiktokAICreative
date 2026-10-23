@@ -11,6 +11,7 @@ import { isActive, isDarkRoute, NAV_CREDITS, NAV_FOOTER } from "../shell/nav";
 import { NavIcon } from "../shell/nav-parts";
 import { Sidebar, UserRow } from "../shell/sidebar";
 import { Topbar } from "../shell/topbar";
+import { ShellStatusContext } from "../shell/shell-status-context";
 import { useShellStatus } from "../shell/use-shell-status";
 import { WorkerStatus } from "../shell/worker-status";
 
@@ -31,7 +32,8 @@ function useShortcutLabel(): string {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? "/";
-  const { status, now } = useShellStatus();
+  const shell = useShellStatus();
+  const { status, now } = shell;
   const kbd = useShortcutLabel();
   const [menuOpen, setMenuOpen] = useState(false);
   const [, startTransition] = useTransition();
@@ -47,6 +49,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
+    <ShellStatusContext.Provider value={shell}>
     <div className="min-h-dvh bg-canvas text-fg lg:flex">
       <Sidebar pathname={pathname} status={status} now={now} kbd={kbd} onLogout={logout} />
       <div className="flex min-w-0 flex-1 flex-col">
@@ -66,6 +69,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <BottomNav pathname={pathname} />
       <MobileMenu open={menuOpen} onClose={() => setMenuOpen(false)} pathname={pathname} status={status} now={now} onLogout={logout} />
     </div>
+    </ShellStatusContext.Provider>
   );
 }
 

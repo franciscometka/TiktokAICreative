@@ -80,6 +80,21 @@ export async function accessToken(): Promise<string | undefined> {
   return token && exp > Math.floor(Date.now() / 1000) + 30 ? token : undefined;
 }
 
+/**
+ * L8.3: claims do JWT da sessão, SÓ para exibição (ex.: nome em `user_metadata`). A assinatura
+ * é validada pela Render API em cada chamada; nada aqui autoriza coisa alguma.
+ */
+export async function sessionClaims(): Promise<Record<string, unknown> | null> {
+  const token = await accessToken();
+  if (!token) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8")) as unknown;
+    return payload && typeof payload === "object" ? (payload as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Páginas: sem sessão válida → renova (se houver refresh) ou vai para o login. */
 export async function requireAccessToken(nextPath: string): Promise<string> {
   const token = await accessToken();

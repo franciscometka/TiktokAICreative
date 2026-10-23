@@ -2,29 +2,15 @@
 
 import { useRef, useState } from "react";
 import { removeImageAction } from "@/app/actions";
-import type { ActionResult, UploadedImageView } from "@/application/campaign-actions";
 import type { ImageView } from "@/application/campaign-view";
-import { IMAGE_TYPES, UPLOAD_ERROR_MESSAGES, UPLOAD_LIMITS, isImageContentType } from "@/domain/upload";
-import { BUILD_RUNTIME_MODE } from "@/lib/runtime-mode";
+import { UPLOAD_LIMITS } from "@/domain/upload";
 import { buttonClasses, cx, Spinner } from "../ui/primitives";
-
-const ACCEPT = Object.keys(IMAGE_TYPES).join(",");
-const MB = 1024 * 1024;
-/** Lote 7: no modo cloud o arquivo vai DIRETO ao Storage (URL assinada); nunca passa pelo Vercel. */
-const DIRECT_UPLOAD = BUILD_RUNTIME_MODE === "cloud";
-
-async function directUpload(productId: string, file: File): Promise<ActionResult<UploadedImageView>> {
-  const step = async <T,>(body: Record<string, unknown>) => (await (await fetch("/api/uploads/direct", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json()) as ActionResult<T>;
-  const authorized = await step<{ imageId: string; uploadUrl: string }>({ step: "authorize", ownerId: productId, contentType: file.type, size: file.size });
-  if (!authorized.ok) return authorized;
-  const put = await fetch(authorized.value.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type, "x-upsert": "false" }, body: file });
-  if (!put.ok) return { ok: false, error: { code: "upload", title: "Imagem recusada", message: "Falha no envio.", retryable: true } };
-  return step<UploadedImageView>({ step: "complete", ownerId: productId, imageId: authorized.value.imageId });
-}
+import { IMAGE_ACCEPT, MAX_IMAGE_MB, screenFiles, uploadProductImage } from "../upload/upload-client";
 
 /**
- * Upload local das imagens do produto. A checagem aqui é só conveniência; o servidor valida
- * MIME, tamanho e o conteúdo real do arquivo de novo.
+ * Upload local das imagens do produto (wizard avançado e avatar). L8.3: o envio (direto ao
+ * Storage no cloud) vem da camada compartilhada `components/upload`. A checagem aqui é só
+ * conveniência; o servidor valida MIME, tamanho e o conteúdo real do arquivo de novo.
  */
 export function ImageUploader({
   productId,
@@ -47,34 +33,19 @@ export function ImageUploader({
   const remaining = UPLOAD_LIMITS.maxImagesPerProduct - images.length;
 
   async function upload(files: File[]) {
-    const problems: string[] = [];
-    const accepted = files.filter((file) => {
-      if (!isImageContentType(file.type)) problems.push(`${file.name}: ${UPLOAD_ERROR_MESSAGES.unsupported_type}`);
-      else if (file.size > UPLOAD_LIMITS.maxBytes) problems.push(`${file.name}: ${UPLOAD_ERROR_MESSAGES.too_large}`);
-      else return true;
-      return false;
-    });
-    if (accepted.length > remaining) {
-      problems.push(UPLOAD_ERROR_MESSAGES.limit_reached);
-      accepted.splice(remaining);
-    }
+    const screened = screenFiles(files, remaining);
+    const problems = [...screened.problems];
+    const accepted = screened.accepted.map((i) => files[i]!);
 
     let current = images;
     setUploading(accepted.length);
     for (const file of accepted) {
-      const body = new FormData();
-      body.set("file", file);
-      body.set("productId", productId);
-      try {
-        const result = DIRECT_UPLOAD ? await directUpload(productId, file) : ((await (await fetch("/api/uploads", { method: "POST", body })).json()) as ActionResult<UploadedImageView>);
-        if (result.ok) {
-          current = [...current, { id: result.value.id, previewUrl: result.value.previewUrl }];
-          onChange(current);
-        } else {
-          problems.push(`${file.name}: ${result.error.message}`);
-        }
-      } catch {
-        problems.push(`${file.name}: falha no envio.`);
+      const result = await uploadProductImage(productId, file);
+      if (result.ok) {
+        current = [...current, { id: result.value.id, previewUrl: result.value.previewUrl }];
+        onChange(current);
+      } else {
+        problems.push(`${file.name}: ${result.error.message}`);
       }
       setUploading((n) => n - 1);
     }
@@ -131,7 +102,7 @@ export function ImageUploader({
       <input
         ref={inputRef}
         type="file"
-        accept={ACCEPT}
+        accept={IMAGE_ACCEPT}
         multiple
         className="sr-only"
         tabIndex={-1}
@@ -143,7 +114,7 @@ export function ImageUploader({
         }}
       />
       <p className="mt-2 text-xs text-zinc-500">
-        {hint ?? <>JPG, PNG ou WebP · até {UPLOAD_LIMITS.maxBytes / MB} MB cada · até {UPLOAD_LIMITS.maxImagesPerProduct} imagens. Fotos reais
+        {hint ?? <>JPG, PNG ou WebP · até {MAX_IMAGE_MB} MB cada · até {UPLOAD_LIMITS.maxImagesPerProduct} imagens. Fotos reais
         do produto reduzem os segundos de vídeo IA necessários.</>}
       </p>
       {images.length === 0 && remaining > 0 && (

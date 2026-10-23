@@ -221,7 +221,7 @@ const STAGE_NAMES: Record<string, string> = {
 
 export type ProjectStatus = "draft" | "preparing" | "waiting" | "generating" | "ready" | "attention" | "simulated";
 export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
-  draft: "Rascunho", preparing: "Preparando", waiting: "Aguardando você", generating: "Gerando", ready: "Pronto", attention: "Precisa de atenção", simulated: "Simulação",
+  draft: "Rascunho", preparing: "Preparando", waiting: "Aguardando aprovação", generating: "Gerando", ready: "Pronto", attention: "Precisa de atenção", simulated: "Simulação",
 };
 
 export interface ProjectCard {

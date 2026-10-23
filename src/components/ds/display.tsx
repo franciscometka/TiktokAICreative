@@ -10,11 +10,11 @@ import { cx, type Tone } from "./styles";
 
 /**
  * Assinatura visual da IA. `active` = pulso muito discreto (estados em andamento);
- * `gradient` = gradiente da marca. Decorativo: o texto ao lado carrega o significado.
+ * `gradient` = gradiente da marca; `inherit` = cor do texto ao redor (ex.: dentro do CTA ✦). Decorativo: o texto ao lado carrega o significado.
  */
-export function Spark({ active = false, gradient = false, className }: { active?: boolean; gradient?: boolean; className?: string }) {
+export function Spark({ active = false, gradient = false, inherit = false, className }: { active?: boolean; gradient?: boolean; inherit?: boolean; className?: string }) {
   return (
-    <span aria-hidden className={cx("inline-block leading-none select-none", active && "animate-spark", gradient ? "text-gradient-ai" : "text-primary-light", className)}>✦</span>
+    <span aria-hidden className={cx("inline-block leading-none select-none", active && "animate-spark", inherit ? null : gradient ? "text-gradient-ai" : "text-primary-light", className)}>✦</span>
   );
 }
 

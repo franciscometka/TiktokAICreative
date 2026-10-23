@@ -52,10 +52,11 @@ const TITLES: readonly [string, string][] = [
  * Telas já 100% Cinematic AI Studio (dark nativo, sem a superfície clara temporária).
  * Cada lote de redesign adiciona a sua rota aqui.
  */
-export const DARK_ROUTES: readonly string[] = ["/credits"];
+export const DARK_ROUTES: readonly string[] = ["/", "/credits"];
 
 export function isDarkRoute(pathname: string): boolean {
-  return DARK_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
+  // "/" (Home, L8.3) vale só para a própria Home, nunca como prefixo das outras rotas.
+  return DARK_ROUTES.some((route) => pathname === route || (route !== "/" && pathname.startsWith(`${route}/`)));
 }
 
 /** Título da topbar a partir da rota (contexto curto; o nome longo do projeto fica na página). */
