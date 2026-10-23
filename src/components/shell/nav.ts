@@ -1,4 +1,4 @@
-import { Command, House, LayoutGrid, Settings, UserRound, Zap, type LucideIcon } from "lucide-react";
+import { House, LayoutGrid, Settings, UserRound, Zap, type LucideIcon } from "lucide-react";
 
 /**
  * L8.1 — navegação do Cinematic AI Studio (sidebar desktop, bottom nav mobile, título da topbar).
@@ -31,9 +31,8 @@ export const NAV_MAIN: readonly NavItem[] = [
 /** L8.2: Créditos virou rota real. */
 export const NAV_CREDITS: NavItem = { href: "/credits", label: "Créditos", short: "Créditos", icon: Zap };
 
-export const NAV_SOON: readonly SoonItem[] = [
-  { id: "palette", label: "Command Palette", icon: Command, hint: "Busca e atalhos rápidos chegam em breve." },
-];
+/** L8.8: a Command Palette virou real (botão na sidebar); nada mais "em breve" por enquanto. */
+export const NAV_SOON: readonly SoonItem[] = [];
 
 export const NAV_FOOTER: readonly NavItem[] = [{ href: "/settings", label: "Configurações", short: "Ajustes", icon: Settings }];
 

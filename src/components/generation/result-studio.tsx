@@ -43,7 +43,7 @@ export function ResultStudio({ view, source, campaignId, onEstimate, localMode, 
       <header className="relative isolate mt-4">
         <AmbientGlow className="-top-10 [mask-image:linear-gradient(to_bottom,#000_40%,transparent)]" />
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-[26px] leading-tight font-semibold tracking-tight text-fg sm:text-title" data-headline>{view.title}</h1>
+          <h1 className="text-[28px] leading-tight font-semibold tracking-tight text-fg sm:text-title" data-headline>{view.title}</h1>
           <ProjectStatusBadge status="ready" label="Pronto" />
         </div>
         {meta.length ? <p className="mt-1.5 text-sm text-fg-muted tabular" data-result-meta>{meta.join(" · ")}</p> : null}

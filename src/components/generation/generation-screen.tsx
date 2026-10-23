@@ -77,7 +77,7 @@ export function GenerationScreen({ source, campaignId, handlers, advancedHref }:
           <header className="relative isolate">
             {view.kind === "done" ? <AmbientGlow className="-top-10 [mask-image:linear-gradient(to_bottom,#000_40%,transparent)]" /> : null}
             <p className="truncate text-caption font-medium text-fg-subtle">{view.title}</p>
-            <h1 className="mt-1 flex items-center gap-2.5 text-[26px] leading-tight font-semibold tracking-tight text-fg sm:text-title" data-headline>
+            <h1 className="mt-1 flex items-center gap-2.5 text-[28px] leading-tight font-semibold tracking-tight text-fg sm:text-title" data-headline>
               {progress || view.kind === "done" ? <Spark active={progress} gradient /> : null}
               <span key={view.kind} className="animate-fade-in">{view.headline}</span>
             </h1>

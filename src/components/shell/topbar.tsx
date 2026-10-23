@@ -1,17 +1,17 @@
-import { Bell, Menu } from "lucide-react";
+import { Menu, Search } from "lucide-react";
 import type { ShellStatus } from "@/app/api/shell/route";
-import { IconButton, Tooltip } from "../ds";
+import { cx, focusRing, IconButton, interactive, Tooltip } from "../ds";
 import { CreditsBadge } from "./credits-badge";
 import { pageTitle } from "./nav";
 import { Brand, Kbd } from "./nav-parts";
+import { BellButton } from "./notification-center";
 import { WorkerStatus } from "./worker-status";
 
 /**
  * Topbar minimalista. Desktop: contexto da página + worker, saldo de créditos (discreto), notificações e
- * atalho da Command Palette (os dois últimos chegam no L8.8 — aparecem desabilitados).
- * Mobile: marca + ponto do worker + menu das áreas secundárias.
+ * Command Palette (L8.8: funcionando). Mobile: marca + ponto do worker + busca + notificações + menu.
  */
-export function Topbar({ pathname, status, now, kbd, onOpenMenu }: { pathname: string; status: ShellStatus | null; now: Date; kbd: string; onOpenMenu: () => void }) {
+export function Topbar({ pathname, status, now, kbd, onOpenMenu, onOpenPalette }: { pathname: string; status: ShellStatus | null; now: Date; kbd: string; onOpenMenu: () => void; onOpenPalette?: () => void }) {
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-canvas/95 pt-[env(safe-area-inset-top)]">
       {/* Desktop */}
@@ -20,17 +20,20 @@ export function Topbar({ pathname, status, now, kbd, onOpenMenu }: { pathname: s
         <WorkerStatus variant="pill" status={status?.worker ?? null} now={now} />
         <CreditsBadge summary={status?.credits ?? null} loading={!status} />
         <span className="mx-1 h-5 w-px bg-line" aria-hidden />
-        <Tooltip side="bottom" align="end" content="Notificações chegam em breve.">
-          <IconButton label="Notificações (em breve)" size="sm" aria-disabled="true" className="cursor-not-allowed opacity-60 hover:bg-transparent"><Bell /></IconButton>
-        </Tooltip>
-        <Tooltip side="bottom" align="end" content="Command Palette chega em breve.">
-          <span tabIndex={0} aria-disabled="true" aria-label={`Command Palette (em breve), atalho ${kbd}`} className="cursor-not-allowed rounded-md outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-light"><Kbd>{kbd}</Kbd></span>
+        <BellButton />
+        <Tooltip side="bottom" align="end" content="Buscar e ações">
+          <button type="button" onClick={onOpenPalette} aria-label={`Abrir Command Palette (${kbd})`} aria-haspopup="dialog" data-open-palette
+            className={cx("inline-flex h-8 items-center gap-2 rounded-lg border border-line px-2.5 text-caption text-fg-subtle hover:border-line-strong hover:text-fg", interactive, focusRing)}>
+            <Search className="size-3.5" aria-hidden /><Kbd>{kbd}</Kbd>
+          </button>
         </Tooltip>
       </div>
       {/* Mobile */}
       <div className="flex h-14 items-center gap-2 px-4 lg:hidden">
         <div className="min-w-0 flex-1"><Brand compact /></div>
         <WorkerStatus variant="dot" status={status?.worker ?? null} now={now} />
+        <IconButton label="Buscar e ações" onClick={onOpenPalette}><Search /></IconButton>
+        <BellButton size="md" />
         <IconButton label="Abrir menu" onClick={onOpenMenu}><Menu /></IconButton>
       </div>
     </header>

@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Mic, X } from "lucide-react";
+import { ArrowLeft, Check, Mic, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition, type KeyboardEvent, type ReactNode } from "react";
@@ -10,7 +10,7 @@ import { AGE_LABELS, avatarFormState, avatarPayload, type AvatarFormState } from
 import type { ImageView } from "@/application/campaign-view";
 import { UGC_ENVIRONMENT_LABELS } from "@/config/ugc";
 import { UGC_ENVIRONMENTS } from "@/domain/ugc";
-import { Button, Card, cx, Field, focusRing, Input, interactive, Modal, Segmented, Select, Textarea } from "../ds";
+import { Button, Card, cx, Field, focusRing, Input, interactive, Modal, Segmented, Select, Textarea, useOptionalToast } from "../ds";
 import { PhotoDrop } from "../upload/photo-drop";
 
 /**
@@ -71,6 +71,7 @@ function Section({ id, number, label, description, children }: { id: string; num
 
 export function AvatarStudioForm({ avatarId, initial, voices }: { avatarId: string; initial?: AvatarView; voices: VoiceProfileView[] }) {
   const router = useRouter();
+  const toast = useOptionalToast();
   const [pending, startTransition] = useTransition();
   const [s, setS] = useState<AvatarFormState>(() => avatarFormState(initial));
   const [images, setImages] = useState<ImageView[]>(initial?.imageUrl && initial.referenceImage ? [{ id: initial.referenceImage.imageId, previewUrl: initial.imageUrl }] : []);
@@ -84,14 +85,18 @@ export function AvatarStudioForm({ avatarId, initial, voices }: { avatarId: stri
     setMessage(undefined);
     startTransition(async () => {
       const result = await saveAvatarAction(avatarPayload(avatarId, { ...s, imageId: images[0]?.id ?? null }));
-      if (result.ok) { router.push(`/avatars/${avatarId}`); router.refresh(); }
-      else { setErrors(result.fieldErrors ?? {}); setMessage(result.error.message); }
+      if (result.ok) {
+        // L8.8: feedback imediato (toast); não vai para a central de notificações.
+        toast.show({ id: `avatar:${avatarId}:saved`, title: initial ? "Alterações salvas" : "Avatar criado", description: result.value.revision !== initial?.revision && initial ? `${result.value.name} · nova revisão ${result.value.revision}` : result.value.name, tone: "success" });
+        router.push(`/avatars/${avatarId}`); router.refresh();
+      } else { setErrors(result.fieldErrors ?? {}); setMessage(result.error.message); }
     });
   }
   function toggleActive() {
     if (!initial) return;
     startTransition(async () => {
       const result = await setAvatarActiveAction({ avatarId, active: !initial.active });
+      if (result.ok) toast.show({ id: `avatar:${avatarId}:active`, title: result.value.active ? "Avatar ativado" : "Avatar desativado", description: result.value.active ? undefined : "Não entra na escolha automática.", tone: "success" });
       setMessage(result.ok ? (result.value.active ? "Avatar ativado." : "Avatar desativado: não entra no automático.") : result.error.message);
       router.refresh();
     });
@@ -99,13 +104,14 @@ export function AvatarStudioForm({ avatarId, initial, voices }: { avatarId: stri
   function archive() {
     startTransition(async () => {
       const result = await archiveAvatarAction(avatarId);
-      if (result.ok) { router.push("/avatars"); router.refresh(); } else { setConfirmArchive(false); setMessage(result.error.message); }
+      if (result.ok) { toast.show({ id: `avatar:${avatarId}:archived`, title: "Avatar excluído", description: "Vídeos antigos continuam com a revisão que usaram.", tone: "info" }); router.push("/avatars"); router.refresh(); }
+      else { setConfirmArchive(false); setMessage(result.error.message); }
     });
   }
 
   return (
     <main className="mx-auto w-full max-w-4xl px-4 pt-8 pb-12 sm:px-8 sm:pt-12" data-avatar-form={initial ? "edit" : "new"}>
-      <Link href={initial ? `/avatars/${avatarId}` : "/avatars"} className={cx("text-caption font-medium text-fg-subtle hover:text-fg", interactive, focusRing)}>← {initial ? initial.name : "Avatares"}</Link>
+      <Link href={initial ? `/avatars/${avatarId}` : "/avatars"} className={cx("inline-flex items-center gap-1.5 text-caption font-medium text-fg-subtle hover:text-fg", interactive, focusRing)}><ArrowLeft className="size-3.5" aria-hidden />{initial ? initial.name : "Avatares"}</Link>
       <h1 className="mt-3 text-[28px] leading-tight font-semibold tracking-tight text-fg sm:text-title">{initial ? `Editar ${initial.name}` : "Novo avatar"}</h1>
       <p className="mt-2 text-body text-fg-muted">{initial ? `Revisão ${initial.revision}. Vídeos antigos continuam vinculados à revisão que usaram.` : "Uma pessoa padrão para apresentar seus produtos, sempre com o mesmo rosto e a mesma voz."}</p>
 

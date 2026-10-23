@@ -1,4 +1,4 @@
-﻿/** L8.0 — design system Cinematic AI Studio. Importar sempre de "@/components/ds". */
+/** L8.0 — design system Cinematic AI Studio. Importar sempre de "@/components/ds". */
 export { cx, focusRing, interactive, type Size, type Tone } from "./styles";
 export { Spinner } from "./spinner";
 export { Button, IconButton, buttonClass, type ButtonProps, type ButtonVariant, type IconButtonProps } from "./button";
@@ -9,5 +9,5 @@ export { AmbientGlow, Badge, Card, cardClass, EmptyState, Progress, Skeleton, Sp
 export { Tooltip } from "./tooltip";
 export { Modal, Sheet } from "./overlay";
 export { Dropdown, type DropdownItem } from "./dropdown";
-export { ToastProvider, useToast, type ToastInput, type ToastTone } from "./toast";
+export { ToastProvider, useOptionalToast, useToast, type ToastInput, type ToastTone } from "./toast";
 export { ThemeDark, ThemeLight } from "./theme";

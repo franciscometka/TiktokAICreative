@@ -30,9 +30,10 @@ describe("navegação", () => {
     const html = renderToStaticMarkup(createElement(Sidebar, { pathname: "/campaigns/abc", status: status({ state: "online", lastSeenAt: ago(5_000) }), now: NOW, kbd: "Ctrl K" }));
     for (const text of ["Creative Factory", "AI Video Studio", "Início", "Criar vídeo", "Projetos", "Avatares", "Créditos", "Command Palette", "Configurações", "Ctrl K", "cisco"]) expect(html).toContain(text);
     expect(currentLinks(html)).toEqual(["Projetos"]);
-    // L8.2: Créditos é rota real; Command Palette segue "em breve" (não é link, sem botão morto).
+    // L8.2: Créditos é rota real. L8.8: Command Palette virou um botão real (abre o diálogo).
     expect(html).toContain('href="/credits"');
-    expect(html).toMatch(/aria-disabled="true"[^>]*>[\s\S]*?Command Palette/);
+    expect(html).toMatch(/<button type="button" aria-haspopup="dialog"[^>]*>[\s\S]*?Command Palette/);
+    expect(html).not.toContain('aria-disabled="true"');
     // Saldo real na sidebar (do status), com equivalência e "Ver uso".
     for (const text of ["6.760", "≈ 2 vídeos de 30s", "Ver uso →"]) expect(html).toContain(text);
   });

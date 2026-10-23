@@ -165,7 +165,7 @@ export function CreditsHeader({ subtitle }: { subtitle?: string }) {
   return (
     <header className="flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 className="text-[28px] leading-tight font-semibold tracking-[-0.02em] text-fg sm:text-[34px]">Créditos</h1>
+        <h1 className="text-[28px] leading-tight font-semibold tracking-tight text-fg sm:text-title">Créditos</h1>
         <p className="mt-1.5 text-body text-fg-muted">Acompanhe o consumo do seu estúdio.</p>
       </div>
       {subtitle ? <p className="text-caption text-fg-subtle">{subtitle}</p> : null}
