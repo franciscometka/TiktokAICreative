@@ -159,6 +159,68 @@ export async function getAvatarView(deps: AvatarDeps, id: string): Promise<Avata
   }
 }
 
+// ---------------------------------------------------------------- perfil (L8.7, só leitura)
+
+/** Resumo SEGURO de uma revisão: número, data, foto e se é a atual. O domínio não guarda motivo. */
+export interface AvatarRevisionView {
+  revision: number;
+  current: boolean;
+  /** Última gravação daquela revisão (o domínio não guarda outra data por revisão). */
+  updatedAt: string;
+  imageUrl: string | null;
+}
+
+export interface AvatarUsageView {
+  /** Projetos cujo pedido usou este avatar (qualquer revisão). */
+  count: number;
+  recent: { id: string; name: string; createdAt: string; thumbnailUrl: string | null }[];
+}
+
+export interface AvatarDetailView {
+  avatar: AvatarView;
+  revisions: AvatarRevisionView[];
+  /** null = não foi possível calcular com segurança neste processo. */
+  usage: AvatarUsageView | null;
+}
+
+/** Leitura mínima de projetos (sem acoplar ao PipelineService inteiro). */
+export interface CampaignReader {
+  listCampaignIds(): Promise<readonly string[]>;
+  getCampaign(id: string): Promise<{ id: string; createdAt: string; request: { projectName?: string; product: { id: string; name: string; images: readonly { id: string }[] }; avatar?: { avatarId?: string } } }>;
+}
+
+export function revisionViews(record: { current: Avatar; revisions: readonly Avatar[] }): AvatarRevisionView[] {
+  return [...record.revisions].sort((a, b) => b.revision - a.revision).map((r) => ({
+    revision: r.revision, current: r.revision === record.current.revision, updatedAt: r.updatedAt,
+    imageUrl: r.referenceImage ? imagePreviewUrl(r.referenceImage.ownerId, r.referenceImage.imageId) ?? null : null,
+  }));
+}
+
+export async function avatarUsage(service: CampaignReader, avatarId: string, limit = 3): Promise<AvatarUsageView> {
+  const used: AvatarUsageView["recent"] = [];
+  for (const id of await service.listCampaignIds()) {
+    try {
+      const c = await service.getCampaign(id);
+      if (c.request.avatar?.avatarId !== avatarId) continue;
+      const image = c.request.product.images[0];
+      used.push({ id: c.id, name: c.request.projectName || c.request.product.name, createdAt: c.createdAt, thumbnailUrl: image ? imagePreviewUrl(c.request.product.id, image.id) ?? null : null });
+    } catch {
+      // Projeto ilegível: não entra na contagem.
+    }
+  }
+  used.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return { count: used.length, recent: used.slice(0, limit) };
+}
+
+/** Perfil do avatar: atual + revisões + uso nos projetos (só leitura). */
+export async function getAvatarDetail(deps: AvatarDeps & { service?: CampaignReader }, id: string): Promise<AvatarDetailView | undefined> {
+  if (!deps.avatars || !SAFE_AVATAR_ID.test(id)) return undefined;
+  let record: Awaited<ReturnType<AvatarLibraryStore["getAvatarRecord"]>>;
+  try { record = await deps.avatars.getAvatarRecord(id); } catch { return undefined; }
+  if (record.current.archived) return undefined;
+  return { avatar: avatarView(record.current), revisions: revisionViews(record), usage: deps.service ? await avatarUsage(deps.service, id) : null };
+}
+
 function fieldErrorsOf(issues: readonly { path: PropertyKey[]; message: string }[]): Partial<Record<string, string>> {
   const errors: Partial<Record<string, string>> = {};
   for (const issue of issues) errors[issue.path.map(String).join(".") || "form"] ??= issue.message;

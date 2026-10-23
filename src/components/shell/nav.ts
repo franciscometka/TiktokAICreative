@@ -52,7 +52,7 @@ const TITLES: readonly [string, string][] = [
  * Telas já 100% Cinematic AI Studio (dark nativo, sem a superfície clara temporária).
  * Cada lote de redesign adiciona a sua rota aqui.
  */
-export const DARK_ROUTES: readonly string[] = ["/", "/create", "/credits", "/campaigns", "/projects"];
+export const DARK_ROUTES: readonly string[] = ["/", "/create", "/credits", "/campaigns", "/projects", "/avatars"];
 
 export function isDarkRoute(pathname: string): boolean {
   // "/" (Home, L8.3) vale só para a própria Home, nunca como prefixo das outras rotas.

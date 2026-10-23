@@ -1,4 +1,4 @@
-import { getAvatarView, listAvatarViews, listVoiceProfileViews, type AvatarView, type VoiceProfileView } from "@/application/avatar-actions";
+import { getAvatarDetail, getAvatarView, listAvatarViews, listVoiceProfileViews, type AvatarDetailView, type AvatarView, type VoiceProfileView } from "@/application/avatar-actions";
 import { getCampaignView, type ActionResult } from "@/application/campaign-actions";
 import type { CampaignView } from "@/application/campaign-view";
 import type { V2EstimateView } from "@/application/create-v2";
@@ -40,6 +40,8 @@ export interface ReadBackend {
   project(id: string): Promise<ActionResult<{ view: CampaignView; v2: ProjectV2View | null }>>;
   avatars(): Promise<AvatarView[]>;
   avatar(id: string): Promise<AvatarView | undefined>;
+  /** L8.7: perfil (revisões + uso nos projetos), só leitura. */
+  avatarDetail(id: string): Promise<AvatarDetailView | undefined>;
   voices(): Promise<VoiceProfileView[]>;
   settings(): Promise<SettingsData>;
   /** L8.1: presença do worker. Local = o próprio Next gera (estado "local"). */
@@ -75,6 +77,7 @@ class LocalBackend implements ReadBackend {
   }
   avatars() { return listAvatarViews(this.deps); }
   avatar(id: string) { return getAvatarView(this.deps, id); }
+  avatarDetail(id: string) { return getAvatarDetail(this.deps, id); }
   voices() { return listVoiceProfileViews(this.deps); }
   async settings(): Promise<SettingsData> {
     return { config: getPublicConfig(), voices: await listVoiceProfileViews(this.deps), matrix: this.deps.service.ugcSpeechMatrix() ?? null, presets: getPresetSummaries() };
@@ -123,6 +126,10 @@ class RemoteBackend implements ReadBackend {
   avatars() { return this.read<AvatarView[]>("/v1/avatars"); }
   async avatar(id: string) {
     const { status, json } = await apiFetch<{ ok: boolean; value: AvatarView }>(this.token, "GET", `/v1/avatars/${encodeURIComponent(id)}`);
+    return status === 404 || !json.ok ? undefined : json.value;
+  }
+  async avatarDetail(id: string) {
+    const { status, json } = await apiFetch<{ ok: boolean; value: AvatarDetailView }>(this.token, "GET", `/v1/avatars/${encodeURIComponent(id)}/detail`);
     return status === 404 || !json.ok ? undefined : json.value;
   }
   voices() { return this.read<VoiceProfileView[]>("/v1/voices"); }

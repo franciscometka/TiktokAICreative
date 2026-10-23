@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { archiveAvatar, getAvatarView, listAvatarViews, listVoiceProfileViews, saveAvatar, saveVoiceProfile, setAvatarActive } from "@/application/avatar-actions";
+import { archiveAvatar, getAvatarDetail, getAvatarView, listAvatarViews, listVoiceProfileViews, saveAvatar, saveVoiceProfile, setAvatarActive } from "@/application/avatar-actions";
 import {
   approveUgcReference,
   authorizeAndRunJob,
@@ -178,6 +178,13 @@ export function createApiHandler(options: ApiOptions): (req: IncomingMessage, re
       const avatar = await getAvatarView((await ctx.runtime()).deps, id!);
       if (!avatar) throw new HttpError(404, "not_found", "Avatar não encontrado.");
       reply(ctx, 200, { ok: true, value: avatar });
+    }),
+    // L8.7: perfil do avatar (revisões + uso nos projetos do PRÓPRIO usuário). Só leitura.
+    route("GET", "/v1/avatars/:id/detail", async (ctx, { id }) => {
+      if (!SAFE_AVATAR_ID.test(id!)) throw new HttpError(404, "not_found", "Avatar não encontrado.");
+      const detail = await getAvatarDetail((await ctx.runtime()).deps, id!);
+      if (!detail) throw new HttpError(404, "not_found", "Avatar não encontrado.");
+      reply(ctx, 200, { ok: true, value: detail });
     }),
     route("GET", "/v1/voices", async (ctx) => reply(ctx, 200, { ok: true, value: await listVoiceProfileViews((await ctx.runtime()).deps) })),
     route("GET", "/v1/assets/signed", async (ctx) => {

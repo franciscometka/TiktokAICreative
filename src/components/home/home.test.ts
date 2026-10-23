@@ -55,7 +55,7 @@ describe("saudação e nome", () => {
 
   it("Home é dark nativa (fora da ilha clara) sem escurecer as outras rotas", () => {
     expect(isDarkRoute("/")).toBe(true);
-    expect(isDarkRoute("/avatars")).toBe(false);
+    expect(isDarkRoute("/settings")).toBe(false);
     expect(isDarkRoute("/credits")).toBe(true);
   });
 });
