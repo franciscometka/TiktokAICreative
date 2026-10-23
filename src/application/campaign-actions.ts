@@ -119,7 +119,7 @@ export async function getCampaignView(deps: AppDeps, campaignId: string): Promis
     const jobActivity = new Map<string, JobActivity>();
     for (const job of jobs) {
       jobActuals.set(job.id, (await service.getJobCostReport(job.id)).actual);
-      jobActivity.set(job.id, { active: service.isJobActive(job.id), progress: service.getRenderProgress(job.id) });
+      jobActivity.set(job.id, { active: service.isJobActive(job.id), progress: service.getRenderProgress(job.id), queued: service.executionState({ jobId: job.id }) === "queued" });
     }
     const view = buildCampaignView({
       campaign,
@@ -130,6 +130,7 @@ export async function getCampaignView(deps: AppDeps, campaignId: string): Promis
       jobActivity,
       audioProvider: deps.audioProvider,
     });
+    if (view.state === "planning") view.planning.queued = service.executionState({ campaignId }) === "queued";
     if (deps.allowMocks === false) for (const creative of view.creatives) if (creative.ugc) creative.ugc = realOnlyUgcView(creative.ugc);
     const capabilities = service.getStageCapabilities();
     if (capabilities && ["hybrid", "offline"].includes(campaign.executionMode ?? "")) {

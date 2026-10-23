@@ -152,3 +152,21 @@ describe("arquivos temporários", () => {
     expect(await readFile(join(ws2, campaign.request.product.images[0]!.uri))).toEqual(Buffer.from(PNG_BYTES));
   });
 });
+
+describe("L8.6 — fila × gerando (só leitura)", () => {
+  it("aprovado e sem worker = \"Na fila\"; assumido pelo claim = \"Gerando\"; nada é executado aqui", async () => {
+    const { campaignId, jobId, token } = await plannedProject("prod_q86");
+    expect((await h.call("POST", `/v1/jobs/${jobId}/generate`, { body: { token } })).status).toBe(202);
+    const queued = (await h.call("GET", `/v1/projects/${campaignId}`)).json.value;
+    expect(queued.view.creatives[0].queued).toBe(true);
+    expect((await h.call("GET", "/v1/projects")).json.value.find((c: { id: string }) => c.id === campaignId)).toMatchObject({ status: "queued", statusLabel: "Na fila" });
+    expect((await h.infra.queue.activeStates(TEST_USER)).get(`job:${jobId}`)).toBe("queued");
+    // Simula SÓ o claim (o worker assumiu); a tarefa não roda neste teste.
+    const task = await h.infra.queue.claim("w86", 30);
+    expect(task?.jobId).toBe(jobId);
+    const running = (await h.call("GET", `/v1/projects/${campaignId}`)).json.value;
+    expect(running.view.creatives[0].queued).toBe(false);
+    expect((await h.call("GET", "/v1/projects")).json.value.find((c: { id: string }) => c.id === campaignId)).toMatchObject({ status: "generating", statusLabel: "Gerando" });
+    await h.infra.queue.finish(task!.id, "w86", { status: "completed", outcome: "test" });
+  });
+});

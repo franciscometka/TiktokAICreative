@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Campaign, GenerationJob } from "@/domain/pipeline";
-import { isPaidRun, jobKey, planningKey, type ActivitySnapshot, type JobRun, type WorkDispatcher } from "@/pipeline/dispatch";
+import { isPaidRun, jobKey, planningKey, type ActivitySnapshot, type JobRun, type WorkDispatcher, type ActiveState } from "@/pipeline/dispatch";
 import { isUniqueViolation, type SqlClient } from "../db/sql";
 
 /**
@@ -152,6 +152,17 @@ export class PostgresJobQueue {
     return new Set(r.rows.map((row) => row.dedupe_key));
   }
 
+  /**
+   * L8.6 (só leitura): estado de cada execução ativa do usuário. "running" é gravado pelo claim
+   * transacional — é o único sinal confiável de que um worker já assumiu a tarefa.
+   */
+  async activeStates(userId: string): Promise<Map<string, ActiveState>> {
+    const r = await this.db.query<{ dedupe_key: string; status: ActiveState }>("select dedupe_key, status from job_queue where user_id = $1 and status in ('queued','running')", [userId]);
+    const states = new Map<string, ActiveState>();
+    for (const row of r.rows) if (states.get(row.dedupe_key) !== "running") states.set(row.dedupe_key, row.status);
+    return states;
+  }
+
   async latest(userId: string, dedupeKey: string): Promise<QueueTask | undefined> {
     const r = await this.db.query<Row>("select * from job_queue where user_id = $1 and dedupe_key = $2 order by created_at desc limit 1", [userId, dedupeKey]);
     return r.rows[0] ? toTask(r.rows[0]) : undefined;
@@ -193,8 +204,12 @@ export class QueueDispatcher implements WorkDispatcher {
 }
 
 export class SetActivity implements ActivitySnapshot {
-  constructor(private readonly keys: ReadonlySet<string>) {}
+  constructor(private readonly keys: ReadonlySet<string> | ReadonlyMap<string, ActiveState>) {}
   isActive(key: string): boolean {
     return this.keys.has(key);
+  }
+  /** L8.6: só quando construído com os estados (Map); com Set, desconhecido. */
+  state(key: string): ActiveState | undefined {
+    return this.keys instanceof Map ? this.keys.get(key) : undefined;
   }
 }

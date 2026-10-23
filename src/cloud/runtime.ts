@@ -52,7 +52,8 @@ export function pgLocks(db: SqlClient, timeoutMs: number): NonNullable<PipelineD
  * fila (activity) — fechar o navegador ou trocar de instância não faz o job parecer interrompido.
  */
 export async function apiUserRuntime(infra: CloudInfra, userId: string): Promise<UserRuntime> {
-  const activity = new SetActivity(await infra.queue.activeKeys(userId));
+  // L8.6: estados (queued/running) em vez de só as chaves — mesma consulta, só leitura.
+  const activity = new SetActivity(await infra.queue.activeStates(userId));
   return userRuntime(infra, userId, {
     dispatcher: new QueueDispatcher(infra.queue, userId),
     activity,

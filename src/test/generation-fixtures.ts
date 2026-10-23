@@ -36,6 +36,7 @@ export function sourceFixture(over: Partial<GenerationSource> = {}): GenerationS
     identity: { strategy: "avatar_reference_image", avatarName: "Cristina" }, specsCount: 2, uncertainPaidOperation: null,
     authorization: { status: "active", estimatedBrl: 20.12, baselineActualBrl: 0.4 }, jobQuote: { estimatedBrl: 20.12, ready: true }, planningQuote: null,
     actual: { totalBrl: 6.4, simulated: false }, renderDurationSeconds: null, productImageUrl: "/api/uploads/prod_1/img_1.png", fidelity: null,
+    createdAt: "2026-10-22T12:00:00Z", finishedAt: null, actualByCategoryBrl: null, previousRenders: [], queued: false,
     ...over,
   };
 }
@@ -53,7 +54,8 @@ export const GENERATION_STATES: Record<string, GenerationSource> = {
     activityPhase: null, presenterReady: false, authorization: null, actual: { totalBrl: 0.4, simulated: false },
     scenes: scenesFixture(0, "planned"),
   }),
-  queued: sourceFixture({ presenterReady: false, actual: { totalBrl: 0.4, simulated: false } }),
+  // L8.6: dado real da fila (aprovado, nenhum worker assumiu ainda).
+  queued: sourceFixture({ presenterReady: false, queued: true, actual: { totalBrl: 0.4, simulated: false } }),
   planning: sourceFixture({ v2: v2Fixture({ phase: "planning" }), presenterReady: false, authorization: null, actual: { totalBrl: 0, simulated: false } }),
   reference: sourceFixture({ presenterReady: false, actual: { totalBrl: 0.4, simulated: false } }),
   fidelity: sourceFixture({ v2: v2Fixture({ phase: "product_check", approval: APPROVAL }), activityPhase: null, presenterReady: false, fidelity: { statusLabel: "Aguardando revisão", conflicts: [] }, actual: { totalBrl: 1.6, simulated: false } }),
@@ -63,6 +65,9 @@ export const GENERATION_STATES: Record<string, GenerationSource> = {
   done: sourceFixture({
     v2: v2Fixture({ phase: "done", result: { videoUrl: "/api/renders/c/k/r1", downloadUrl: "/api/renders/c/k/r1?download=1", durationLabel: "00:31", costLabel: "R$ 19,87" } }),
     activityPhase: null, scenes: scenesFixture(5), actual: { totalBrl: 19.87, simulated: false }, renderDurationSeconds: 31.2, authorization: { status: "completed", estimatedBrl: 20.12, baselineActualBrl: 0.4 },
+    finishedAt: "2026-10-22T13:10:00Z",
+    actualByCategoryBrl: { llm: 0.35, ugc_reference: 1.2, ugc_scene: 18.12, rendering: 0.2 },
+    previousRenders: [{ renderId: "r0", videoUrl: "/api/renders/c/k/r0", downloadUrl: "/api/renders/c/k/r0?download=1", finishedAt: "2026-10-22T12:50:00Z" }],
   }),
   scene_failed: sourceFixture({
     v2: v2Fixture({ phase: "failed", error: { message: "Não conseguimos gerar o trecho 4.", details: "Krea: tempo esgotado · Cena 4", retry: "job", sceneId: "scene_4" } }),

@@ -15,7 +15,7 @@ import { RecentProjects } from "./recent-projects";
 
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
 const card = (i: number, over: Partial<ProjectCard> = {}): ProjectCard => ({
-  id: `c${i}`, name: `Projeto ${i}`, thumbnailUrl: `/api/uploads/p${i}/img_${i}.png`, avatarName: "Cristina", durationLabel: "30s",
+  id: `c${i}`, name: `Projeto ${i}`, productName: `Produto ${i}`, thumbnailUrl: `/api/uploads/p${i}/img_${i}.png`, thumbnailKind: "product", avatarName: "Cristina", durationLabel: "30s", actualBrl: null, estimatedBrl: null,
   status: "ready", statusLabel: "Pronto", createdAt: `2026-10-${String(10 + i).padStart(2, "0")}T12:00:00Z`, dateLabel: "x", ...over,
 });
 const NOW = new Date("2026-10-23T12:00:00Z");
@@ -55,7 +55,7 @@ describe("saudação e nome", () => {
 
   it("Home é dark nativa (fora da ilha clara) sem escurecer as outras rotas", () => {
     expect(isDarkRoute("/")).toBe(true);
-    expect(isDarkRoute("/projects")).toBe(false);
+    expect(isDarkRoute("/avatars")).toBe(false);
     expect(isDarkRoute("/credits")).toBe(true);
   });
 });
@@ -154,7 +154,7 @@ describe("projetos recentes", () => {
     const recent = recentProjects([1, 2, 3, 4, 5, 6].map((i) => card(i)));
     expect(HOME_RECENT_LIMIT).toBe(4);
     expect(recent.map((c) => c.id)).toEqual(["c6", "c5", "c4", "c3"]);
-    const html = renderToStaticMarkup(createElement(RecentProjects, { cards: [...recent.slice(0, 3), card(9, { status: "waiting", statusLabel: PROJECT_STATUS_LABELS.waiting })] }));
+    const html = renderToStaticMarkup(createElement(RecentProjects, { cards: [...recent.slice(0, 3), card(9, { status: "awaiting_approval", statusLabel: PROJECT_STATUS_LABELS.awaiting_approval })] }));
     expect(html).toContain('data-recent-count="4"');
     expect(text(html)).toContain("Aguardando aprovação");
     expect(text(html)).not.toContain("Aguardando você");

@@ -137,10 +137,12 @@ describe("Projeto V2 — geração automática com progresso simples (Lote 6)", 
     const { deps } = await v2Project(true);
     const cards = await listProjectCards(deps);
     const card = cards.find((c) => c.name === "Secador de cabelo")!;
-    expect(card).toMatchObject({ avatarName: "Marina", durationLabel: "30s", status: "draft", statusLabel: "Rascunho" });
+    // L8.6: job criado esperando a autorização da geração = "Aguardando aprovação" (nunca "Rascunho").
+    expect(card).toMatchObject({ avatarName: "Marina", durationLabel: "30s", status: "awaiting_approval", statusLabel: "Aguardando aprovação" });
     expect(card.thumbnailUrl).toMatch(/^\/api\/uploads\/prod_v2\//);
-    expect(JSON.stringify(card)).not.toMatch(/job_|campaign_.*job/);
-    expect(matchesFilter(card, "in_progress")).toBe(true);
+    expect(JSON.stringify(card)).not.toMatch(/job_|campaign_.*job|Rascunho/);
+    expect(matchesFilter(card, "awaiting_approval")).toBe(true);
+    expect(matchesFilter(card, "in_production")).toBe(false);
     expect(matchesFilter(card, "ready")).toBe(false);
     expect(clockLabel(65)).toBe("01:05");
   });

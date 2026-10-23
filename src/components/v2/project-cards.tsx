@@ -5,7 +5,7 @@ import { Chip } from "./ui";
 /** Cards visuais de projeto: thumbnail, nome, avatar, duração, status e data. Sem IDs técnicos. */
 
 const STATUS_TONE: Record<ProjectCard["status"], "neutral" | "accent" | "success" | "warning"> = {
-  draft: "neutral", preparing: "accent", generating: "accent", waiting: "warning", ready: "success", attention: "warning", simulated: "neutral",
+  awaiting_approval: "warning", queued: "neutral", preparing: "accent", generating: "accent", attention: "warning", ready: "success", failed: "warning", blocked: "warning", simulated: "neutral",
 };
 
 export function ProjectCards({ cards, emptyText = "Nenhum projeto ainda. Crie seu primeiro vídeo." }: { cards: ProjectCard[]; emptyText?: string }) {

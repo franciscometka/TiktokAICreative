@@ -1,4 +1,6 @@
-import { actualCreditsFromBrl, estimatedCreditsFromBrl } from "@/costs/credits";
+import { actualCreditsFromBrl, apportion, estimatedCreditsFromBrl, toMicroBrl } from "@/costs/credits";
+import type { CostCategory } from "@/domain/cost";
+import { CREDIT_GROUPS } from "./credits";
 import type { WorkerStatusView } from "./worker-status";
 import type { CampaignView, CreativeView, SceneView } from "./campaign-view";
 import type { ProjectV2View } from "./project-v2-view";
@@ -82,6 +84,18 @@ export interface GenerationView {
   /** Motivo técnico sanitizado (só em "Ver detalhes"). */
   details: string | null;
   summary: { label: string; value: string }[];
+  /** L8.6 — Result Studio (só no concluído): dados reais do resultado. */
+  result: GenerationResult | null;
+}
+
+export interface GenerationResult {
+  /** Data de conclusão do render (ou criação do projeto, se faltar). */
+  dateLabel: string;
+  sceneCount: number;
+  /** Créditos REAIS por serviço (ledger, grupos do L8.2; somam exatamente o total). */
+  breakdown: { label: string; credits: number }[];
+  /** Versões anteriores do render que já existem (mais nova primeiro). */
+  versions: { id: string; label: string; videoUrl: string; downloadUrl: string }[];
 }
 
 // ---------------------------------------------------------------- entrada (recorte do CampaignView)
@@ -102,6 +116,12 @@ export interface GenerationSource {
   actual: { totalBrl: number; simulated: boolean };
   renderDurationSeconds: number | null;
   productImageUrl: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+  actualByCategoryBrl: Partial<Record<string, number>> | null;
+  previousRenders: { renderId: string; videoUrl: string; downloadUrl: string; finishedAt: string | null }[];
+  /** L8.6: execução aprovada esperando um worker (fila durável). */
+  queued: boolean;
   /** Product Fidelity Gate da referência (status e divergências), quando existe. */
   fidelity: { statusLabel: string; conflicts: string[] } | null;
 }
@@ -125,6 +145,11 @@ export function generationSource(view: CampaignView, v2: ProjectV2View): Generat
     actual: { totalBrl: view.costs.actual.totalBrl, simulated: view.costs.actual.simulated },
     renderDurationSeconds: creative?.latestRender?.durationSeconds ?? null,
     productImageUrl: view.product.images[0]?.previewUrl ?? null,
+    createdAt: view.createdAt,
+    finishedAt: creative?.latestRender?.finishedAt ?? null,
+    actualByCategoryBrl: view.costs.actualByCategoryBrl ?? null,
+    previousRenders: (creative?.previousRenders ?? []).map((r) => ({ renderId: r.renderId, videoUrl: r.videoUrl, downloadUrl: r.downloadUrl, finishedAt: r.finishedAt })),
+    queued: (creative?.queued ?? false) || (view.state === "planning" && view.planning.queued === true),
     fidelity: ugc?.fidelity ? { statusLabel: ugc.fidelity.statusLabel, conflicts: ugc.fidelity.conflicts } : null,
   };
 }
@@ -185,7 +210,6 @@ function kindOf(source: GenerationSource): GenerationKind {
   const { v2 } = source;
   switch (v2.phase) {
     case "planning_approval": return "awaiting_planning_approval";
-    case "planning": return "planning";
     case "planning_failed": return "planning_failed";
     case "ready_to_generate": return "awaiting_approval";
     case "presenter_review": case "product_check": return "fidelity";
@@ -195,7 +219,11 @@ function kindOf(source: GenerationSource): GenerationKind {
       // Operação paga sem confirmação: pausa de segurança, nunca "erro com retry".
       if (source.uncertainPaidOperation) return "blocked";
       return v2.error?.sceneId ? "scene_failed" : "job_failed";
+    case "planning":
+      return source.queued ? "queued" : "planning";
     case "generating":
+      // L8.6: aprovado mas ainda sem worker = "Na fila" (dado real da fila, não inferido).
+      if (source.queued) return "queued";
       if (source.activityPhase === "rendering") return "rendering";
       return source.presenterReady ? "generating" : "reference";
   }
@@ -246,7 +274,7 @@ function contextFor(kind: GenerationKind, source: GenerationSource, scenes: read
 const COPY: Record<GenerationKind, { headline: string; subtext: string | null; tone: GenerationView["tone"] }> = {
   awaiting_planning_approval: { headline: "Tudo pronto para começar", subtext: "Primeiro passo: o roteiro. A geração do vídeo pede uma nova aprovação depois.", tone: "attention" },
   awaiting_approval: { headline: "Tudo pronto para começar", subtext: "O roteiro está pronto. Revise a estimativa e aprove para gerar o vídeo.", tone: "attention" },
-  queued: { headline: "Seu vídeo está na fila", subtext: "O computador de geração está offline. O trabalho continua assim que ele voltar.", tone: "warning" },
+  queued: { headline: "Seu vídeo está na fila", subtext: "O trabalho começa assim que o computador de geração assumir este projeto.", tone: "neutral" },
   planning: { headline: "Estamos criando seu vídeo", subtext: "Acompanhe cada etapa enquanto o Creative Factory monta seu conteúdo.", tone: "progress" },
   reference: { headline: "Estamos criando seu vídeo", subtext: "Acompanhe cada etapa enquanto o Creative Factory monta seu conteúdo.", tone: "progress" },
   fidelity: { headline: "Confira antes de continuar", subtext: "A geração das cenas só começa depois da sua conferência.", tone: "attention" },
@@ -293,6 +321,26 @@ function summaryFor(source: GenerationSource): GenerationView["summary"] {
   ];
 }
 
+const DATE = (iso: string) => new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" });
+
+/** Repartição REAL por serviço (só com ledger sem simulados); soma exatamente o total exibido. */
+export function creditBreakdown(byCategory: Partial<Record<string, number>> | null, totalCredits: number): { label: string; credits: number }[] {
+  if (!byCategory || totalCredits <= 0) return [];
+  const micro = CREDIT_GROUPS.map((g) => (g.categories as readonly CostCategory[]).reduce((sum, c) => sum + toMicroBrl(byCategory[c] ?? 0), 0));
+  const parts = apportion(micro, totalCredits);
+  return CREDIT_GROUPS.map((g, i) => ({ label: g.label, credits: parts[i]! })).filter((g) => g.credits > 0);
+}
+
+function resultFor(source: GenerationSource, sceneCount: number, perBrl: number | null): GenerationResult {
+  const used = perBrl && !source.actual.simulated ? actualCreditsFromBrl(source.actual.totalBrl, perBrl) : 0;
+  return {
+    dateLabel: DATE(source.finishedAt ?? source.createdAt),
+    sceneCount,
+    breakdown: perBrl ? creditBreakdown(source.actualByCategoryBrl, used) : [],
+    versions: source.previousRenders.map((r, i) => ({ id: r.renderId, label: r.finishedAt ? `Versão ${source.previousRenders.length - i} · ${DATE(r.finishedAt)}` : `Versão ${source.previousRenders.length - i}`, videoUrl: r.videoUrl, downloadUrl: r.downloadUrl })),
+  };
+}
+
 export interface GenerationContext {
   /** null = créditos não configurados (sem números). */
   creditsPerBrl: number | null;
@@ -322,6 +370,7 @@ export function buildGenerationView(source: GenerationSource, ctx: GenerationCon
     action: actionFor(kind, source, ctx.creditsPerBrl),
     details: kind === "blocked" ? [source.uncertainPaidOperation, source.v2.error?.details].filter(Boolean).join(" · ") : source.v2.error?.details ?? null,
     summary: summaryFor(source),
+    result: kind === "done" ? resultFor(source, scenes.length, ctx.creditsPerBrl) : null,
   };
 }
 
@@ -331,12 +380,12 @@ export function buildGenerationView(source: GenerationSource, ctx: GenerationCon
  */
 export function withWorker(view: GenerationView, worker: WorkerStatusView | null): GenerationView & { workerNotice: "unknown" | null } {
   const needsWorker = view.kind === "planning" || view.kind === "reference" || view.kind === "generating" || view.kind === "rendering";
-  if (needsWorker && worker?.state === "offline") {
-    const copy = COPY.queued;
+  if ((needsWorker || view.kind === "queued") && worker?.state === "offline") {
+    const copy = { ...COPY.queued, subtext: "O computador de geração está offline. O trabalho continua assim que ele voltar.", tone: "warning" as const };
     // A etapa em andamento fica "aguardando" (âmbar); nada é marcado como falha.
     return { ...view, kind: "queued", headline: copy.headline, subtext: copy.subtext, tone: copy.tone, context: null, sceneCounter: null, workerNotice: null,
       stages: view.stages.map((s) => (s.state === "active" ? { ...s, state: "attention" as const } : s)),
       scenes: view.scenes.map((s) => (s.status === "generating" ? { ...s, status: "waiting" as const } : s)) };
   }
-  return { ...view, workerNotice: needsWorker && worker?.state === "unknown" ? "unknown" : null };
+  return { ...view, workerNotice: (needsWorker || view.kind === "queued") && worker?.state === "unknown" ? "unknown" : null };
 }

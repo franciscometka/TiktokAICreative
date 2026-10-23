@@ -107,12 +107,14 @@ describe("prévia e timeline", () => {
     expect(scene).not.toContain("autoplay");
   });
 
-  it("timeline: número, duração e status; só a cena selecionada recebe player; fala/visual/movimento", () => {
+  it("timeline: número, duração e status; nenhum player montado até pedir; fala/visual/movimento", () => {
     const view = buildGenerationView(GENERATION_STATES.generating!, { creditsPerBrl: 100 });
     const html = renderToStaticMarkup(createElement(SceneTimeline, { scenes: view.scenes, defaultSelected: "scene_1" }));
     const t = text(html);
     for (const s of ["Cena 1", "Cena 5", "6s", "Pronta", "Gerando", "Aguardando", "Fala", "Descrição visual", "Movimento", "Câmera na mão"]) expect(t).toContain(s);
-    expect((html.match(/<video/g) ?? []).length).toBe(1);
+    // L8.6: o detalhe da cena só monta o <video> depois do clique em "Ver cena".
+    expect(html).not.toContain("<video");
+    expect(html).toContain("Ver cena 1");
     expect(html).toMatch(/role="tab"[^>]*aria-selected="true"/);
     expect(html).not.toMatch(/Regenerar|Editar/);
   });

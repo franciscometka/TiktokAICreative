@@ -3,6 +3,8 @@ import { formatBrl } from "@/lib/money";
 import type { AppDeps } from "./campaign-actions";
 import { campaignState, imagePreviewUrl, type CampaignView, type CreativeView } from "./campaign-view";
 import { planningErrorDetails } from "./user-errors";
+import { ugcReferenceUrl } from "./ugc-view";
+import { paidOperationInFlight } from "@/pipeline/paid-operation";
 
 /**
  * Lote 6 — UX V2: a complexidade do pipeline continua existindo, mas a tela principal mostra só
@@ -219,71 +221,148 @@ const STAGE_NAMES: Record<string, string> = {
 
 // ---------------------------------------------------------------- Projetos (cards)
 
-export type ProjectStatus = "draft" | "preparing" | "waiting" | "generating" | "ready" | "attention" | "simulated";
+/**
+ * L8.6 — status HONESTO do projeto (cards de Projetos e da Home). Sem "Rascunho": um projeto já
+ * criado espera aprovação, está na fila, gerando, pronto, falhou, pausado por segurança ou precisa
+ * de você. Worker offline NÃO muda o status (o job continua na fila).
+ */
+export type ProjectStatus = "awaiting_approval" | "queued" | "preparing" | "generating" | "attention" | "ready" | "failed" | "blocked" | "simulated";
 export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
-  draft: "Rascunho", preparing: "Preparando", waiting: "Aguardando aprovação", generating: "Gerando", ready: "Pronto", attention: "Precisa de atenção", simulated: "Simulação",
+  awaiting_approval: "Aguardando aprovação", queued: "Na fila", preparing: "Preparando roteiro", generating: "Gerando",
+  attention: "Precisa de atenção", ready: "Pronto", failed: "Falhou", blocked: "Pausado por segurança", simulated: "Simulação",
 };
 
 export interface ProjectCard {
   id: string;
   name: string;
+  productName: string;
+  /** Prioridade: referência visual real > foto do produto > null (placeholder). */
   thumbnailUrl: string | null;
+  thumbnailKind: "reference" | "product" | null;
   avatarName: string | null;
   durationLabel: string | null;
   status: ProjectStatus;
   statusLabel: string;
   createdAt: string;
   dateLabel: string;
+  /** Custo REAL do ledger (BRL, sem simulados); null = nada real registrado. */
+  actualBrl: number | null;
+  /** Estimativa aprovada (BRL) enquanto está em produção; exibir sempre com "~". */
+  estimatedBrl: number | null;
 }
 
-export function projectStatus(campaign: Campaign, job: GenerationJob | undefined, planningActive: boolean, jobActive: boolean): ProjectStatus {
-  const state = campaignState(campaign, planningActive);
-  if (state === "planning") return "preparing";
-  if (state === "failed" || state === "interrupted") return campaign.status === "draft" && !planningActive ? "draft" : "attention";
-  if (!job) return "draft";
-  if (jobActive) return "generating";
+export interface ProjectFlags {
+  planningActive: boolean;
+  jobActive: boolean;
+  /** L8.6: execução ativa ainda na fila (nenhum worker assumiu). */
+  planningQueued?: boolean;
+  jobQueued?: boolean;
+}
+
+const AWAITING_JOB: readonly GenerationJob["status"][] = ["planned", "cost_estimated", "awaiting_approval", "budget_exceeded"];
+
+export function projectStatus(campaign: Campaign, job: GenerationJob | undefined, flags: ProjectFlags): ProjectStatus {
+  const state = campaignState(campaign, flags.planningActive);
+  if (state === "planning") return flags.planningQueued ? "queued" : "preparing";
+  if (state === "failed" || state === "interrupted") {
+    // Rascunho que nunca iniciou o planejamento: espera a aprovação explícita (não é falha).
+    const neverStarted = campaign.status === "draft" && campaign.planningRuns === undefined && !campaign.planningStartedAt;
+    return neverStarted ? "awaiting_approval" : "failed";
+  }
+  if (!job) return "awaiting_approval";
+  if (flags.jobActive) return flags.jobQueued ? "queued" : "generating";
   const done = job.renders.findLast((r) => r.status === "completed");
   if (job.status === "completed" && done) return done.isMock ? "simulated" : "ready";
-  if (job.status === "failed" || job.scenes.some((s) => s.attempts.at(-1)?.status === "failed")) return "attention";
-  if (job.waitingForStage || job.jobAuthorization?.status === "paused") return "waiting";
-  if (job.status === "generating" || job.status === "rendering") return "attention"; // interrompido
-  return "draft";
+  // Em geração sem execução: com operação paga sem confirmação = pausa de segurança; senão, falha.
+  if ((job.status === "generating" || job.status === "rendering") && !job.waitingForStage) return paidOperationInFlight(job) ? "blocked" : "failed";
+  if (job.status === "failed" || job.status === "cancelled" || job.scenes.some((s) => s.attempts.at(-1)?.status === "failed")) return "failed";
+  if (job.waitingForStage || job.jobAuthorization?.status === "paused" || job.status === "audio_review") return "attention";
+  if (AWAITING_JOB.includes(job.status)) return "awaiting_approval";
+  return "attention";
 }
 
-export function projectCard(campaign: Campaign, job: GenerationJob | undefined, flags: { planningActive: boolean; jobActive: boolean }): ProjectCard {
+function thumbnail(campaign: Campaign, job: GenerationJob | undefined): Pick<ProjectCard, "thumbnailUrl" | "thumbnailKind"> {
+  const reference = job?.ugc?.references.findLast((r) => r.state === "succeeded" && !r.isMock && r.review !== "rejected");
+  if (job && reference) return { thumbnailUrl: ugcReferenceUrl(campaign.id, job.creativeId, reference.version), thumbnailKind: "reference" };
   const image = campaign.request.product.images[0];
-  const status = projectStatus(campaign, job, flags.planningActive, flags.jobActive);
+  const url = image ? imagePreviewUrl(campaign.request.product.id, image.id) ?? null : null;
+  return { thumbnailUrl: url, thumbnailKind: url ? "product" : null };
+}
+
+export function projectCard(campaign: Campaign, job: GenerationJob | undefined, flags: ProjectFlags, actualBrl: number | null = null): ProjectCard {
+  const status = projectStatus(campaign, job, flags);
   const rendered = job?.renders.findLast((r) => r.status === "completed")?.durationSeconds;
   const planned = campaign.plan?.creatives[0]?.duration;
   const seconds = rendered ?? campaign.request.targetDurationSeconds ?? planned;
+  const auth = job?.jobAuthorization;
+  const inProduction = status === "queued" || status === "generating";
   return {
     id: campaign.id,
     name: campaign.request.projectName || campaign.request.product.name,
-    thumbnailUrl: image ? imagePreviewUrl(campaign.request.product.id, image.id) ?? null : null,
+    productName: campaign.request.product.name,
+    ...thumbnail(campaign, job),
     avatarName: campaign.request.avatar?.snapshot?.name ?? (campaign.request.creativeMode === "ai_ugc" ? "Automático" : null),
     durationLabel: seconds ? `${Math.round(seconds)}s` : null,
     status, statusLabel: PROJECT_STATUS_LABELS[status],
     createdAt: campaign.createdAt,
     dateLabel: new Date(campaign.createdAt).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }),
+    actualBrl: actualBrl && actualBrl > 0 ? actualBrl : null,
+    estimatedBrl: inProduction && auth ? auth.estimatedBrl + auth.baselineActualBrl : null,
   };
 }
 
-export type ProjectFilter = "all" | "ready" | "in_progress" | "attention";
+/** Filtros com estados reais. "in_progress" (Lote 6) continua aceito pela API como "em produção". */
+export type ProjectFilter = "all" | "in_production" | "awaiting_approval" | "ready" | "attention" | "in_progress";
+export const PROJECT_FILTERS: readonly { id: Exclude<ProjectFilter, "in_progress">; label: string }[] = [
+  { id: "all", label: "Todos" }, { id: "in_production", label: "Em produção" }, { id: "awaiting_approval", label: "Aguardando aprovação" },
+  { id: "ready", label: "Prontos" }, { id: "attention", label: "Precisam de atenção" },
+];
+
 export function matchesFilter(card: ProjectCard, filter: ProjectFilter): boolean {
-  if (filter === "all") return true;
-  if (filter === "ready") return card.status === "ready";
-  if (filter === "attention") return card.status === "attention" || card.status === "waiting";
-  return card.status === "preparing" || card.status === "generating" || card.status === "draft";
+  switch (filter) {
+    case "all": return true;
+    case "ready": return card.status === "ready" || card.status === "simulated";
+    case "awaiting_approval": return card.status === "awaiting_approval";
+    case "attention": return card.status === "attention" || card.status === "failed" || card.status === "blocked";
+    case "in_production": case "in_progress": return card.status === "preparing" || card.status === "queued" || card.status === "generating";
+  }
+}
+
+export type ProjectSort = "recent" | "oldest" | "cost";
+export const PROJECT_SORTS: readonly { id: ProjectSort; label: string }[] = [
+  { id: "recent", label: "Mais recentes" }, { id: "oldest", label: "Mais antigos" }, { id: "cost", label: "Maior consumo" },
+];
+
+const strip = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+/** Busca (nome, produto, avatar) + filtro + ordenação, no cliente. "Maior consumo" = custo real. */
+export function queryProjects(cards: readonly ProjectCard[], q: { search?: string; filter?: ProjectFilter; sort?: ProjectSort }): ProjectCard[] {
+  const term = strip(q.search?.trim() ?? "");
+  const list = cards.filter((c) => matchesFilter(c, q.filter ?? "all") && (!term || [c.name, c.productName, c.avatarName ?? ""].some((v) => strip(v).includes(term))));
+  const sort = q.sort ?? "recent";
+  return list.sort((a, b) =>
+    sort === "oldest" ? a.createdAt.localeCompare(b.createdAt)
+    : sort === "cost" ? (b.actualBrl ?? 0) - (a.actualBrl ?? 0) || b.createdAt.localeCompare(a.createdAt)
+    : b.createdAt.localeCompare(a.createdAt));
 }
 
 export async function listProjectCards(deps: Pick<AppDeps, "service">, limit = 100): Promise<ProjectCard[]> {
   const { service } = deps;
+  // Custo real por projeto: UMA leitura do ledger (sem simulados), agrupada por campanha.
+  const actual = new Map<string, number>();
+  for (const entry of await service.listCostEntries()) if (!entry.simulated) actual.set(entry.campaignId, (actual.get(entry.campaignId) ?? 0) + entry.costBrl);
   const cards: ProjectCard[] = [];
   for (const id of await service.listCampaignIds()) {
     try {
       const campaign = await service.getCampaign(id);
       const jobs = await service.listJobs(id);
-      cards.push(projectCard(campaign, jobs[0], { planningActive: service.isPlanningActive(id), jobActive: jobs[0] ? service.isJobActive(jobs[0].id) : false }));
+      const job = jobs[0];
+      cards.push(projectCard(campaign, job, {
+        planningActive: service.isPlanningActive(id),
+        planningQueued: service.executionState({ campaignId: id }) === "queued",
+        jobActive: job ? service.isJobActive(job.id) : false,
+        jobQueued: job ? service.executionState({ jobId: job.id }) === "queued" : false,
+      }, actual.has(id) ? Math.round(actual.get(id)! * 100) / 100 : null));
     } catch {
       // Projeto ilegível: continua acessível em Configurações → Diagnóstico.
     }

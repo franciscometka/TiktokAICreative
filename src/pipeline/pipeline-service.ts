@@ -1578,6 +1578,18 @@ export class PipelineService {
     return this.activeJobs.has(jobId) || this.deps.activity?.isActive(jobKey(jobId)) === true;
   }
 
+  /**
+   * L8.6 (só leitura): "running" = executando (neste processo ou assumido por um worker);
+   * "queued" = na fila durável, ainda não assumido; undefined = sem execução ativa.
+   */
+  executionState(key: { jobId: string } | { campaignId: string }): "queued" | "running" | undefined {
+    const queueKey = "jobId" in key ? jobKey(key.jobId) : planningKey(key.campaignId);
+    // Execução neste processo (local/worker) = rodando de fato.
+    if ("jobId" in key ? this.activeJobs.has(key.jobId) : this.activePlanning.has(key.campaignId)) return "running";
+    if (!this.deps.activity?.isActive(queueKey)) return undefined;
+    return this.deps.activity.state?.(queueKey) ?? "running";
+  }
+
   /** Job em "generating"/"rendering" sem execução neste processo = interrompido (derivado). */
   isJobInterrupted(job: GenerationJob): boolean {
     return (job.status === "generating" || job.status === "rendering") && !job.waitingForStage && !this.isJobActive(job.id);

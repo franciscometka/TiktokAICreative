@@ -27,7 +27,11 @@ export interface WorkDispatcher {
 /** Execuções ativas conhecidas fora deste processo (fila durável): queued/running. */
 export interface ActivitySnapshot {
   isActive(key: string): boolean;
+  /** L8.6 (só leitura): ainda na fila × já assumida por um worker. undefined = não informado. */
+  state?(key: string): ActiveState | undefined;
 }
+
+export type ActiveState = "queued" | "running";
 
 export const planningKey = (campaignId: string) => `planning:${campaignId}`;
 export const jobKey = (jobId: string) => `job:${jobId}`;

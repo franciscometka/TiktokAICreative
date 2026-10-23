@@ -118,6 +118,8 @@ function renderView(record: RenderRecord, campaignId: string, creativeId: string
 
 export interface JobActivity {
   active: boolean;
+  /** L8.6: ativo mas ainda na fila (nenhum worker assumiu). */
+  queued?: boolean;
   progress?: { renderedFrames: number; totalFrames: number };
 }
 
@@ -166,6 +168,8 @@ export interface CreativeView {
     | undefined;
   /** Job em generating/rendering sem execução no processo (servidor caiu/reiniciou). */
   interrupted: boolean;
+  /** L8.6: execução aprovada aguardando um worker (fila durável). Só leitura. */
+  queued: boolean;
   /** Último render real concluído (MP4 em disco), para player e download. */
   latestRender: RenderView | undefined;
   /** Versões anteriores concluídas (mais nova primeiro, sem a última). */
@@ -217,7 +221,7 @@ export interface CampaignView {
     finalVideoSeconds: Range;
   };
   budget: CostBudget;
-  planning: { startedAt: string | undefined; runs: number; simulated: boolean };
+  planning: { startedAt: string | undefined; runs: number; simulated: boolean; /** L8.6: planejamento na fila, sem worker ainda. */ queued?: boolean };
   error: (UserError & { detail: string | undefined }) | undefined;
   analysis: ProductAnalysis | undefined;
   hooks: { id: string; text: string; angle: string; styleLabel: string }[];
@@ -229,6 +233,8 @@ export interface CampaignView {
     pendingFutureBrl: number;
     /** Já utilizado + futuro pendente. */
     projectedBrl: number;
+    /** L8.6: custo REAL por categoria do ledger (só quando nada é simulado). Só leitura. */
+    actualByCategoryBrl?: Partial<Record<string, number>>;
     containsPlaceholderPrices: boolean;
   };
 }
@@ -390,6 +396,7 @@ function creativeView(
         }
       : undefined,
     interrupted,
+    queued: active && activity?.queued === true,
     latestRender: renders[0],
     previousRenders: renders.slice(1),
     lastRenderError: failedAfter?.error,
@@ -504,6 +511,7 @@ export function buildCampaignView({
       actual,
       pendingFutureBrl,
       projectedBrl: roundBrl(actual.totalBrl + pendingFutureBrl),
+      ...(campaignActual.entryCount > 0 && !campaignActual.includesSimulated ? { actualByCategoryBrl: { ...campaignActual.byCategoryBrl } } : {}),
       containsPlaceholderPrices: pendingJobs.some((j) => j.estimate?.containsPlaceholderPrices),
     },
   };
