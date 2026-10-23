@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import type { ReactNode } from "react";
 import { newProductId } from "@/application/campaign-actions";
 import { formInputFromRequest, type CampaignFormInput } from "@/application/campaign-form";
 import { imagePreviewUrl, type ImageView } from "@/application/campaign-view";
@@ -8,6 +7,7 @@ import type { CreditsResult } from "@/application/credits";
 import { CampaignWizard } from "@/components/create/campaign-wizard";
 import { CreateFlowScreen } from "@/components/create/create-flow-screen";
 import { ReadinessPanel } from "@/components/readiness-panel";
+import { LegacyIsland } from "@/components/shell/legacy-island";
 import { DEFAULT_SPEAKER_PROFILE_ID, SPEAKER_PROFILES } from "@/config/voices";
 import { getPresetSummaries, getPublicConfig, getRuntime } from "@/server/runtime";
 import { LocalOnly, ServiceUnavailable } from "@/components/v2/service-unavailable";
@@ -45,15 +45,6 @@ async function CinematicCreate({ search }: { search: Search }) {
       credits={credits.configured ? { perBrl: credits.creditsPerBrl, remaining: credits.remaining } : null}
       planningAvailable={data.value.config.planningAvailable}
     />
-  );
-}
-
-/** Wizard técnico (modo avançado / "Planejar de novo"): continua na ilha clara. */
-function LegacyIsland({ children }: { children: ReactNode }) {
-  return (
-    <div className="px-2 pt-2 sm:px-3 sm:pt-3">
-      <div data-surface="legacy" className="theme-light overflow-x-clip rounded-2xl ring-1 ring-white/[0.06]">{children}</div>
-    </div>
   );
 }
 

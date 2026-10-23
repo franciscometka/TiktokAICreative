@@ -19,7 +19,9 @@ import { getPublicConfig, getRuntime } from "@/server/runtime";
 import { ReadinessPanel } from "@/components/readiness-panel";
 import { SimpleVideoWorkspace } from "@/components/campaign/simple-video-workspace";
 import { buildProjectV2View } from "@/application/project-v2-view";
-import { ProjectV2 } from "@/components/v2/project-v2";
+import { generationSource } from "@/application/generation-view";
+import { GenerationProject } from "@/components/generation/generation-project";
+import { LegacyIsland } from "@/components/shell/legacy-island";
 import { runtimeMode } from "@/server/session";
 import { CloudProjectPage } from "./cloud-project";
 
@@ -58,7 +60,8 @@ export default async function CampaignPage({ params, searchParams }: { params: P
 
   if (!result.ok) {
     return (
-      <main className="theme-light mx-auto max-w-3xl px-4 py-10 sm:px-6">
+      <LegacyIsland>
+      <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
         <Notice tone={result.error.code === "corrupted" ? "red" : "neutral"} title={result.error.title}>
           {result.error.message}
         </Notice>
@@ -66,27 +69,30 @@ export default async function CampaignPage({ params, searchParams }: { params: P
           Ver campanhas
         </Link>
       </main>
+      </LegacyIsland>
     );
   }
 
   const view = result.value;
   // Lote 6: projetos da UX V2 abrem na tela simples; "Detalhes técnicos" (?view=advanced) mostra tudo.
-  // Projetos antigos (sem uxVersion) continuam na tela completa de sempre.
+  // Projetos antigos (sem uxVersion) continuam na tela completa de sempre (ilha clara).
+  // L8.5: a tela simples é a experiência de geração Cinematic (mesmo polling de 3s, mesmas ações).
   if (view.uxVersion === 2 && viewMode !== "advanced") {
     const v2 = buildProjectV2View(view);
     const busy = v2.phase === "planning" || v2.phase === "generating";
     return (
-      <main className="mx-auto max-w-5xl px-4 py-8 sm:px-8 sm:py-12">
+      <>
         {busy && <AutoRefresh intervalMs={3_000} />}
-        <ProjectV2 view={v2} campaignId={view.id} />
-      </main>
+        <GenerationProject source={generationSource(view, v2)} campaignId={view.id} />
+      </>
     );
   }
   const planned = view.state === "planned";
   const created = new Date(view.createdAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 
   return (
-    <main className="theme-light mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
+    <LegacyIsland>
+    <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
       <nav className="text-sm text-zinc-500" aria-label="Navegação">
         <Link href={view.uxVersion === 2 ? `/campaigns/${view.id}` : "/projects"} className="hover:text-zinc-900">
           {view.uxVersion === 2 ? "← Voltar à visão simples" : "Projetos"}
@@ -252,5 +258,6 @@ export default async function CampaignPage({ params, searchParams }: { params: P
         </details>
       )}
     </main>
+    </LegacyIsland>
   );
 }

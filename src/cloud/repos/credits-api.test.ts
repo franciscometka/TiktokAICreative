@@ -43,7 +43,7 @@ describe("GET /v1/credits", () => {
     expect(other.used).toBe(4000);
 
     const summary = await h.call("GET", "/v1/credits?summary=1");
-    expect(Object.keys(summary.json.value).sort()).toEqual(["allowance", "estimatedVideos", "remaining", "state"]);
+    expect(Object.keys(summary.json.value).sort()).toEqual(["allowance", "creditsPerBrl", "estimatedVideos", "remaining", "state"]);
     expect(summary.json.value.remaining).toBe(9163);
   });
 

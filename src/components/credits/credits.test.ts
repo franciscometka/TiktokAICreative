@@ -15,7 +15,7 @@ const entry = (campaignId: string, category: CostCategory, costBrl: number, crea
   ({ kind: "actual", id: `${campaignId}-${category}-${createdAt}`, campaignId, jobId: null, creativeId: null, sceneId: null, attemptId: null, llmCallId: null, operation: "generate", category, description: "x", provider: "p", model: "m", unit: "request", quantity: 1, unitPriceUsd: 0, costUsd: 0, exchangeRate: 5, costBrl, simulated: false, createdAt }) as unknown as GenerationCost;
 const estimate = { duration: 30 as const, quality: "high" as const, clips: 4, totalBrl: 22.72, lines: [], provisional: false };
 const view = (entries: GenerationCost[]): CreditsView => buildCreditsView({ config, entries, estimates: [estimate], now: NOW, projects: [{ campaignId: "c1", name: "Secador Taiff", targetSeconds: 30, videoCompletedAt: "2026-10-22T12:45:00Z", active: false }] });
-const summary = (remaining: number, state: CreditsSummary["state"]): CreditsSummary => ({ remaining, allowance: 10_000, state, estimatedVideos: { seconds: 30, count: Math.floor(remaining / 2272), creditsPerVideo: 2272, basis: "estimate" } });
+const summary = (remaining: number, state: CreditsSummary["state"]): CreditsSummary => ({ creditsPerBrl: 100, remaining, allowance: 10_000, state, estimatedVideos: { seconds: 30, count: Math.floor(remaining / 2272), creditsPerVideo: 2272, basis: "estimate" } });
 
 describe("badge e painel do shell", () => {
   it("saldo real com link para Créditos e tooltip com franquia e vídeos", () => {

@@ -192,6 +192,8 @@ export async function loadCreditsView(deps: Pick<AppDeps, "service">, config: Cr
 
 /** Resumo leve para sidebar/topbar. */
 export interface CreditsSummary {
+  /** L8.5: fator de conversão (a tela do projeto converte custo real/estimado sem outra consulta). */
+  creditsPerBrl: number;
   remaining: number;
   allowance: number;
   state: CreditsState;
@@ -207,5 +209,5 @@ export function videosLabel(summary: Pick<CreditsSummary, "estimatedVideos">): s
 
 export function creditsSummary(view: CreditsResult): CreditsSummary | null {
   if (!view.configured) return null;
-  return { remaining: view.remaining, allowance: view.allowance, state: view.state, estimatedVideos: view.estimatedVideos };
+  return { creditsPerBrl: view.creditsPerBrl, remaining: view.remaining, allowance: view.allowance, state: view.state, estimatedVideos: view.estimatedVideos };
 }

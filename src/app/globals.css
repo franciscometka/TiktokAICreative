@@ -67,6 +67,8 @@
   --animate-indeterminate: indeterminate 1.4s var(--ease-cf) infinite;
   --animate-spark: spark 2.4s ease-in-out infinite;
   --animate-ping-soft: ping-soft 2s var(--ease-cf) infinite;
+  /* L8.5: check desenhado (etapa concluída) — roda só quando o elemento monta/muda. */
+  --animate-draw: draw var(--dur-emph) var(--ease-cf) both;
 
   @keyframes fade-in {
     from { opacity: 0; }
@@ -97,6 +99,10 @@
   @keyframes spark {
     0%, 100% { opacity: 1; transform: scale(1) rotate(0deg); }
     50% { opacity: 0.55; transform: scale(0.86) rotate(45deg); }
+  }
+  @keyframes draw {
+    from { stroke-dashoffset: 24; }
+    to { stroke-dashoffset: 0; }
   }
   @keyframes ping-soft {
     0% { opacity: 0.55; transform: scale(1); }

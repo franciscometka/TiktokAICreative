@@ -12,6 +12,7 @@ import type { CreativePlan, VisualSource } from "@/domain/creative";
 import type { Campaign, GenerationJob, JobStatus, StyleSelection } from "@/domain/pipeline";
 import type { RenderRecord } from "@/domain/render";
 import { activeAttempt, mediaComplete } from "@/pipeline/guards";
+import { paidOperationInFlight } from "@/pipeline/paid-operation";
 import type { CreativeReview } from "@/domain/plan-evaluation";
 import type { Range } from "@/domain/quality";
 import { STORED_IMAGE_NAME } from "@/domain/upload";
@@ -122,7 +123,9 @@ export interface JobActivity {
 
 export interface CreativeView {
   /** Lote 6: autorização única do job (ativa/pausada/concluída) — a UX V2 decide a próxima ação. */
-  authorization?: { status: "active" | "paused" | "completed"; pausedReason?: string };
+  authorization?: { status: "active" | "paused" | "completed"; pausedReason?: string; /** L8.5: estimativa aprovada (BRL) e custo real já existente na aprovação. */ estimatedBrl?: number; baselineActualBrl?: number };
+  /** L8.5: operação PAGA sem confirmação no documento (mesma regra da retomada do worker). Só leitura. */
+  uncertainPaidOperation?: string;
   /** Lote 6: estratégia de voz decidida (Voice Lock ou fala nativa) e o motivo. */
   voiceLock?: { strategyLabel: string; reason: string; available: boolean };
   /** Lote 6: avatar/revisão usados pelo job. */
@@ -353,7 +356,8 @@ function creativeView(
       productPreviewUrl: job?.ugc ? imagePreviewUrl(campaign.request.product.id, job.ugc.product.imageId) ?? null : null,
     }),
     offline: campaign.executionMode === "offline",
-    ...(job?.jobAuthorization ? { authorization: { status: job.jobAuthorization.status, ...(job.jobAuthorization.pausedReason ? { pausedReason: job.jobAuthorization.pausedReason } : {}) } } : {}),
+    ...(job?.jobAuthorization ? { authorization: { status: job.jobAuthorization.status, ...(job.jobAuthorization.pausedReason ? { pausedReason: job.jobAuthorization.pausedReason } : {}), estimatedBrl: job.jobAuthorization.estimatedBrl, baselineActualBrl: job.jobAuthorization.baselineActualBrl } } : {}),
+    ...(job && interrupted && paidOperationInFlight(job) ? { uncertainPaidOperation: paidOperationInFlight(job) } : {}),
     ...(job?.voiceLock ? { voiceLock: { strategyLabel: job.voiceLock.strategy === "locked_voice" ? "Voice Lock (voz fixa do avatar)" : "Voz do próprio vídeo", reason: job.voiceLock.reason, available: job.voiceLock.available } } : {}),
     ...(job?.avatar ? { avatar: job.avatar } : {}),
     ...(creative.masterScript ? { masterScript: { text: creative.masterScript.text, wordCount: creative.masterScript.wordCount, segments: creative.masterScript.segments.length, tone: creative.masterScript.persona.tone, warnings: creative.masterScript.warnings } } : {}),
