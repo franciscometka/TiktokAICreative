@@ -1,14 +1,15 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import { newProductId } from "@/application/campaign-actions";
 import { formInputFromRequest, type CampaignFormInput } from "@/application/campaign-form";
 import { imagePreviewUrl, type ImageView } from "@/application/campaign-view";
+import { initialCreateState } from "@/application/create-flow";
+import type { CreditsResult } from "@/application/credits";
 import { CampaignWizard } from "@/components/create/campaign-wizard";
+import { CreateFlowScreen } from "@/components/create/create-flow-screen";
 import { ReadinessPanel } from "@/components/readiness-panel";
 import { DEFAULT_SPEAKER_PROFILE_ID, SPEAKER_PROFILES } from "@/config/voices";
-import { getPresetSummaries, getPublicConfig, getRuntime, getV2Estimates } from "@/server/runtime";
-import { listAvatarViews } from "@/application/avatar-actions";
-import { CreateVideo } from "@/components/v2/create-video";
-import { PageHeader } from "@/components/v2/ui";
+import { getPresetSummaries, getPublicConfig, getRuntime } from "@/server/runtime";
 import { LocalOnly, ServiceUnavailable } from "@/components/v2/service-unavailable";
 import { getBackend, loadOr } from "@/server/backend";
 import { runtimeMode } from "@/server/session";
@@ -20,41 +21,59 @@ function toInput(n: number): string {
   return n.toFixed(2).replace(".", ",");
 }
 
-export default async function CreatePage({ searchParams }: { searchParams: Promise<{ from?: string; edit?: string; mode?: string }> }) {
-  const { from, edit, mode } = await searchParams;
+type Search = Record<string, string | string[] | undefined>;
+const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+
+/**
+ * L8.4 — Create Cinematic em 4 passos (local e cloud, pelos mesmos view models). O rascunho vindo
+ * da Home (foto, ideia, preset) e qualquer parâmetro da URL são revalidados em initialCreateState.
+ */
+async function CinematicCreate({ search }: { search: Search }) {
+  const backend = await getBackend("/create");
+  const [data, credits] = await Promise.all([
+    loadOr(() => backend.bootstrap(0)),
+    backend.credits().catch((): CreditsResult => ({ configured: false })),
+  ]);
+  if (!data.ok) return <ServiceUnavailable />;
+  const avatars = data.value.avatars.filter((a) => a.active);
+  const initial = initialCreateState({ newProductId: newProductId(), search, avatarIds: avatars.map((a) => a.id) });
+  return (
+    <CreateFlowScreen
+      initial={initial}
+      avatars={avatars.map((a) => ({ id: a.id, name: a.name, imageUrl: a.imageUrl, tags: a.tags, defaultForTags: a.defaultForTags, preferredProductCategories: a.preferredProductCategories, voiceName: a.voiceName, revision: a.revision, updatedAt: a.updatedAt }))}
+      estimates={data.value.estimates}
+      credits={credits.configured ? { perBrl: credits.creditsPerBrl, remaining: credits.remaining } : null}
+      planningAvailable={data.value.config.planningAvailable}
+    />
+  );
+}
+
+/** Wizard técnico (modo avançado / "Planejar de novo"): continua na ilha clara. */
+function LegacyIsland({ children }: { children: ReactNode }) {
+  return (
+    <div className="px-2 pt-2 sm:px-3 sm:pt-3">
+      <div data-surface="legacy" className="theme-light overflow-x-clip rounded-2xl ring-1 ring-white/[0.06]">{children}</div>
+    </div>
+  );
+}
+
+export default async function CreatePage({ searchParams }: { searchParams: Promise<Search> }) {
+  const search = await searchParams;
+  const from = one(search.from);
+  const edit = one(search.edit);
+  const mode = one(search.mode);
   if (runtimeMode() === "cloud") {
-    // Lote 7: Create V2 pela Render API; o wizard técnico antigo fica no modo local.
+    // Lote 7: o wizard técnico antigo fica no modo local.
     if (from || mode === "advanced") return <LocalOnly title="Criação avançada disponível no modo local" />;
-    const backend = await getBackend("/create");
-    const data = await loadOr(() => backend.bootstrap(0));
-    if (!data.ok) return <ServiceUnavailable />;
-    return (
-      <main className="mx-auto max-w-5xl px-4 py-8 sm:px-8 sm:py-12">
-        <PageHeader title="Criar vídeo" description="Foto + ideia + avatar + duração. A gente cuida do roteiro, da apresentadora e da edição." />
-        <div className="mt-8">
-          <CreateVideo productId={newProductId()} avatars={data.value.avatars.filter((a) => a.active).map((a) => ({ id: a.id, name: a.name, imageUrl: a.imageUrl, tags: a.tags }))}
-            estimates={data.value.estimates} planningAvailable={data.value.config.planningAvailable} />
-        </div>
-      </main>
-    );
+    return <CinematicCreate search={search} />;
   }
-  const publicConfig = getPublicConfig();
-  const { service } = getRuntime().deps;
 
   // Lote 6: Create V2 é o padrão. "Planejar de novo" (from) e a criação avançada (mode=advanced)
   // continuam no wizard completo, com todas as opções técnicas.
-  if (!from && mode !== "advanced") {
-    const avatars = await listAvatarViews(getRuntime().deps);
-    return (
-      <main className="mx-auto max-w-5xl px-4 py-8 sm:px-8 sm:py-12">
-        <PageHeader title="Criar vídeo" description="Foto + ideia + avatar + duração. A gente cuida do roteiro, da apresentadora e da edição." />
-        <div className="mt-8">
-          <CreateVideo productId={newProductId()} avatars={avatars.filter((a) => a.active).map((a) => ({ id: a.id, name: a.name, imageUrl: a.imageUrl, tags: a.tags }))}
-            estimates={getV2Estimates()} planningAvailable={publicConfig.planningAvailable} />
-        </div>
-      </main>
-    );
-  }
+  if (!from && mode !== "advanced") return <CinematicCreate search={search} />;
+
+  const publicConfig = getPublicConfig();
+  const { service } = getRuntime().deps;
 
   let initial: CampaignFormInput = {
     simpleFlow: true,
@@ -105,7 +124,8 @@ export default async function CreatePage({ searchParams }: { searchParams: Promi
   }
 
   return (
-    <main className="theme-light mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
+    <LegacyIsland>
+    <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
       <div className="mb-8">
         <p className="text-xs font-semibold tracking-wider text-zinc-500 uppercase">Nova campanha</p>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900">
@@ -129,5 +149,6 @@ export default async function CreatePage({ searchParams }: { searchParams: Promi
         allowMocks={publicConfig.allowMocks}
       />
     </main>
+    </LegacyIsland>
   );
 }

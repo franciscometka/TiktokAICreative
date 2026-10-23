@@ -444,8 +444,11 @@ export function buildCampaignView({
   const pendingFutureBrl = roundBrl(pendingJobs.reduce((acc, j) => acc + (j.estimate?.estimatedAdditionalBrl ?? 0), 0));
   const actual = presentActualCosts(campaignActual);
 
+  // L8.4: rascunho que NUNCA iniciou o planejamento (aguarda a aprovação explícita) não teve
+  // tentativa nem chamada paga: não é "interrompido… pode ter sido cobrado".
+  const neverStarted = campaign.status === "draft" && campaign.planningRuns === undefined && !campaign.planningStartedAt;
   let error: CampaignView["error"];
-  if (state === "interrupted") error = { ...planningUserError("interrupted"), detail: undefined };
+  if (state === "interrupted" && !neverStarted) error = { ...planningUserError("interrupted"), detail: undefined };
   else if (state === "failed") {
     error = { ...planningUserError(campaign.errorCode ?? "unknown"), detail: campaign.error };
   }
@@ -485,7 +488,8 @@ export function buildCampaignView({
     budget: request.budget,
     planning: {
       startedAt: campaign.planningStartedAt,
-      runs: campaign.planningRuns ?? 1,
+      // Campanhas antigas (sem o contador) que já planejaram contam 1; nunca iniciado = 0.
+      runs: campaign.planningRuns ?? (neverStarted ? 0 : 1),
       simulated: campaign.plannerId === "mock",
     },
     error,

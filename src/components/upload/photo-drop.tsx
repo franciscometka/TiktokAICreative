@@ -39,7 +39,7 @@ export function PhotoDropView({ state, images, max, message, size = "panel", dis
   return (
     <div data-photo-state={state} className={cx(tile ? "w-full" : "w-full max-w-xs")} {...drag}>
       {main ? (
-        <figure className={cx("relative overflow-hidden rounded-2xl bg-surface-sunken ring-1 ring-line", tile ? "aspect-square" : "aspect-[4/5]")}>
+        <figure className={cx("relative overflow-hidden rounded-2xl bg-surface-sunken ring-1 ring-line", tile ? "aspect-square" : "aspect-[4/3] sm:aspect-[4/5]")}>
           {/* eslint-disable-next-line @next/next/no-img-element -- imagem do upload servida por rota com IDs */}
           <img key={main.id} src={main.previewUrl} alt="Foto do produto" className="size-full animate-reveal object-cover" />
           <span className="absolute bottom-2 left-2 inline-flex h-6 animate-fade-in items-center gap-1 rounded-full bg-canvas/80 px-2 text-xs font-medium text-success ring-1 ring-success/30 backdrop-blur-sm">
@@ -56,7 +56,7 @@ export function PhotoDropView({ state, images, max, message, size = "panel", dis
         <button type="button" onClick={onPick} disabled={disabled || state === "uploading"}
           className={cx(
             "group relative grid w-full place-items-center overflow-hidden rounded-2xl border border-dashed text-center", interactive, focusRing,
-            tile ? "aspect-square" : "aspect-[4/5]",
+            tile ? "aspect-square" : "aspect-[4/3] sm:aspect-[4/5]",
             state === "drag" ? "border-primary-light bg-primary-soft" : state === "error" ? "border-danger/60 bg-danger-soft/40" : "border-line-strong bg-surface-sunken hover:border-primary-light/60 hover:bg-surface",
             "disabled:cursor-wait",
           )}>

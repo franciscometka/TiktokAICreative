@@ -206,7 +206,7 @@ A UX continua com os mesmos quatro passos: Preparando roteiro, Preparando aprese
 - **Fora da resposta:** provider, modelo, prompt e ids de entrada/job.
 - **"≈ N vídeos de 30s":**
   - usa a média real dos últimos 10 vídeos de 30s, quando há pelo menos 3;
-  - senão, usa a estimativa atual de 30s (Balanceado), se não for provisória;
+  - senão, usa a estimativa atual de 30s (Equilibrado), se não for provisória;
   - senão, não aparece.
 
 ## Limites conhecidos

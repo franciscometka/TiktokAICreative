@@ -109,6 +109,30 @@ describe("Projeto V2 — geração automática com progresso simples (Lote 6)", 
     expect(full.creatives[0]!.voiceLock?.strategyLabel).toBe("Voz do próprio vídeo");
   });
 
+  it("regressão L8.4: projeto recém-criado que NUNCA iniciou o planejamento = \"Tudo pronto para começar\", não \"interrompido… pode ter sido cobrado\"", async () => {
+    // Modo REAL (sem mocks): o roteiro só roda depois da aprovação explícita. Nenhuma chamada paga
+    // acontece aqui — o planner do harness é o mock e nada é aprovado.
+    const h = await ugcHarness();
+    const service = h.build({ allowMocks: false });
+    const { uploads } = await tempUploads();
+    const deps = { service, uploads, avatars: new InMemoryAvatarLibraryStore(), rendersDir: h.config.rendersDir, audioDir: h.config.audioDir, defaultBudget: budget };
+    const photo = await uploads.save("prod_new", { bytes: PNG_BYTES, size: PNG_BYTES.length, declaredType: "image/png" });
+    const started = await startVideoV2(deps, { productId: "prod_new", name: "Secador", imageIds: [photo.id], idea: "Natural no quarto", duration: 30 });
+    if (!started.ok) throw new Error(started.error.message);
+    const campaign = await service.getCampaign(started.value.campaignId);
+    expect(campaign.status).toBe("draft");
+    expect(campaign.planningRuns).toBeUndefined();
+    const full = await getCampaignView(deps, started.value.campaignId);
+    if (!full.ok) throw new Error(full.error.message);
+    expect(full.value.planning.runs).toBe(0);
+    expect(full.value.error).toBeUndefined();
+    const v2 = buildProjectV2View(full.value);
+    expect(v2.phase).toBe("planning_approval");
+    expect(v2.headline).toBe("Tudo pronto para começar.");
+    expect(v2.quoteToken).toBe(full.value.planningQuote!.token);
+    expect(JSON.stringify(full.value)).not.toMatch(/pode ter sido cobrad|interrompid/i);
+  });
+
   it("Projetos: cards com nome, avatar, duração e status; filtros simples", async () => {
     const { deps } = await v2Project(true);
     const cards = await listProjectCards(deps);
