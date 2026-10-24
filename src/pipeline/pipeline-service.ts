@@ -16,6 +16,7 @@ import type { UgcAssetStore } from "@/storage/ugc-asset-store";
 import { generateUgcReference, generateUgcScene, identityBlockReason, initialUgcState, UgcCostChangedError, UgcFidelityError, UgcIdentityUnsupportedError, UgcPendingError, type UgcFidelityReview, type UgcFlowDeps } from "./ugc-flow";
 import { decideFidelity, initialFidelity, missingSpecConfirmations } from "@/domain/fidelity";
 import { generatePresenter, presenterPreview, PresenterPendingError, type PresenterFlowDeps } from "./presenter-flow";
+import { paidOperationInFlight } from "./paid-operation";
 import type { PresenterProvider } from "@/providers/presenter/presenter-provider";
 import { readFile } from "node:fs/promises";
 import type { AvatarPreset } from "@/domain/presenter";
@@ -515,6 +516,24 @@ export class PipelineService {
       { id: "approval", label: "Aprovação explícita", ok: true, detail: "A confirmação registra cotação, unidade, provider e modelo; autoriza somente uma criação." },
     ];
     return { awaitingReview, regenerate, budgetDecision, stage, mode, unit, token: this.fingerprint({ job, stage, mode, unit, estimatedBrl, model, provider, budgetDecision, regenerate }), provider, model, estimatedBrl, actualBrl: entries.filter(e => !e.simulated).reduce((a,e) => a+e.costBrl,0), simulatedBrl: entries.filter(e => e.simulated).reduce((a,e) => a+e.costBrl,0), ready: !blocked && !done, blocked, done, state: this.isJobActive(jobId) && job.currentStage === stage ? "Em andamento" : nativeSkip ? "Fala nativa do vídeo UGC" : done ? "Concluído" : awaitingReview ? "Aguardando aprovação visual" : blocked ? "Bloqueado" : "Aguardando ação explícita", preflight };
+  }
+
+  /** Nova decisão de gasto para recuperar UMA cena cuja tentativa terminal falhou. */
+  async quoteFailedSceneRetry(jobId: string, sceneId: string): Promise<StageQuote> {
+    const { job, creative } = await this.load(jobId);
+    const scene = creative.scenes.find(item => item.id === sceneId && item.requiresGeneratedVideo);
+    const state = job.scenes.find(item => item.sceneId === sceneId);
+    if (!scene || !state) throw new Error(`A cena ${sceneId} não pertence a este job.`);
+    const quote = await this.quoteStage(jobId, this.sceneStage(scene), false, true, sceneId);
+    const latest = state.attempts.at(-1);
+    if (activeAttempt(state.attempts) || !latest || latest.status !== "failed") {
+      return { ...quote, ready: false, blocked: "A cena não está com falha terminal.", state: "Bloqueado" };
+    }
+    const uncertain = paidOperationInFlight(job);
+    if (uncertain) {
+      return { ...quote, ready: false, blocked: `Geração pausada por segurança: ${uncertain}.`, state: "Bloqueado" };
+    }
+    return quote;
   }
 
   /** Cotação única do fluxo simples. Conservadora: qualquer etapa REAL reserva o futuro inteiro da estimativa. */

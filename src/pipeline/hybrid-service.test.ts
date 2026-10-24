@@ -300,6 +300,35 @@ describe("execução híbrida por etapa — somente transportes falsos", () => {
     expect(after.scenes.find(scene => scene.sceneId === untouched.id)!.attempts).toHaveLength(before.scenes.find(scene => scene.sceneId === untouched.id)!.attempts.length);
     expect(after.scenes.find(scene => scene.sceneId === target.id)!.attempts.filter(attempt => attempt.active)).toHaveLength(1);
   });
+  it("cotação de retry da cena falha existe só para a tentativa terminal correta", async () => {
+    const f = await setup();
+    const id = f.campaign.jobIds[0]!;
+    const jobQuote = await f.service.quoteJob(id);
+    expect((await (await f.service.authorizeAndRunJob(id, jobQuote.token)).completion).kind).toBe("COMPLETED");
+    const campaign = await f.service.getCampaign(f.campaign.id);
+    const target = campaign.plan!.creatives[0]!.scenes.find(scene => scene.requiresGeneratedVideo)!;
+    const store = new FilePipelineStore(f.config.dataDir);
+    const completed = await store.getJob(id);
+    const failedAttemptId = completed.scenes.find(scene => scene.sceneId === target.id)!.attempts.at(-1)!.id;
+    await store.saveJob({
+      ...completed,
+      status: "failed",
+      error: "Falha terminal controlada",
+      scenes: completed.scenes.map(scene => scene.sceneId === target.id
+        ? { ...scene, attempts: scene.attempts.map(attempt => attempt.id === failedAttemptId ? { ...attempt, status: "failed" as const, active: false, error: "Falha terminal controlada" } : attempt) }
+        : scene),
+    });
+
+    const quote = await f.service.quoteFailedSceneRetry(id, target.id);
+    expect(quote).toMatchObject({ ready: true, unit: target.id, regenerate: true });
+
+    const readyScene = campaign.plan!.creatives[0]!.scenes.find(scene => scene.requiresGeneratedVideo && scene.id !== target.id)!;
+    const readyQuote = await f.service.quoteFailedSceneRetry(id, readyScene.id);
+    expect(readyQuote.ready).toBe(false);
+    expect(readyQuote.blocked).toMatch(/não está com falha terminal/i);
+
+    await expect(f.service.quoteFailedSceneRetry(id, "scene_from_other_campaign")).rejects.toThrow(/não pertence/i);
+  });
   it("autoriza exceder só até o valor mostrado e somente com permissão da política", async () => {
     const f = await setup({ narration: "real" }, false); const id = f.campaign.jobIds[0]!;
     const store = new FilePipelineStore(f.config.dataDir); const campaign = await store.getCampaign(f.campaign.id);
