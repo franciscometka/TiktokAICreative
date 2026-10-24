@@ -15,7 +15,7 @@ import { SceneTimeline } from "./scene-timeline";
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
 const noop = async () => ({ ok: true as const });
 const handlers = { startPlanning: noop, authorize: noop, approve: noop, regenerate: noop, retryScene: noop, retryPlanning: noop, estimateChange: async () => ({ ok: false as const, error: { message: "x" } }), refresh: () => undefined };
-const shell = (worker: ShellStatus["worker"]["state"] = "online", mode: ShellStatus["mode"] = "cloud"): ShellStatus => ({ mode, worker: { state: worker, lastSeenAt: null }, user: null, credits: { creditsPerBrl: 100, remaining: 8000, allowance: 10_000, state: "normal", estimatedVideos: null } });
+const shell = (worker: ShellStatus["worker"]["state"] = "online", mode: ShellStatus["mode"] = "cloud"): ShellStatus => ({ mode, worker: { state: worker, lastSeenAt: null }, user: null, credits: { creditsPerBrl: 100, periodStart: "2026-10-01T03:00:00.000Z", remaining: 8000, allowance: 10_000, state: "normal", estimatedVideos: null } });
 const screen = (key: keyof typeof GENERATION_STATES, status: ShellStatus | null = shell()) =>
   renderToStaticMarkup(createElement(ShellStatusContext.Provider, { value: { status, now: new Date(0) } },
     createElement(GenerationScreen, { source: GENERATION_STATES[key]!, campaignId: "c1", handlers, advancedHref: "/campaigns/c1?view=advanced" })));

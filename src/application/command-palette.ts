@@ -57,6 +57,27 @@ export function moveActive(active: number, count: number, key: "ArrowDown" | "Ar
   return (active + (key === "ArrowDown" ? 1 : -1) + count) % count;
 }
 
+/**
+ * L8.8.1 — seleção guardada pelo ID do item (não pelo índice): se os resultados mudarem e o item
+ * sumir, a seleção EFETIVA cai no primeiro item; o destaque e o Enter usam sempre este mesmo valor.
+ */
+export function resolveActive(activeId: string | null, items: readonly PaletteItem[]): number {
+  if (items.length === 0) return -1;
+  const index = activeId ? items.findIndex((i) => i.id === activeId) : -1;
+  return index >= 0 ? index : 0;
+}
+
+/** Campo editável (input, textarea, select, contenteditable): o atalho global não rouba o Ctrl/⌘K dele. */
+export function isEditableTarget(target: unknown): boolean {
+  if (!target || typeof target !== "object") return false;
+  const el = target as { tagName?: unknown; isContentEditable?: unknown; closest?: (selector: string) => unknown };
+  // O campo da própria palette trata o atalho (fecha).
+  if (typeof el.closest === "function" && el.closest("[data-palette]")) return false;
+  if (el.isContentEditable === true) return true;
+  const tag = typeof el.tagName === "string" ? el.tagName.toUpperCase() : "";
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+}
+
 /** Ctrl+K (Windows/Linux) ou ⌘K (macOS). Sem outros atalhos neste lote. */
 export function isPaletteShortcut(e: { key: string; ctrlKey: boolean; metaKey: boolean; altKey?: boolean; shiftKey?: boolean }, mac: boolean): boolean {
   return e.key.toLowerCase() === "k" && (mac ? e.metaKey : e.ctrlKey) && !e.altKey && !e.shiftKey;

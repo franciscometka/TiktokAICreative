@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, useTransition, type ReactNode } from "react";
 import { logoutAction } from "@/app/auth-actions";
-import { isPaletteShortcut } from "@/application/command-palette";
+import { isEditableTarget, isPaletteShortcut } from "@/application/command-palette";
 import { cx, focusRing, Sheet, ToastProvider } from "../ds";
 import { CommandPalette } from "../shell/command-palette";
 import { NotificationCenter, NotificationsContext } from "../shell/notification-center";
@@ -68,6 +68,8 @@ function ShellFrame({ pathname, children }: { pathname: string; children: ReactN
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!isPaletteShortcut(e, isMacPlatform())) return;
+      // L8.8.1: num campo editável o Ctrl/⌘K é do campo (o campo da palette é exceção e fecha).
+      if (isEditableTarget(e.target)) return;
       e.preventDefault();
       setPaletteOpen((open) => !open);
     };

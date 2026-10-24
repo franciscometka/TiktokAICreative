@@ -5,6 +5,7 @@ import {
 } from "@/costs/credits";
 import type { AppDeps } from "./campaign-actions";
 import type { V2EstimateView } from "./create-v2";
+import { creditProjects, loadProjectFacts } from "./shell-summary";
 
 /**
  * L8.2 — visão de créditos para a tela Créditos, a sidebar e a topbar. DERIVADA do ledger
@@ -169,31 +170,18 @@ function estimatedVideos(input: { config: CreditsConfig; projects: readonly Proj
 export async function loadCreditsView(deps: Pick<AppDeps, "service">, config: CreditsConfig | null, estimates: readonly V2EstimateView[], now = new Date()): Promise<CreditsResult> {
   if (!config) return { configured: false };
   const { service } = deps;
-  const entries = await service.listCostEntries();
-  const projects: ProjectCreditInfo[] = [];
-  for (const id of await service.listCampaignIds()) {
-    try {
-      const campaign = await service.getCampaign(id);
-      const jobs = await service.listJobs(id);
-      const done = jobs.flatMap((j) => j.renders.filter((r) => r.status === "completed" && !r.isMock).map((r) => r.finishedAt ?? r.startedAt)).sort().at(-1) ?? null;
-      projects.push({
-        campaignId: id,
-        name: campaign.request.projectName || campaign.request.product.name,
-        targetSeconds: campaign.request.targetDurationSeconds ?? null,
-        videoCompletedAt: done,
-        active: jobs.some((j) => service.isJobActive(j.id)),
-      });
-    } catch {
-      // Projeto ilegível: o custo dele continua contando no uso (vem do ledger), só sem nome.
-    }
-  }
-  return buildCreditsView({ config, entries, projects, estimates, now });
+  // L8.8.1: projetos pelos MESMOS fatos leves do shell (cloud: 1 SQL; sem reler cada documento).
+  // Projeto ilegível fica de fora dos fatos: o custo dele continua contando no uso (vem do ledger).
+  const [entries, facts] = await Promise.all([service.listCostEntries(), loadProjectFacts(service)]);
+  return buildCreditsView({ config, entries, projects: creditProjects(service, facts), estimates, now });
 }
 
 /** Resumo leve para sidebar/topbar. */
 export interface CreditsSummary {
   /** L8.5: fator de conversão (a tela do projeto converte custo real/estimado sem outra consulta). */
   creditsPerBrl: number;
+  /** L8.8.1: início do mês de créditos (identidade dos avisos de saldo, no fuso configurado). */
+  periodStart: string;
   remaining: number;
   allowance: number;
   state: CreditsState;
@@ -209,5 +197,5 @@ export function videosLabel(summary: Pick<CreditsSummary, "estimatedVideos">): s
 
 export function creditsSummary(view: CreditsResult): CreditsSummary | null {
   if (!view.configured) return null;
-  return { creditsPerBrl: view.creditsPerBrl, remaining: view.remaining, allowance: view.allowance, state: view.state, estimatedVideos: view.estimatedVideos };
+  return { creditsPerBrl: view.creditsPerBrl, periodStart: view.period.start, remaining: view.remaining, allowance: view.allowance, state: view.state, estimatedVideos: view.estimatedVideos };
 }

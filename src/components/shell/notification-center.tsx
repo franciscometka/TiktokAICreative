@@ -3,7 +3,7 @@
 import { AlertTriangle, Bell, CheckCircle2, CheckCheck, Info, XCircle } from "lucide-react";
 import Link from "next/link";
 import { createContext, useContext, type ReactNode } from "react";
-import { notificationTime, unreadCount, type NotificationItem, type NotificationState } from "@/application/notifications";
+import { isSafeInternalHref, notificationTime, unreadCount, type NotificationItem, type NotificationState } from "@/application/notifications";
 import { Button, cx, focusRing, IconButton, interactive, Sheet } from "../ds";
 
 /**
@@ -71,7 +71,7 @@ export function NotificationList({ state, now, onItem, onMarkAll }: { state: Not
                   <span className="shrink-0 text-[11px] text-fg-subtle tabular">{notificationTime(n.at, now)}</span>
                 </span>
                 {n.description ? <span className="mt-0.5 block text-caption text-fg-muted">{n.description}</span> : null}
-                {n.actionLabel && n.href ? <span className="mt-1 block text-caption font-medium text-primary-light">{n.actionLabel} →</span> : null}
+                {n.actionLabel && isSafeInternalHref(n.href) ? <span className="mt-1 block text-caption font-medium text-primary-light">{n.actionLabel} →</span> : null}
               </span>
               {n.read ? <span className="sr-only">Lida</span> : <><span aria-hidden className="mt-1.5 size-2 shrink-0 rounded-full bg-primary-light" /><span className="sr-only">Não lida</span></>}
             </>
@@ -79,7 +79,8 @@ export function NotificationList({ state, now, onItem, onMarkAll }: { state: Not
           const cls = cx("flex w-full items-start gap-3 rounded-xl border p-3 text-left", interactive, focusRing, n.read ? "border-transparent hover:bg-surface-hover" : "border-line bg-surface hover:border-line-strong");
           return (
             <li key={n.key} data-notification={n.kind} data-read={n.read || undefined}>
-              {n.href ? <Link href={n.href} onClick={() => onItem(n.key)} className={cls}>{body}</Link> : <button type="button" onClick={() => onItem(n.key)} className={cls}>{body}</button>}
+              {/* L8.8.1: link persistido só vira <Link> se for rota interna segura. */}
+              {isSafeInternalHref(n.href) ? <Link href={n.href} onClick={() => onItem(n.key)} className={cls}>{body}</Link> : <button type="button" onClick={() => onItem(n.key)} className={cls}>{body}</button>}
             </li>
           );
         })}

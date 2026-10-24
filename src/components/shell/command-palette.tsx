@@ -3,7 +3,7 @@
 import { FolderOpen, Home, LayoutGrid, Search, Settings, UserRound, Video, Zap, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { groupItems, moveActive, paletteItems, type PaletteData, type PaletteItem } from "@/application/command-palette";
+import { groupItems, moveActive, paletteItems, resolveActive, type PaletteData, type PaletteItem } from "@/application/command-palette";
 import { cx, Spark } from "../ds";
 import { Kbd } from "./nav-parts";
 
@@ -69,10 +69,12 @@ export function CommandPalette({ open, onClose, data }: { open: boolean; onClose
   const router = useRouter();
   const ref = useRef<HTMLDialogElement>(null);
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
+  // L8.8.1: seleção pelo ID do item; o índice efetivo (destaque E Enter) sai de resolveActive.
+  const [activeId, setActiveId] = useState<string | null>(null);
   const listId = useId();
   const inputId = useId();
   const items = useMemo(() => paletteItems(query, data), [query, data]);
+  const active = resolveActive(activeId, items);
 
   const opener = useRef<HTMLElement | null>(null);
   useEffect(() => {
@@ -96,12 +98,13 @@ export function CommandPalette({ open, onClose, data }: { open: boolean; onClose
     return () => dialog.removeEventListener("cancel", onCancel);
   }, [onClose]);
 
-  const close = () => { setQuery(""); setActive(0); onClose(); };
+  const close = () => { setQuery(""); setActiveId(null); onClose(); };
   const pick = (item: PaletteItem) => { close(); router.push(item.href); };
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === "ArrowDown" || e.key === "ArrowUp" || ((e.key === "Home" || e.key === "End") && e.ctrlKey)) {
       e.preventDefault();
-      setActive((a) => moveActive(a, items.length, e.key as "ArrowDown"));
+      const next = moveActive(active, items.length, e.key as "ArrowDown");
+      setActiveId(next >= 0 ? items[next]!.id : null);
     } else if (e.key === "Enter") {
       e.preventDefault();
       const item = items[active];
@@ -112,7 +115,7 @@ export function CommandPalette({ open, onClose, data }: { open: boolean; onClose
   return (
     <dialog ref={ref} aria-label="Command Palette" onClick={(e) => { if (e.target === e.currentTarget) close(); }}
       className="cf-overlay m-auto mt-[12vh] w-[calc(100%-2rem)] max-w-xl rounded-2xl border border-line-strong bg-elevated p-0 text-fg shadow-pop open:animate-scale-in max-sm:mt-4">
-      {open ? <PaletteView query={query} onQuery={(q) => { setQuery(q); setActive(0); }} items={items} active={Math.min(active, items.length - 1)} onActive={setActive} onPick={pick} onKeyDown={onKeyDown} listId={listId} inputId={inputId} /> : null}
+      {open ? <PaletteView query={query} onQuery={(q) => { setQuery(q); setActiveId(null); }} items={items} active={active} onActive={(i) => setActiveId(items[i]?.id ?? null)} onPick={pick} onKeyDown={onKeyDown} listId={listId} inputId={inputId} /> : null}
     </dialog>
   );
 }

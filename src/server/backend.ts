@@ -6,6 +6,7 @@ import { buildProjectV2View, listProjectCards, matchesFilter, type ProjectCard, 
 import type { PublicAppConfig } from "@/application/public-config";
 import type { WorkerStatusView } from "@/application/worker-status";
 import { creditsSummary, loadCreditsView, type CreditsResult, type CreditsSummary } from "@/application/credits";
+import { buildShellSummary, type ShellSummary } from "@/application/shell-summary";
 import { loadFrontendEnv } from "@/cloud/config";
 import type { PresetSummary } from "@/costs/preset-summary";
 import { getPresetSummaries, getPublicConfig, getRuntime, getV2Estimates } from "./runtime";
@@ -49,6 +50,8 @@ export interface ReadBackend {
   /** L8.2: créditos derivados do ledger (não configurado = { configured: false }). */
   credits(): Promise<CreditsResult>;
   creditsSummary(): Promise<CreditsSummary | null>;
+  /** L8.8.1: leitura LEVE do shell (projetos resumidos priorizados, avatares, saldo). */
+  shell(): Promise<ShellSummary>;
 }
 
 /** Backend fora do ar: a tela mostra "Serviço temporariamente indisponível." (nada técnico). */
@@ -85,6 +88,7 @@ class LocalBackend implements ReadBackend {
   async worker(): Promise<WorkerStatusView> { return { state: "local", lastSeenAt: null }; }
   credits() { return loadCreditsView(this.deps, getRuntime().config.credits, getV2Estimates()); }
   async creditsSummary() { return creditsSummary(await this.credits()); }
+  shell() { return buildShellSummary(this.deps, getRuntime().config.credits, getV2Estimates()); }
 }
 
 /** Chamada HTTPS à Render API. Erro de rede/5xx de infraestrutura → ServiceUnavailableError. */
@@ -137,6 +141,7 @@ class RemoteBackend implements ReadBackend {
   worker() { return this.read<WorkerStatusView>("/v1/worker"); }
   credits() { return this.read<CreditsResult>("/v1/credits"); }
   creditsSummary() { return this.read<CreditsSummary | null>("/v1/credits?summary=1"); }
+  shell() { return this.read<ShellSummary>("/v1/shell"); }
 }
 
 /** Leitura de página: backend fora do ar vira { ok: false } para a tela "indisponível". */

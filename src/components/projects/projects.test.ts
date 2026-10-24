@@ -13,7 +13,7 @@ import { cardCredits, ProjectLibrary } from "./project-library";
 /** L8.6 — biblioteca de Projetos e Result Studio. */
 
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
-const status: ShellStatus = { mode: "cloud", worker: { state: "online", lastSeenAt: null }, user: null, credits: { creditsPerBrl: 100, remaining: 8000, allowance: 10_000, state: "normal", estimatedVideos: null } };
+const status: ShellStatus = { mode: "cloud", worker: { state: "online", lastSeenAt: null }, user: null, credits: { creditsPerBrl: 100, periodStart: "2026-10-01T03:00:00.000Z", remaining: 8000, allowance: 10_000, state: "normal", estimatedVideos: null } };
 const withShell = (el: ReturnType<typeof createElement>, s: ShellStatus | null = status) => renderToStaticMarkup(createElement(ShellStatusContext.Provider, { value: { status: s, now: new Date(0) } }, el));
 const card = (id: string, over: Partial<ProjectCard> = {}): ProjectCard => ({
   id, name: `Projeto ${id}`, productName: `Produto ${id}`, thumbnailUrl: `/api/uploads/p/${id}.png`, thumbnailKind: "product", avatarName: "Cristina", durationLabel: "30s",

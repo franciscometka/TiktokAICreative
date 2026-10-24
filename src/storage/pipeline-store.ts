@@ -1,3 +1,4 @@
+import type { ProjectFacts } from "@/application/project-facts";
 import { CampaignSchema, GenerationJobSchema, type Campaign, type GenerationJob } from "@/domain/pipeline";
 
 export class NotFoundError extends Error {
@@ -15,6 +16,11 @@ export interface PipelineStore {
   listJobs(campaignId: string): Promise<GenerationJob[]>;
   /** IDs de todas as campanhas (ordem não garantida). */
   listCampaignIds(): Promise<string[]>;
+  /**
+   * L8.8.1 (opcional, só leitura): fatos mínimos de TODOS os projetos numa consulta, sem trazer
+   * documentos. Ausente = o chamador extrai dos documentos (modo local).
+   */
+  listProjectFacts?(): Promise<ProjectFacts[]>;
 }
 
 /** Guarda cópias validadas; leituras devolvem cópias (sem aliasing de objetos mutáveis). */

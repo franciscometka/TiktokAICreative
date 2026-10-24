@@ -1,10 +1,10 @@
 import type { Campaign, GenerationJob } from "@/domain/pipeline";
 import { formatBrl } from "@/lib/money";
 import type { AppDeps } from "./campaign-actions";
-import { campaignState, imagePreviewUrl, type CampaignView, type CreativeView } from "./campaign-view";
+import { imagePreviewUrl, type CampaignView, type CreativeView } from "./campaign-view";
 import { planningErrorDetails } from "./user-errors";
 import { ugcReferenceUrl } from "./ugc-view";
-import { paidOperationInFlight } from "@/pipeline/paid-operation";
+import { projectFactsOf, statusFromFacts } from "./project-facts";
 
 /**
  * Lote 6 — UX V2: a complexidade do pipeline continua existindo, mas a tela principal mostra só
@@ -259,26 +259,9 @@ export interface ProjectFlags {
   jobQueued?: boolean;
 }
 
-const AWAITING_JOB: readonly GenerationJob["status"][] = ["planned", "cost_estimated", "awaiting_approval", "budget_exceeded"];
-
+/** L8.8.1: a regra mora em `statusFromFacts` (a mesma usada pelo shell e pela consulta leve do cloud). */
 export function projectStatus(campaign: Campaign, job: GenerationJob | undefined, flags: ProjectFlags): ProjectStatus {
-  const state = campaignState(campaign, flags.planningActive);
-  if (state === "planning") return flags.planningQueued ? "queued" : "preparing";
-  if (state === "failed" || state === "interrupted") {
-    // Rascunho que nunca iniciou o planejamento: espera a aprovação explícita (não é falha).
-    const neverStarted = campaign.status === "draft" && campaign.planningRuns === undefined && !campaign.planningStartedAt;
-    return neverStarted ? "awaiting_approval" : "failed";
-  }
-  if (!job) return "awaiting_approval";
-  if (flags.jobActive) return flags.jobQueued ? "queued" : "generating";
-  const done = job.renders.findLast((r) => r.status === "completed");
-  if (job.status === "completed" && done) return done.isMock ? "simulated" : "ready";
-  // Em geração sem execução: com operação paga sem confirmação = pausa de segurança; senão, falha.
-  if ((job.status === "generating" || job.status === "rendering") && !job.waitingForStage) return paidOperationInFlight(job) ? "blocked" : "failed";
-  if (job.status === "failed" || job.status === "cancelled" || job.scenes.some((s) => s.attempts.at(-1)?.status === "failed")) return "failed";
-  if (job.waitingForStage || job.jobAuthorization?.status === "paused" || job.status === "audio_review") return "attention";
-  if (AWAITING_JOB.includes(job.status)) return "awaiting_approval";
-  return "attention";
+  return statusFromFacts(projectFactsOf(campaign, job), { planningActive: flags.planningActive, planningQueued: flags.planningQueued === true, jobActive: flags.jobActive, jobQueued: flags.jobQueued === true });
 }
 
 function thumbnail(campaign: Campaign, job: GenerationJob | undefined): Pick<ProjectCard, "thumbnailUrl" | "thumbnailKind"> {

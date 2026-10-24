@@ -1,3 +1,4 @@
+import type { ProjectFacts } from "@/application/project-facts";
 import { createHash } from "node:crypto";
 import { CampaignSchema, GenerationJobSchema, type Campaign, type GenerationJob } from "@/domain/pipeline";
 import { CorruptedDataError } from "@/storage/atomic-file";
@@ -154,6 +155,16 @@ export class PostgresPipelineStore implements PipelineStore {
     return r.rows.map((row) => row.id);
   }
 
+  /**
+   * L8.8.1 — fatos mínimos de todos os projetos do usuário numa ÚNICA consulta. Extrai no banco
+   * (jsonb/jsonpath) só os campos de `ProjectFacts`: sem documento, cenas, mídia ou ledger.
+   * Mesmas regras de `projectFactsOf` (paridade coberta por teste).
+   */
+  async listProjectFacts(): Promise<ProjectFacts[]> {
+    const r = await this.db.query<FactsRow>(PROJECT_FACTS_SQL, [this.userId]);
+    return r.rows.map(factsFromRow);
+  }
+
   /** Worker: marca progresso transitório ("uploading"/"blocked") sem tocar no documento. */
   async markProgress(jobId: string, progress: Extract<ProgressStage, "uploading" | "blocked">, message: string): Promise<void> {
     await this.db.transaction(async (tx) => {
@@ -173,4 +184,64 @@ export class PostgresPipelineStore implements PipelineStore {
       if (r.rowCount > 0) await tx.query("insert into job_events (user_id, campaign_id, job_id, type, stage, message) values ($1, $2, $3, 'progress', $4, $5)", [this.userId, job.campaignId, jobId, progress, `arquivos salvos; ${job.status}`]);
     });
   }
+}
+
+// ---------------------------------------------------------------- L8.8.1: fatos leves (shell/créditos)
+
+/** Mesmas regras de `paidOperationInFlight` em jsonpath (paridade coberta por teste). */
+export const PAID_IN_FLIGHT_PATHS = [
+  `'$.stageIntents[*] ? (@.state == "running")'`,
+  `'$.ugc.references[*] ? ((!exists(@.isMock) || @.isMock == false) && (@.state == "submitting" || @.state == "pending" || @.state == "uncertain"))'`,
+  `'$.ugcVideoOperations[*] ? (@.state != "settled")'`,
+  `'$.presenterTasks[*] ? (@.state == "pending" || @.state == "submitting")'`,
+  `'$.videoTasks[*] ? (@.state == "submitting" || @.state == "pending")'`,
+];
+const PAID_IN_FLIGHT = PAID_IN_FLIGHT_PATHS.map((path) => `jsonb_path_exists(j.document, ${path})`).join(" or ");
+
+export const PROJECT_FACTS_SQL = `
+select c.id, c.status as campaign_status, c.created_at, c.updated_at,
+  coalesce(nullif(c.document->'request'->>'projectName', ''), c.document->'request'->'product'->>'name') as name,
+  (c.document->'request'->>'targetDurationSeconds')::float as target_seconds,
+  (c.document->'planningRuns' is null and c.document->>'planningStartedAt' is null) as no_planning,
+  j.id as job_id, j.status as job_status, j.document->>'updatedAt' as job_updated_at,
+  (j.document->>'waitingForStage') is not null as waiting,
+  (j.document->'jobAuthorization'->>'status') = 'paused' as auth_paused,
+  coalesce(jsonb_path_exists(j.document, '$.scenes[*] ? (@.attempts[last].status == "failed")'), false) as last_attempt_failed,
+  coalesce(${PAID_IN_FLIGHT}, false) as paid_in_flight,
+  lr.x->>'id' as render_id, lr.n as render_index, coalesce((lr.x->>'isMock')::boolean, false) as render_mock, (lr.x->>'durationSeconds')::float as render_seconds,
+  rr.done_at as real_done_at
+from campaigns c
+left join jobs j on j.user_id = c.user_id and j.id = c.document->'jobIds'->>0
+left join lateral (
+  select x, n from jsonb_array_elements(j.document->'renders') with ordinality as t(x, n)
+  where x->>'status' = 'completed' order by n desc limit 1) lr on true
+left join lateral (
+  select max(coalesce(x->>'finishedAt', x->>'startedAt')) as done_at from jsonb_array_elements(j.document->'renders') as t(x)
+  where x->>'status' = 'completed' and coalesce((x->>'isMock')::boolean, false) = false) rr on true
+where c.user_id = $1
+order by c.created_at desc`;
+
+interface FactsRow {
+  id: string; campaign_status: ProjectFacts["campaignStatus"]; created_at: Date | string; updated_at: Date | string; name: string; target_seconds: number | null; no_planning: boolean;
+  job_id: string | null; job_status: NonNullable<ProjectFacts["job"]>["status"] | null; job_updated_at: string | null; waiting: boolean | null; auth_paused: boolean | null;
+  last_attempt_failed: boolean; paid_in_flight: boolean; render_id: string | null; render_index: number | string | null; render_mock: boolean; render_seconds: number | null; real_done_at: string | null;
+}
+
+const iso = (v: Date | string) => (v instanceof Date ? v.toISOString() : new Date(v).toISOString());
+
+function factsFromRow(row: FactsRow): ProjectFacts {
+  const hasRender = row.render_index !== null;
+  return {
+    id: row.id, name: row.name, createdAt: iso(row.created_at), updatedAt: iso(row.updated_at),
+    campaignStatus: row.campaign_status, neverStarted: row.campaign_status === "draft" && row.no_planning,
+    targetSeconds: row.target_seconds,
+    job: row.job_id && row.job_status ? {
+      id: row.job_id, status: row.job_status, updatedAt: row.job_updated_at ?? iso(row.updated_at),
+      waitingForStage: row.waiting === true, authorizationPaused: row.auth_paused === true,
+      lastAttemptFailed: row.last_attempt_failed, paidOperationInFlight: row.paid_in_flight,
+      // Mesmo id de `projectFactsOf`: o id da execução do render.
+      lastRender: hasRender ? { id: row.render_id ?? "", isMock: row.render_mock, durationSeconds: row.render_seconds } : null,
+      realVideoCompletedAt: row.real_done_at,
+    } : null,
+  };
 }

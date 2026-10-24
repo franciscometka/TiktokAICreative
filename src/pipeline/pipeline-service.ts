@@ -1,3 +1,4 @@
+import type { ProjectFacts } from "@/application/project-facts";
 import { createHash } from "node:crypto";
 import { EXECUTION_STAGES, MOCK_STAGE_MODES, type StageModes, type ExecutionStage, type ExecutionMode, type JobQuote, type StageCapabilities, type StageQuote } from "@/domain/execution";
 import type { PreflightCheck } from "@/domain/readiness";
@@ -1588,6 +1589,11 @@ export class PipelineService {
     if ("jobId" in key ? this.activeJobs.has(key.jobId) : this.activePlanning.has(key.campaignId)) return "running";
     if (!this.deps.activity?.isActive(queueKey)) return undefined;
     return this.deps.activity.state?.(queueKey) ?? "running";
+  }
+
+  /** L8.8.1: fatos leves direto do store quando ele sabe (cloud/SQL); null = extrair dos documentos. */
+  async listProjectFactsFast(): Promise<ProjectFacts[] | null> {
+    return this.deps.store.listProjectFacts ? this.deps.store.listProjectFacts() : null;
   }
 
   /** Job em "generating"/"rendering" sem execução neste processo = interrompido (derivado). */

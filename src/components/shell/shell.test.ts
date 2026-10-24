@@ -12,7 +12,7 @@ import { WorkerStatus } from "./worker-status";
 
 const NOW = new Date("2026-10-22T12:00:00Z");
 const ago = (ms: number) => new Date(NOW.getTime() - ms).toISOString();
-const status = (worker: WorkerStatusView) => ({ mode: "cloud" as const, worker, user: { label: "cisco", initial: "C" }, credits: { creditsPerBrl: 100, remaining: 6760, allowance: 10000, state: "normal" as const, estimatedVideos: { seconds: 30 as const, count: 2, creditsPerVideo: 2272, basis: "estimate" as const } } });
+const status = (worker: WorkerStatusView) => ({ mode: "cloud" as const, worker, user: { label: "cisco", initial: "C" }, credits: { creditsPerBrl: 100, periodStart: "2026-10-01T03:00:00.000Z", remaining: 6760, allowance: 10000, state: "normal" as const, estimatedVideos: { seconds: 30 as const, count: 2, creditsPerVideo: 2272, basis: "estimate" as const } } });
 const currentLinks = (html: string) => [...html.matchAll(/<a[^>]*aria-current="page"[^>]*>([\s\S]*?)<\/a>/g)].map((m) => m[1]!.replace(/<[^>]+>/g, ""));
 
 describe("navegação", () => {

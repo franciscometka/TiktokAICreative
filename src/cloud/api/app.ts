@@ -1,3 +1,4 @@
+import { buildShellSummary } from "@/application/shell-summary";
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
@@ -136,6 +137,10 @@ export function createApiHandler(options: ApiOptions): (req: IncomingMessage, re
     route("GET", "/v1/credits", async (ctx) => {
       const view = await loadCreditsView((await ctx.runtime()).deps, infra.config.credits, v2EstimatesFor(infra.config));
       reply(ctx, 200, { ok: true, value: ctx.url.searchParams.get("summary") === "1" ? creditsSummary(view) : view });
+    }),
+    // L8.8.1: leitura leve do shell (custo constante por poll: fatos em 1 SQL + ledger + avatares).
+    route("GET", "/v1/shell", async (ctx) => {
+      reply(ctx, 200, { ok: true, value: await buildShellSummary((await ctx.runtime()).deps, infra.config.credits, v2EstimatesFor(infra.config)) });
     }),
     route("GET", "/v1/bootstrap", async (ctx) => {
       const rt = await ctx.runtime();

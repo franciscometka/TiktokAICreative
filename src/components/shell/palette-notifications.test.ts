@@ -94,8 +94,10 @@ describe("Notificações", () => {
   });
 
   it("snapshot do shell para eventos usa só dados resumidos", () => {
-    const status: ShellStatus = { mode: "cloud", worker: { state: "online", lastSeenAt: null }, user: null, credits: { creditsPerBrl: 100, remaining: 1800, allowance: 10_000, state: "low", estimatedVideos: null }, projects: [{ id: "c1", name: "S", status: "ready", statusLabel: "Pronto", durationLabel: "30s" }], avatars: [] };
-    expect(snapshotOf(status)).toEqual({ worker: "online", credits: { state: "low", remaining: 1800, estimatedVideos: null }, projects: [{ id: "c1", name: "S", status: "ready", durationLabel: "30s" }] });
+    const status: ShellStatus = { mode: "cloud", worker: { state: "online", lastSeenAt: null }, user: null, credits: { creditsPerBrl: 100, periodStart: "2026-10-01T03:00:00.000Z", remaining: 1800, allowance: 10_000, state: "low", estimatedVideos: null }, projects: [{ id: "c1", name: "S", status: "ready", statusLabel: "Pronto", durationLabel: "30s", episode: "render-r1", updatedAt: "2026-10-23T12:00:00.000Z" }], avatars: [], namespace: "uabc" };
+    expect(snapshotOf(status)).toEqual({ worker: { state: "online", lastSeenAt: null }, credits: { state: "low", remaining: 1800, allowance: 10_000, estimatedVideos: null, periodStart: "2026-10-01T03:00:00.000Z" }, projects: [{ id: "c1", name: "S", status: "ready", durationLabel: "30s", episode: "render-r1" }] });
+    // Projetos não consultados (null) ficam null — a memória mantém os anteriores.
+    expect(snapshotOf({ ...status, projects: null }).projects).toBeNull();
   });
 });
 
