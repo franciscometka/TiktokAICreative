@@ -420,6 +420,26 @@ describe("execução híbrida por etapa — somente transportes falsos", () => {
     await (await f.service.retryFailedScene(id, sceneId, quoteB.token)).completion;
     expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(3);
   });
+  it("retry de Presenter deriva avatar no servidor, preserva áudio e lança só o novo custo", async () => {
+    const f = await setup({ narration: "real", avatar: "real" }, true, { short: true });
+    const id = f.campaign.jobIds[0]!;
+    await f.execute("narration");
+    const avatar = await f.service.quoteStage(id, "avatar");
+    expect((await (await f.service.executeStage(id, "avatar", avatar.token)).completion).kind).toBe("FAILED");
+    const failed = await f.service.getJob(id);
+    const sceneId = failed.scenes.find(scene => scene.attempts.at(-1)?.presenter)?.sceneId!;
+    const before = (await f.ledger()).filter(entry => entry.sceneId === sceneId && !entry.simulated);
+    const quote = await f.service.quoteFailedSceneRetry(id, sceneId);
+    expect(quote.stage).toBe("avatar");
+    f.presenter.options.short = false;
+    await (await f.service.retryFailedScene(id, sceneId, quote.token)).completion;
+
+    const after = await f.service.getJob(id);
+    expect(after.scenes.find(scene => scene.sceneId === sceneId)!.attempts).toHaveLength(2);
+    expect(f.presenter.posts).toBe(2);
+    expect(f.audio.calls).toHaveLength(1);
+    expect((await f.ledger()).filter(entry => entry.sceneId === sceneId && !entry.simulated)).toHaveLength(before.length + 1);
+  });
   it("autoriza exceder só até o valor mostrado e somente com permissão da política", async () => {
     const f = await setup({ narration: "real" }, false); const id = f.campaign.jobIds[0]!;
     const store = new FilePipelineStore(f.config.dataDir); const campaign = await store.getCampaign(f.campaign.id);

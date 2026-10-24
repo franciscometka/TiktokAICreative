@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { isUgcPersonSource } from "@/domain/ugc";
 import { activeAttempt } from "./guards";
 import { ugcHarness, FULL_REVIEW } from "@/test/ugc-harness";
+import { MockUgcReferenceProvider, MockUgcVideoProvider } from "@/providers/ugc/mock-ugc-providers";
 
 describe("AI UGC — pipeline MOCK completo, offline", () => {
   it("referência → pausa para aprovação → cenas UGC com a mesma pessoa → B-roll → render", async () => {
@@ -52,5 +53,37 @@ describe("AI UGC — pipeline MOCK completo, offline", () => {
     expect(h.calls.narrations()).toHaveLength(0);
     expect(job.manifest!.audio).toEqual([]);
     for (const s of ugcScenes) expect(job.manifest!.assets.find((a) => a.sceneId === s.id)!.clipAudio).toBe(true);
+  });
+
+  it("retry de Product UGC deriva ugc_video e nunca chama Presenter", async () => {
+    const videoOptions = { fail: true };
+    const videos: MockUgcVideoProvider[] = [];
+    const h = await ugcHarness({
+      ugcProviders: {
+        reference: pricing => new MockUgcReferenceProvider(pricing),
+        video: pricing => {
+          const provider = new MockUgcVideoProvider(pricing, "native_speech", videoOptions);
+          videos.push(provider);
+          return provider;
+        },
+      },
+    });
+    await h.run();
+    let job = await h.service.getJob(h.jobId);
+    const reference = job.ugc!.references[0]!;
+    const approved = await h.service.approveUgcReference(h.jobId, reference.id, FULL_REVIEW);
+    expect((await approved.completion!).kind).toBe("FAILED");
+    job = await h.service.getJob(h.jobId);
+    const sceneId = job.scenes.find(scene => scene.attempts.at(-1)?.ugc)?.sceneId!;
+    const quote = await h.service.quoteFailedSceneRetry(h.jobId, sceneId);
+    expect(quote.stage).toBe("ugc_video");
+    videoOptions.fail = false;
+    await (await h.service.retryFailedScene(h.jobId, sceneId, quote.token)).completion;
+
+    job = await h.service.getJob(h.jobId);
+    expect(job.scenes.find(scene => scene.sceneId === sceneId)!.attempts).toHaveLength(2);
+    expect(videos.flatMap(provider => provider.calls)).toHaveLength(2);
+    expect(h.calls.presenter()).toBe(0);
+    expect((await h.service.listCostEntries()).filter(entry => entry.sceneId === sceneId && !entry.simulated)).toHaveLength(0);
   });
 });
