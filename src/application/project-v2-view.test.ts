@@ -85,12 +85,13 @@ describe("Projeto V2 — geração automática com progresso simples (Lote 6)", 
     expect(done.result).toMatchObject({ durationLabel: "00:36", downloadUrl: "/api/renders/c/k/r1?download=1" });
     expect(done.result!.costLabel).toMatch(/12,34/);
 
-    const scenes = creative.scenes.map((s, i) => (i === 2 ? { ...s, status: "failed" as const } : s));
+    const scenes = creative.scenes.map((s, i) => (i === 2 ? { ...s, status: "failed" as const, retryQuote: { ready: true, token: "retry_3", estimatedBrl: 2.75 } as never } : s));
     const failed = buildProjectV2View({ ...base, creatives: [{ ...creative, scenes, error: "ProviderError: HTTP 500 {\"zod\":\"...\"}", authorization: { status: "paused" } }] });
     expect(failed.phase).toBe("failed");
     expect(failed.error!.message).toBe("Não conseguimos gerar o trecho 3.");
     expect(failed.headline).not.toContain("ProviderError");
     expect(failed.error!.details).toContain("ProviderError");
+    expect(failed.error).toMatchObject({ retry: "scene", sceneId: scenes[2]!.id, sceneToken: "retry_3", sceneEstimatedBrl: 2.75 });
   });
 
   it("view principal não leva caminhos de disco nem segredos ao browser", async () => {

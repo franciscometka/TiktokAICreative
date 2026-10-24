@@ -304,7 +304,7 @@ function actionFor(kind: GenerationKind, source: GenerationSource, perBrl: numbe
     case "job_failed":
       // Só ações que JÁ existem: cotação da cena (quando houver) ou nova autorização do job com a
       // cotação atual pronta. Sem cotação utilizável → nenhum botão.
-      if (v2.error?.retry === "scene" && v2.error.sceneToken && v2.jobId) return { kind: "retry_scene", label: "Tentar novamente", credits: null, disabled: false };
+      if (v2.error?.retry === "scene" && v2.error.sceneToken && v2.jobId) return { kind: "retry_scene", label: "Tentar novamente", credits: credits(v2.error.sceneEstimatedBrl), disabled: false };
       if (v2.jobId && v2.quoteToken && source.jobQuote?.ready) return { kind: "retry_job", label: "Tentar novamente", credits: credits(source.jobQuote.estimatedBrl), disabled: false };
       return null;
     default:

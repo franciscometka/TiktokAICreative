@@ -70,7 +70,7 @@ export const GENERATION_STATES: Record<string, GenerationSource> = {
     previousRenders: [{ renderId: "r0", videoUrl: "/api/renders/c/k/r0", downloadUrl: "/api/renders/c/k/r0?download=1", finishedAt: "2026-10-22T12:50:00Z" }],
   }),
   scene_failed: sourceFixture({
-    v2: v2Fixture({ phase: "failed", error: { message: "Não conseguimos gerar o trecho 4.", details: "Krea: tempo esgotado · Cena 4", retry: "job", sceneId: "scene_4" } }),
+    v2: v2Fixture({ phase: "failed", error: { message: "Não conseguimos gerar o trecho 4.", details: "Krea: tempo esgotado · Cena 4", retry: "scene", sceneId: "scene_4", sceneToken: "retry_scene_4", sceneEstimatedBrl: 3.98 } }),
     activityPhase: null, scenes: [...scenesFixture(3).slice(0, 3), sceneFixture(4, "failed"), sceneFixture(5, "planned")], actual: { totalBrl: 12.1, simulated: false },
     authorization: { status: "paused", estimatedBrl: 20.12, baselineActualBrl: 0.4 }, jobQuote: { estimatedBrl: 3.98, ready: true },
   }),

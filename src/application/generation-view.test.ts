@@ -50,7 +50,7 @@ describe("estados e etapas reais", () => {
 
   it("falha de cena: qual cena; retry só pela ação existente com cotação pronta", () => {
     const v = build("scene_failed");
-    expect(v).toMatchObject({ kind: "scene_failed", headline: "Cena 4 não foi concluída", action: { kind: "retry_job", label: "Tentar novamente", credits: 398 } });
+    expect(v).toMatchObject({ kind: "scene_failed", headline: "Cena 4 não foi concluída", action: { kind: "retry_scene", label: "Tentar novamente", credits: 398 } });
     expect(v.scenes.map((s) => s.status)).toEqual(["ready", "ready", "ready", "failed", "waiting"]);
     expect(v.stages[3]!.state).toBe("failed");
   });

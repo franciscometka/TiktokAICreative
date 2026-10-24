@@ -153,6 +153,9 @@ export async function getCampaignView(deps: AppDeps, campaignId: string): Promis
             scene.id,
           );
         }
+        for (const scene of creative.scenes.filter(item => item.isGenerated && item.status === "failed")) {
+          scene.retryQuote = await service.quoteFailedSceneRetry(creative.jobId, scene.id);
+        }
         const job = jobs.find(item => item.id === creative.jobId);
         const plan = campaign.plan?.creatives.find(item => item.id === creative.id);
         if (job && plan) creative.nextAction = recommendedNextAction(plan, job, creative.stageQuotes, service.isJobActive(job.id));

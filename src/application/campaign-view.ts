@@ -70,6 +70,8 @@ export interface SceneView {
   videoUrl?: string;
   simulated: boolean;
   regenerationQuote?: StageQuote;
+  /** Cotação single-use para recuperar somente uma tentativa terminalmente falha. */
+  retryQuote?: StageQuote;
   /** AI UGC: quem aparece, o que segura, o que fala e o que faz. */
   ugc?: UgcSceneInfo;
 }

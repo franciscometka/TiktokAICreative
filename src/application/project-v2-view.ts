@@ -41,7 +41,7 @@ export interface ProjectV2View {
     canGenerateOther: boolean;
     simulated: boolean;
   } | null;
-  error: { message: string; details: string; retry: "job" | "scene" | "planning" | "planning_approval"; sceneId?: string; sceneToken?: string } | null;
+  error: { message: string; details: string; retry: "job" | "scene" | "planning" | "planning_approval"; sceneId?: string; sceneToken?: string; sceneEstimatedBrl?: number } | null;
   result: { videoUrl: string; downloadUrl: string; durationLabel: string; costLabel: string } | null;
   /** `label` é o que a tela afirma; só diz "Apresentado por X" quando a foto de X é usada de fato. */
   avatar: { name: string | null; label: string; reason: string } | null;
@@ -191,10 +191,11 @@ export function buildProjectV2View(view: CampaignView): ProjectV2View {
   if (failed || creative.interrupted || (creative.authorization?.status === "paused" && creative.error)) {
     const number = failed?.number;
     const message = number ? `Não conseguimos gerar o trecho ${number}.` : creative.interrupted ? "A geração foi interrompida." : "Não conseguimos continuar a geração.";
-    const sceneToken = failed?.regenerationQuote?.ready ? failed.regenerationQuote.token : undefined;
+    const retryQuote = failed?.retryQuote?.ready ? failed.retryQuote : undefined;
+    const sceneToken = retryQuote?.token;
     return {
       ...base, phase: "failed", headline: message,
-      error: { message, details: [creative.error, creative.authorization?.pausedReason, failed ? `Cena ${failed.number}` : undefined].filter(Boolean).join(" · ") || "Sem detalhes.", retry: sceneToken ? "scene" : "job", ...(failed ? { sceneId: failed.id } : {}), ...(sceneToken ? { sceneToken } : {}) },
+      error: { message, details: [creative.error, creative.authorization?.pausedReason, failed ? `Cena ${failed.number}` : undefined].filter(Boolean).join(" · ") || "Sem detalhes.", retry: sceneToken ? "scene" : "job", ...(failed ? { sceneId: failed.id } : {}), ...(sceneToken ? { sceneToken, sceneEstimatedBrl: retryQuote.estimatedBrl } : {}) },
       progress: steps([scriptStep, presenterReady ? "done" : "error", presenterReady ? "error" : "pending", "pending"]),
     };
   }
