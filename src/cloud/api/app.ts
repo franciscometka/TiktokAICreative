@@ -9,7 +9,7 @@ import {
   cancelCreative,
   executeHybridPlanning,
   getCampaignView,
-  regenerateStoryboardScene,
+  retryFailedScene,
   regenerateUgcReference,
   rerenderCreative,
   retryCampaignPlanning,
@@ -240,8 +240,8 @@ export function createApiHandler(options: ApiOptions): (req: IncomingMessage, re
       result(ctx, await regenerateUgcReference((await ctx.runtime()).deps, { jobId: id!, ...body }), 202);
     }),
     route("POST", "/v1/jobs/:id/scenes/:sceneId/retry", async (ctx, { id, sceneId }) => {
-      const body = parse(z.object({ stage: z.enum(["scenes", "avatar", "ugc_video"]), token: z.string().length(64) }), ctx.body);
-      result(ctx, await regenerateStoryboardScene((await ctx.runtime()).deps, { jobId: id!, sceneId: sceneId!, ...body }), 202);
+      const body = parse(z.object({ token: z.string().length(64) }), ctx.body);
+      result(ctx, await retryFailedScene((await ctx.runtime()).deps, { jobId: id!, sceneId: sceneId!, token: body.token }), 202);
     }),
     // Retry SEM custo (render/retomada segura). Retry pago passa por /generate com nova cotação aprovada.
     route("POST", "/v1/jobs/:id/retry", async (ctx, { id }) => result(ctx, await rerenderCreative((await ctx.runtime()).deps, id!), 202)),

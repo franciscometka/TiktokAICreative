@@ -6,7 +6,7 @@ import {
   authorizeJobAction,
   estimateChangeRequestAction,
   executePlanningStageAction,
-  regenerateStoryboardSceneAction,
+  retryFailedSceneAction,
   regenerateUgcReferenceAction,
   retryPlanningAction,
 } from "@/app/actions";
@@ -24,7 +24,7 @@ export function ProjectV2({ view, campaignId }: { view: ProjectV2View; campaignI
         // A UX V2 só habilita o botão com o checklist completo: confirma fidelidade explicitamente.
         approve: (jobId, referenceId, confirmedSpecs) => approveUgcReferenceAction({ jobId, referenceId, fidelityConfirmed: true, confirmedSpecs }),
         regenerate: (jobId) => regenerateUgcReferenceAction({ jobId }),
-        retryScene: (jobId, sceneId, token) => regenerateStoryboardSceneAction({ jobId, stage: "ugc_video", token, sceneId }),
+        retryScene: (jobId, sceneId, token) => retryFailedSceneAction({ jobId, token, sceneId }),
         retryPlanning: () => retryPlanningAction(campaignId),
         estimateChange: (text) => estimateChangeRequestAction({ campaignId, text }),
         refresh: () => router.refresh(),

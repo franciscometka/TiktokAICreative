@@ -2,6 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PNG_BYTES } from "@/test/app-fixtures";
 import { cloudHarness, FAKE_SECRETS, type CloudHarness } from "@/test/cloud-harness";
 import { TEST_USER } from "@/test/pglite";
+import { PostgresPipelineStore } from "@/cloud/repos/pipeline-repository";
+import { apiUserRuntime } from "@/cloud/runtime";
 
 /**
  * Fluxo cloud ponta a ponta, só com mocks (nenhuma API paga):
@@ -26,6 +28,35 @@ async function uploadPhoto(ownerId: string): Promise<string> {
 
 const createInput = (productId: string, imageId: string) => ({ productId, name: "Secador de cabelo Pro", imageIds: [imageId], idea: "Uma mulher apresentando este secador de forma natural em um quarto.", duration: 30 });
 
+async function failedSceneProject(ownerId: string) {
+  const imageId = await uploadPhoto(ownerId);
+  const created = await h.call("POST", "/v1/projects", { body: createInput(ownerId, imageId) });
+  await h.drain();
+  let project = await h.call("GET", `/v1/projects/${created.json.value.campaignId as string}`);
+  const jobId = project.json.value.v2.jobId as string;
+  expect((await h.call("POST", `/v1/jobs/${jobId}/generate`, { body: { token: project.json.value.v2.quoteToken } })).status).toBe(202);
+  await h.drain();
+  project = await h.call("GET", `/v1/projects/${created.json.value.campaignId as string}`);
+  const approval = project.json.value.v2.approval;
+  expect((await h.call("POST", `/v1/jobs/${jobId}/references/${approval.referenceId}/approve`, { body: { fidelityConfirmed: true, confirmedSpecs: approval.specs } })).status).toBe(202);
+  // O teste prepara uma falha terminal sem executar a tarefa MOCK seguinte.
+  await h.db.query("update job_queue set status = 'completed' where job_id = $1 and status = 'queued'", [jobId]);
+  const store = new PostgresPipelineStore(h.db, TEST_USER);
+  const job = await store.getJob(jobId);
+  const scene = job.scenes.find(item => item.requiresGeneratedVideo)!;
+  await store.saveJob({
+    ...job,
+    status: "failed",
+    error: "Falha simulada sem rede.",
+    scenes: job.scenes.map(item => item.sceneId === scene.sceneId ? {
+      ...item,
+      attempts: [{ id: "failed_cloud_attempt", kind: "video", sceneId: item.sceneId, attemptNumber: 1, provider: "mock", model: "mock-video", providerJobId: null, status: "failed", active: false, isMock: true, error: "Falha simulada.", createdAt: job.updatedAt }],
+    } : item),
+  });
+  const quote = await (await apiUserRuntime(h.infra, TEST_USER)).deps.service.quoteFailedSceneRetry(jobId, scene.sceneId);
+  return { campaignId: job.campaignId, jobId, sceneId: scene.sceneId, token: quote.token };
+}
+
 describe("API pública", () => {
   it("/health simples e /ready checa banco + storage + config, sem API paga", async () => {
     const health = await h.call("GET", "/health", { user: null });
@@ -46,6 +77,23 @@ describe("API pública", () => {
 });
 
 describe("fluxo de geração na nuvem", () => {
+  it("retry individual idempotente deriva recipe no servidor e preserva ownership", async () => {
+    const ctx = await failedSceneProject("prod_retry_scene");
+    expect(ctx.token).toHaveLength(64);
+    const before = Number((await h.db.query<{ n: number }>("select count(*)::int as n from job_queue where job_id = $1", [ctx.jobId])).rows[0]?.n);
+
+    const first = await h.call("POST", `/v1/jobs/${ctx.jobId}/scenes/${ctx.sceneId}/retry`, { body: { token: ctx.token, stage: "avatar" } });
+    const replay = await h.call("POST", `/v1/jobs/${ctx.jobId}/scenes/${ctx.sceneId}/retry`, { body: { token: ctx.token } });
+    expect(first.status).toBe(202);
+    expect(replay.status).toBe(202);
+    expect(Number((await h.db.query<{ n: number }>("select count(*)::int as n from job_queue where job_id = $1", [ctx.jobId])).rows[0]?.n)).toBe(before + 1);
+
+    expect((await h.call("POST", `/v1/jobs/${ctx.jobId}/scenes/${ctx.sceneId}/retry`, { user: "b", body: { token: ctx.token } })).status).toBe(404);
+    expect((await h.call("POST", `/v1/jobs/${ctx.jobId}/scenes/wrong_scene/retry`, { body: { token: ctx.token } })).status).not.toBe(202);
+    expect((await h.call("POST", `/v1/jobs/${ctx.jobId}/scenes/${ctx.sceneId}/retry`, { body: { token: "0".repeat(64) } })).status).not.toBe(202);
+    await h.drain();
+  });
+
   it("cria → enfileira → worker planeja → aprovar → worker gera; navegador fecha e API reinicia sem perder nada", async () => {
     const imageId = await uploadPhoto("prod_cloud1");
     // Clique duplo: mesma Idempotency-Key → mesma resposta, UM projeto.
@@ -55,7 +103,7 @@ describe("fluxo de geração na nuvem", () => {
     expect(first.status).toBe(202);
     expect(second.json).toEqual(first.json);
     const campaignId = first.json.value.campaignId as string;
-    expect((await h.db.query<{ n: number }>("select count(*)::int as n from campaigns", [])).rows[0]?.n).toBe(1);
+    expect((await h.db.query<{ n: number }>("select count(*)::int as n from campaigns where id = $1", [campaignId])).rows[0]?.n).toBe(1);
     expect((await h.call("POST", "/v1/projects", { body: { ...createInput("prod_cloud1", imageId), name: "Outro" }, headers })).status).toBe(422);
 
     // A API só persistiu e enfileirou: nada rodou ainda.

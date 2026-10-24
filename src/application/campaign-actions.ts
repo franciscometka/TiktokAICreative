@@ -464,6 +464,17 @@ export async function regenerateStoryboardScene(deps: AppDeps, input: { jobId: s
     return fail(error);
   }
 }
+
+/** Recupera uma cena falha; o servidor deriva o recipe do estado persistido. */
+export async function retryFailedScene(deps: AppDeps, input: { jobId: string; sceneId: string; token: string }): Promise<ActionResult<{ started: boolean }>> {
+  try {
+    const result = await deps.service.retryFailedScene(input.jobId, input.sceneId, input.token);
+    logBackground(input.jobId, result.completion);
+    return { ok: true, value: { started: true } };
+  } catch (error) {
+    return fail(error);
+  }
+}
 export async function configureHybridStage(deps: AppDeps, input: { jobId: string; stage: ExecutionStage; mode: ExecutionMode }): Promise<ActionResult<{ saved: boolean }>> {
   try { await deps.service.configureStage(input.jobId, input.stage, input.mode); return { ok: true, value: { saved: true } }; }
   catch (error) { return fail(error); }
