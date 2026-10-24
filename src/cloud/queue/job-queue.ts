@@ -196,10 +196,14 @@ export class QueueDispatcher implements WorkDispatcher {
   }
 
   async enqueueJob(job: Pick<GenerationJob, "id" | "campaignId" | "stageModes">, run: JobRun): Promise<void> {
-    await this.queue.enqueue({
+    const payload: TaskPayload = { kind: "job_run", run };
+    const queued = await this.queue.enqueue({
       userId: this.userId, campaignId: job.campaignId, jobId: job.id, dedupeKey: jobKey(job.id),
-      payload: { kind: "job_run", run }, paid: isPaidRun(run, job),
+      payload, paid: isPaidRun(run, job),
     });
+    if (!queued.created && JSON.stringify(queued.task.payload) !== JSON.stringify(payload)) {
+      throw new Error("Este job já possui outra operação ativa; o retry específico não foi enfileirado.");
+    }
   }
 }
 

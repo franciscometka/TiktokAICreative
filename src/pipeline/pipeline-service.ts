@@ -79,6 +79,7 @@ import {
   type CampaignRequest,
   type GenerationJob,
   type MediaAttempt,
+  type SceneRetryIntent,
   type MediaKind,
 } from "@/domain/pipeline";
 import type { Clock } from "@/lib/clock";
@@ -293,6 +294,14 @@ export class PipelineService {
   /** Etapa de cada cena gerada: avatar (Presenter), ugc_video (AI UGC) ou scenes (produto/B-roll). */
   private sceneStage(scene: Pick<ScenePlan, "visualSource">): "avatar" | "ugc_video" | "scenes" {
     return scene.visualSource === "presenter" ? "avatar" : isUgcPersonSource(scene.visualSource) ? "ugc_video" : "scenes";
+  }
+  private failedSceneTarget(ctx: JobContext, sceneId: string) {
+    const scene = ctx.creative.scenes.find(item => item.id === sceneId && item.requiresGeneratedVideo);
+    const state = ctx.job.scenes.find(item => item.sceneId === sceneId);
+    if (!scene || !state) throw new Error(`A cena ${sceneId} não pertence a este job.`);
+    const latest = state.attempts.at(-1);
+    if (activeAttempt(state.attempts) || !latest || latest.status !== "failed") throw new Error("A cena não está com falha terminal.");
+    return { scene, state, latest, stage: this.sceneStage(scene) };
   }
   private ugcFactories(): UgcProviderFactories { return this.deps.ugcProviders ?? createUgcProviderFactories(); }
   private ugcReferenceProvider(ctx: JobContext): UgcReferenceProvider {
@@ -520,20 +529,150 @@ export class PipelineService {
 
   /** Nova decisão de gasto para recuperar UMA cena cuja tentativa terminal falhou. */
   async quoteFailedSceneRetry(jobId: string, sceneId: string): Promise<StageQuote> {
-    const { job, creative } = await this.load(jobId);
-    const scene = creative.scenes.find(item => item.id === sceneId && item.requiresGeneratedVideo);
-    const state = job.scenes.find(item => item.sceneId === sceneId);
+    const ctx = await this.load(jobId);
+    const scene = ctx.creative.scenes.find(item => item.id === sceneId && item.requiresGeneratedVideo);
+    const state = ctx.job.scenes.find(item => item.sceneId === sceneId);
     if (!scene || !state) throw new Error(`A cena ${sceneId} não pertence a este job.`);
     const quote = await this.quoteStage(jobId, this.sceneStage(scene), false, true, sceneId);
-    const latest = state.attempts.at(-1);
-    if (activeAttempt(state.attempts) || !latest || latest.status !== "failed") {
-      return { ...quote, ready: false, blocked: "A cena não está com falha terminal.", state: "Bloqueado" };
-    }
-    const uncertain = paidOperationInFlight(job);
+    let failed;
+    try { failed = this.failedSceneTarget(ctx, sceneId); }
+    catch (error) { return { ...quote, ready: false, blocked: messageOf(error), state: "Bloqueado" }; }
+    const uncertain = paidOperationInFlight(ctx.job);
     if (uncertain) {
       return { ...quote, ready: false, blocked: `Geração pausada por segurança: ${uncertain}.`, state: "Bloqueado" };
     }
+    const pending = ctx.job.sceneRetryIntents?.findLast(intent => intent.sceneId === sceneId && intent.failedAttemptId === failed.latest.id && intent.state !== "settled");
+    if (pending) {
+      const active = this.isJobActive(jobId);
+      return {
+        ...quote,
+        stage: pending.stage,
+        mode: pending.mode,
+        unit: pending.sceneId,
+        token: pending.quoteToken,
+        provider: pending.provider,
+        model: pending.model,
+        estimatedBrl: pending.estimatedBrl,
+        ready: !active,
+        blocked: active ? "A tentativa autorizada já está na fila ou em execução." : undefined,
+        done: false,
+        state: active ? "Em andamento" : "Autorizada; pronta para retomar",
+      };
+    }
     return quote;
+  }
+
+  /** Aprova e agenda UMA tentativa da cena. A intent durável nasce no mesmo save da aprovação. */
+  async retryFailedScene(jobId: string, sceneId: string, token: string): Promise<{ job: GenerationJob; completion: Promise<GenerationOutcome> }> {
+    const prepared = await this.withJobLock(jobId, async () => {
+      let job = await this.getJob(jobId);
+      const existing = job.sceneRetryIntents?.find(intent => intent.sceneId === sceneId && intent.quoteToken === token);
+      if (existing) return { job, intent: existing, dispatch: existing.state !== "settled" && !this.isJobActive(jobId) };
+      this.assertJobIdle(jobId);
+      const quote = await this.quoteFailedSceneRetry(jobId, sceneId);
+      if (quote.token !== token || !quote.ready) throw new Error(quote.blocked ?? "A cotação mudou; revise e aprove novamente.");
+      const ctx = await this.load(jobId);
+      const target = this.failedSceneTarget(ctx, sceneId);
+      if (paidOperationInFlight(job)) throw new Error("Geração pausada por segurança: existe uma operação paga sem confirmação.");
+      if (!job.estimate) throw new Error("Job sem estimativa");
+      const estimateId = job.estimate.id;
+      const budget = await this.checkJobBudget(ctx, quote.estimatedBrl);
+      if (budget.kind === "BUDGET_EXCEEDED") throw new Error("O retry excede o orçamento atual; revise uma nova cotação.");
+      if (job.status === "failed") { job = transitionJob(job, "cost_estimated", this.deps.clock()); job = transitionJob(job, "awaiting_approval", this.deps.clock()); }
+      if (job.status === "cost_estimated") job = transitionJob(job, "awaiting_approval", this.deps.clock());
+      const now = this.deps.clock();
+      const intent: SceneRetryIntent = {
+        id: `scene_retry_${token.slice(0, 32)}`,
+        sceneId,
+        stage: target.stage,
+        quoteToken: token,
+        failedAttemptId: target.latest.id,
+        nextAttemptNumber: target.state.attempts.length + 1,
+        estimateId,
+        storyboardRevision: job.storyboardRevision ?? 0,
+        stageRevision: job.stageRevision ?? 0,
+        mode: quote.mode,
+        provider: quote.provider,
+        model: quote.model,
+        estimatedBrl: quote.estimatedBrl,
+        state: "authorized",
+        createdAt: now,
+        updatedAt: now,
+      };
+      job = {
+        ...job,
+        approval: { estimateId, approvedTotalBrl: quote.estimatedBrl, overBudget: false, approvedAt: now },
+        stageApprovals: [...(job.stageApprovals ?? []), { stage: target.stage, mode: quote.mode, provider: quote.provider, model: quote.model, unit: sceneId, quoteToken: token, estimatedBrl: quote.estimatedBrl, approvedAt: now }],
+        sceneRetryIntents: [...(job.sceneRetryIntents ?? []), intent],
+        waitingForStage: undefined,
+        error: undefined,
+      };
+      if (job.status === "awaiting_approval" || job.status === "completed" || job.status === "budget_exceeded") job = transitionJob(job, "generating", now);
+      if (job.status !== "generating") throw new Error("Resolva a revisão/orçamento antes de tentar esta cena.");
+      await this.deps.store.saveJob(job);
+      return { job, intent, dispatch: true };
+    });
+    if (!prepared.dispatch) return { job: prepared.job, completion: Promise.resolve(this.outcomeForSettledRetry(prepared.job)) };
+    const dispatched = await this.dispatchJob(jobId, { kind: "scene_retry", retryIntentId: prepared.intent.id });
+    if (this.deps.dispatcher) {
+      await this.withJobLock(jobId, async () => {
+        const current = await this.getJob(jobId); const now = this.deps.clock();
+        await this.deps.store.saveJob({ ...current, sceneRetryIntents: current.sceneRetryIntents?.map(intent => intent.id === prepared.intent.id && intent.state === "authorized" ? { ...intent, state: "queued" as const, updatedAt: now } : intent) });
+      });
+    }
+    return { job: prepared.job, completion: dispatched.completion };
+  }
+
+  private outcomeForSettledRetry(job: GenerationJob): GenerationOutcome {
+    if (job.status === "completed") return { kind: "COMPLETED", job };
+    if (job.status === "failed") return { kind: "FAILED", job, error: job.error ?? "A tentativa falhou." };
+    return { kind: "WAITING_STAGE", job };
+  }
+
+  private async performSceneRetryIntent(jobId: string, retryIntentId: string): Promise<GenerationOutcome> {
+    const ctx = await this.load(jobId);
+    const intent = ctx.job.sceneRetryIntents?.find(item => item.id === retryIntentId);
+    if (!intent) throw new Error("Intenção de retry não encontrada.");
+    if (intent.state === "settled") return this.outcomeForSettledRetry(ctx.job);
+    const target = this.failedSceneTarget(ctx, intent.sceneId);
+    const quote = await this.quoteStage(jobId, target.stage, true, true, intent.sceneId);
+    const unchanged = target.latest.id === intent.failedAttemptId
+      && target.state.attempts.length + 1 === intent.nextAttemptNumber
+      && ctx.job.estimate?.id === intent.estimateId
+      && (ctx.job.storyboardRevision ?? 0) === intent.storyboardRevision
+      && (ctx.job.stageRevision ?? 0) === intent.stageRevision
+      && quote.stage === intent.stage && quote.mode === intent.mode
+      && quote.provider === intent.provider && quote.model === intent.model
+      && toCents(quote.estimatedBrl) === toCents(intent.estimatedBrl);
+    if (!unchanged || quote.blocked || quote.done) {
+      const reason = quote.blocked ?? "A cotação mudou; revise e aprove novamente.";
+      const blocked = await this.withJobLock(jobId, async () => {
+        const current = await this.getJob(jobId); const now = this.deps.clock();
+        const next = { ...current, sceneRetryIntents: current.sceneRetryIntents?.map(item => item.id === retryIntentId ? { ...item, state: "settled" as const, outcome: "blocked" as const, updatedAt: now } : item), error: reason };
+        await this.deps.store.saveJob(next); return next;
+      });
+      return { kind: "FAILED", job: blocked, error: reason };
+    }
+    await this.withJobLock(jobId, async () => {
+      const current = await this.getJob(jobId); const now = this.deps.clock();
+      await this.deps.store.saveJob({ ...current, sceneRetryIntents: current.sceneRetryIntents?.map(item => item.id === retryIntentId ? { ...item, state: "running" as const, updatedAt: now } : item) });
+    });
+    let outcome = await this.performHybridStage(jobId, intent.stage, true, intent.sceneId);
+    if (outcome.kind === "WAITING_STAGE") {
+      const render = await this.quoteStage(jobId, "render", true);
+      if (render.ready && render.estimatedBrl === 0) {
+        const prepared = await this.prepareStage(jobId, "render", render.token, {}, true);
+        if (!prepared.budgetStillBlocked) outcome = await this.performHybridStage(jobId, "render");
+      }
+    }
+    const latest = await this.getJob(jobId);
+    if (!paidOperationInFlight(latest)) {
+      const now = this.deps.clock();
+      const settled = { ...latest, sceneRetryIntents: latest.sceneRetryIntents?.map(item => item.id === retryIntentId ? { ...item, state: "settled" as const, outcome: outcome.kind === "FAILED" ? "failed" as const : "succeeded" as const, updatedAt: now } : item) };
+      await this.deps.store.saveJob(settled);
+      outcome = { ...outcome, job: settled };
+    }
+    return outcome;
   }
 
   /** Cotação única do fluxo simples. Conservadora: qualquer etapa REAL reserva o futuro inteiro da estimativa. */
@@ -2481,6 +2620,7 @@ export class PipelineService {
         const prepared = await this.prepareStage(jobId, "render", render.token, {}, true);
         return prepared.budgetStillBlocked ? outcome : this.performHybridStage(jobId, "render");
       }
+      case "scene_retry": return this.performSceneRetryIntent(jobId, run.retryIntentId);
     }
   }
 

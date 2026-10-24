@@ -12,6 +12,7 @@ import type { Campaign, GenerationJob } from "@/domain/pipeline";
 export type JobRun =
   | { kind: "authorized" }
   | { kind: "hybrid_stage"; stage: ExecutionStage; regenerate?: boolean; sceneId?: string; thenFreeRender?: boolean }
+  | { kind: "scene_retry"; retryIntentId: string }
   | { kind: "hybrid_mocks" }
   | { kind: "continue" }
   | { kind: "render" }
@@ -46,6 +47,7 @@ export function isPaidRun(run: JobRun | { kind: "planning"; real: boolean }, job
     case "render": return false;
     case "hybrid_mocks": return false;
     case "hybrid_stage": return run.stage !== "render" && job?.stageModes?.[run.stage] === "real";
+    case "scene_retry": return true;
     default: return true;
   }
 }

@@ -202,6 +202,28 @@ export const ApprovalSchema = z.object({
 });
 export type Approval = z.infer<typeof ApprovalSchema>;
 
+/** Autorização durável de UMA nova tentativa de cena, persistida antes do enqueue. */
+export const SceneRetryIntentSchema = z.object({
+  id: nonEmpty,
+  sceneId: nonEmpty,
+  stage: z.enum(["scenes", "avatar", "ugc_video"]),
+  quoteToken: z.string().length(64),
+  failedAttemptId: nonEmpty,
+  nextAttemptNumber: z.int().positive(),
+  estimateId: nonEmpty,
+  storyboardRevision: z.int().nonnegative(),
+  stageRevision: z.int().nonnegative(),
+  mode: z.enum(["mock", "real"]),
+  provider: nonEmpty,
+  model: nonEmpty,
+  estimatedBrl: z.number().nonnegative(),
+  state: z.enum(["authorized", "queued", "running", "settled"]),
+  outcome: z.enum(["succeeded", "failed", "blocked"]).optional(),
+  createdAt: nonEmpty,
+  updatedAt: nonEmpty,
+});
+export type SceneRetryIntent = z.infer<typeof SceneRetryIntentSchema>;
+
 export const GenerationJobSchema = z.object({
   /** Autorização única do fluxo simples. O teto cobre apenas novas chamadas deste job. */
   jobAuthorization: z.object({
@@ -220,6 +242,7 @@ export const GenerationJobSchema = z.object({
   stageRevision: z.number().int().nonnegative().optional(),
   waitingForStage: ExecutionStageSchema.optional(),
   stageApprovals: z.array(z.object({ mode: z.enum(["mock", "real"]).optional(), provider: z.string().optional(), model: z.string().optional(), stage: ExecutionStageSchema, unit: z.string(), quoteToken: z.string(), estimatedBrl: z.number().nonnegative(), approvedAt: z.string() })).optional(),
+  sceneRetryIntents: z.array(SceneRetryIntentSchema).optional(),
   currentStage: z.enum(["narration", "scenes", "avatar", "ugc_reference", "ugc_video", "render"]).optional(),
   /** AI UGC: identidade do personagem, produto-âncora e referências versionadas (pessoa + produto). */
   ugc: UgcJobStateSchema.optional(),

@@ -5,6 +5,7 @@ import { cloudHarness, type CloudHarness } from "@/test/cloud-harness";
 import { TEST_USER } from "@/test/pglite";
 import { PostgresPipelineStore } from "../repos/pipeline-repository";
 import { finishForOutcome } from "./worker";
+import { QueueDispatcher } from "../queue/job-queue";
 
 let h: CloudHarness;
 beforeAll(async () => { h = await cloudHarness(); });
@@ -51,6 +52,23 @@ describe("fila durável (claim transacional)", () => {
     const next = await h.infra.queue.claim("w3", 30);
     expect(next?.dedupeKey).toBe(claimed[0]!.dedupeKey === "test:race:1" ? "test:race:2" : "test:race:1");
     await h.infra.queue.finish(next!.id, "w3", { status: "completed", outcome: "x" });
+  });
+
+  it("dedupe do job aceita replay da mesma intent e recusa engolir outra operação", async () => {
+    const { campaignId, jobId } = await plannedProject("prod_q_retry");
+    const store = new PostgresPipelineStore(h.db, TEST_USER);
+    const job = await store.getJob(jobId);
+    const dispatcher = new QueueDispatcher(h.infra.queue, TEST_USER);
+    const retry2 = { kind: "scene_retry" as const, retryIntentId: "retry_scene_2" };
+    await dispatcher.enqueueJob(job, retry2);
+    await expect(dispatcher.enqueueJob(job, retry2)).resolves.toBeUndefined();
+    await expect(dispatcher.enqueueJob(job, { kind: "scene_retry", retryIntentId: "retry_scene_4" })).rejects.toThrow(/outra operação/i);
+    await expect(dispatcher.enqueueJob(job, { kind: "authorized" })).rejects.toThrow(/outra operação/i);
+    expect((await h.db.query<{ n: number }>("select count(*)::int as n from job_queue where campaign_id = $1 and status = 'queued'", [campaignId])).rows[0]?.n).toBe(1);
+    await h.db.query("update job_queue set status = 'completed' where campaign_id = $1", [campaignId]);
+    await expect(dispatcher.enqueueJob(job, { kind: "scene_retry", retryIntentId: "retry_scene_4" })).resolves.toBeUndefined();
+    expect((await h.db.query<{ n: number }>("select count(*)::int as n from job_queue where campaign_id = $1 and kind = 'job_run'", [campaignId])).rows[0]?.n).toBe(2);
+    await h.db.query("update job_queue set status = 'completed' where campaign_id = $1", [campaignId]);
   });
 });
 
