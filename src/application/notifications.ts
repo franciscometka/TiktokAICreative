@@ -1,4 +1,4 @@
-import type { UxEvent } from "./ux-events";
+import type { CreditsSnapshot, UxEvent } from "./ux-events";
 
 /**
  * L8.8 / L8.8.1 — central de notificações LEVE, só no navegador. Sem tabela, WebSocket, push,
@@ -21,9 +21,11 @@ export interface NotificationState {
   items: NotificationItem[];
   /** Chaves já registradas (inclui as que saíram da lista pelo limite) — evita reaparecer. */
   seen: string[];
+  /** Episódio monotônico por período + franquia; persiste o rearme entre reloads e abas. */
+  creditEpisodes: Record<string, { revision: number; state: CreditsSnapshot["state"] }>;
 }
 
-export const EMPTY_NOTIFICATIONS: NotificationState = { items: [], seen: [] };
+export const EMPTY_NOTIFICATIONS: NotificationState = { items: [], seen: [], creditEpisodes: {} };
 
 /**
  * Rota interna SEGURA: começa com uma única "/", sem barra invertida, sem espaço/controle e sem
@@ -51,14 +53,20 @@ export function mergeNotifications(a: NotificationState, b: NotificationState): 
   }
   const items = [...byKey.values()].sort((x, y) => y.at.localeCompare(x.at) || x.key.localeCompare(y.key)).slice(0, NOTIFICATION_LIMIT);
   const seen = [...new Set([...a.seen, ...b.seen, ...items.map((n) => n.key)])].slice(-SEEN_LIMIT);
-  return { items, seen };
+  const creditEpisodes = { ...a.creditEpisodes };
+  const stateRank: Record<CreditsSnapshot["state"], number> = { normal: 0, low: 1, empty: 2 };
+  for (const [key, candidate] of Object.entries(b.creditEpisodes)) {
+    const current = creditEpisodes[key];
+    if (!current || candidate.revision > current.revision || (candidate.revision === current.revision && stateRank[candidate.state] > stateRank[current.state])) creditEpisodes[key] = candidate;
+  }
+  return { items, seen, creditEpisodes };
 }
 
 export function addEvents(state: NotificationState, events: readonly UxEvent[]): { state: NotificationState; added: UxEvent[] } {
   const seen = new Set(state.seen);
   const added = events.filter((e) => { if (seen.has(e.key)) return false; seen.add(e.key); return true; });
   if (!added.length) return { state, added };
-  const merged = mergeNotifications({ items: added.map((e) => ({ ...e, read: false })), seen: added.map((e) => e.key) }, state);
+  const merged = mergeNotifications({ items: added.map((e) => ({ ...e, read: false })), seen: added.map((e) => e.key), creditEpisodes: {} }, state);
   return { state: merged, added };
 }
 
@@ -80,13 +88,23 @@ const TONES = new Set(["success", "info", "warning", "danger"]);
 export function parseNotifications(raw: string | null): NotificationState {
   if (!raw) return EMPTY_NOTIFICATIONS;
   try {
-    const data = JSON.parse(raw) as { items?: unknown; seen?: unknown };
+    const data = JSON.parse(raw) as { items?: unknown; seen?: unknown; creditEpisodes?: unknown };
     const items = Array.isArray(data.items) ? data.items.filter((n): n is NotificationItem =>
       !!n && typeof n === "object" && typeof (n as NotificationItem).key === "string" && typeof (n as NotificationItem).title === "string"
       && typeof (n as NotificationItem).at === "string" && TONES.has((n as NotificationItem).tone)
       && ((n as NotificationItem).href === null || isSafeInternalHref((n as NotificationItem).href))) : [];
     const seen = Array.isArray(data.seen) ? data.seen.filter((k): k is string => typeof k === "string") : [];
-    return mergeNotifications({ items: items.map((n) => ({ ...n, read: n.read === true })), seen }, EMPTY_NOTIFICATIONS);
+    const creditEpisodes: NotificationState["creditEpisodes"] = {};
+    if (data.creditEpisodes && typeof data.creditEpisodes === "object" && !Array.isArray(data.creditEpisodes)) {
+      for (const [key, value] of Object.entries(data.creditEpisodes)) {
+        if (!value || typeof value !== "object") continue;
+        const episode = value as { revision?: unknown; state?: unknown };
+        if (Number.isInteger(episode.revision) && (episode.revision as number) >= 0 && (episode.state === "normal" || episode.state === "low" || episode.state === "empty")) {
+          creditEpisodes[key] = { revision: episode.revision as number, state: episode.state };
+        }
+      }
+    }
+    return mergeNotifications({ items: items.map((n) => ({ ...n, read: n.read === true })), seen, creditEpisodes }, EMPTY_NOTIFICATIONS);
   } catch {
     return EMPTY_NOTIFICATIONS;
   }
@@ -161,10 +179,25 @@ export class NotificationStore {
   }
 
   /** Registra eventos; devolve só os NOVOS para esta conta (já vistos aqui ou em outra aba = fora). */
-  add(events: readonly UxEvent[]): UxEvent[] {
+  add(events: readonly UxEvent[], credits: CreditsSnapshot | null = null): UxEvent[] {
     const base = mergeNotifications(this.readStorage(), this.state);
-    const { state, added } = addEvents(base, events);
-    if (added.length) this.commit(state);
+    let tracked = base;
+    let revision: number | null = null;
+    if (credits) {
+      const episodeKey = `${credits.periodStart}:${credits.allowance}`;
+      const previous = base.creditEpisodes[episodeKey];
+      const episode = previous
+        ? { revision: previous.revision + (credits.state === "normal" && previous.state !== "normal" ? 1 : 0), state: credits.state }
+        : { revision: 0, state: credits.state };
+      revision = episode.revision;
+      if (!previous || previous.revision !== episode.revision || previous.state !== episode.state) {
+        tracked = { ...base, creditEpisodes: { ...base.creditEpisodes, [episodeKey]: episode } };
+      }
+    }
+    const revised = revision === null ? events : events.map((event) =>
+      event.kind === "credits.low" || event.kind === "credits.empty" ? { ...event, key: `${event.key}:${revision}` } : event);
+    const { state, added } = addEvents(tracked, revised);
+    if (added.length || tracked !== base) this.commit(state);
     else if (base !== this.state) this.state = base;
     return added;
   }

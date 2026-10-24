@@ -1,10 +1,25 @@
 import { describe, expect, it } from "vitest";
 import { notificationsStorageKey, NotificationStore, type ChangeBus, type KeyValueStorage } from "./notifications";
-import type { UxEvent } from "./ux-events";
+import { stepUx, type CreditsSnapshot, type UxEvent, type UxMemory, type UxSnapshot } from "./ux-events";
 
 /** L8.8.1 — store de notificações: isolamento por conta (mesmo processo JS) e coordenação entre abas. */
 
 const event = (key: string, at = "2026-10-23T15:00:00.000Z"): UxEvent => ({ key, kind: "project.completed", tone: "success", title: "Seu vídeo está pronto", description: key, href: "/projects", actionLabel: "Ver resultado", at });
+const PERIOD = "2026-10-01T03:00:00.000Z";
+const credit = (state: CreditsSnapshot["state"]): CreditsSnapshot => ({
+  state,
+  remaining: state === "normal" ? 8_000 : state === "low" ? 1_800 : 0,
+  allowance: 10_000,
+  estimatedVideos: null,
+  periodStart: PERIOD,
+});
+const creditSnapshot = (state: CreditsSnapshot["state"]): UxSnapshot => ({ worker: null, projects: null, credits: credit(state) });
+
+function creditPoll(store: NotificationStore, memory: UxMemory | null, state: CreditsSnapshot["state"]) {
+  const snapshot = creditSnapshot(state);
+  const stepped = stepUx(memory, snapshot, new Date("2026-10-23T15:00:00.000Z"));
+  return { memory: stepped.memory, added: store.add(stepped.events, snapshot.credits) };
+}
 
 /** localStorage falso compartilhado (como o do navegador entre abas da mesma origem). */
 function memoryStorage(): KeyValueStorage & { data: Map<string, string> } {
@@ -76,5 +91,56 @@ describe("multi-aba", () => {
     const s = new NotificationStore("uA", blocked, null);
     expect(s.add([event("e")])).toHaveLength(1);
     expect(s.get().items).toHaveLength(1);
+  });
+});
+
+describe("rearme persistente dos limites de créditos", () => {
+  it.each(["low", "empty"] as const)("normal → %s → normal → mesmo limite cria dois episódios, sem repetir durante o episódio ou após reload", (threshold) => {
+    const storage = memoryStorage();
+    const bus = memoryBus();
+    let store = new NotificationStore("uA", storage, bus);
+    let memory: UxMemory | null = null;
+    const counts: number[] = [];
+
+    for (const state of ["normal", threshold, threshold, "normal", threshold, threshold] as const) {
+      const result = creditPoll(store, memory, state);
+      memory = result.memory;
+      counts.push(result.added.length);
+    }
+
+    expect(counts).toEqual([0, 1, 0, 0, 1, 0]);
+    expect(store.get().items.filter((item) => item.kind === `credits.${threshold}`).map((item) => item.key).sort()).toEqual([
+      `credits:${threshold}:${PERIOD}:10000:0`,
+      `credits:${threshold}:${PERIOD}:10000:1`,
+    ]);
+
+    store.dispose();
+    store = new NotificationStore("uA", storage, bus);
+    const reload = creditPoll(store, null, threshold);
+    expect(reload.added).toEqual([]);
+    expect(store.get().items.filter((item) => item.kind === `credits.${threshold}`)).toHaveLength(2);
+  });
+
+  it.each(["low", "empty"] as const)("duas abas convergem para um único evento por episódio de %s", (threshold) => {
+    const storage = memoryStorage();
+    const bus = memoryBus();
+    const a = new NotificationStore("uA", storage, bus);
+    const b = new NotificationStore("uA", storage, bus);
+    let memoryA: UxMemory | null = null;
+    let memoryB: UxMemory | null = null;
+
+    let resultA = creditPoll(a, memoryA, "normal"); memoryA = resultA.memory;
+    let resultB = creditPoll(b, memoryB, "normal"); memoryB = resultB.memory;
+    resultA = creditPoll(a, memoryA, threshold); memoryA = resultA.memory;
+    resultB = creditPoll(b, memoryB, threshold); memoryB = resultB.memory;
+    expect(resultA.added.length + resultB.added.length).toBe(1);
+
+    resultA = creditPoll(a, memoryA, "normal"); memoryA = resultA.memory;
+    resultB = creditPoll(b, memoryB, "normal"); memoryB = resultB.memory;
+    resultB = creditPoll(b, memoryB, threshold); memoryB = resultB.memory;
+    resultA = creditPoll(a, memoryA, threshold); memoryA = resultA.memory;
+    expect(resultA.added.length + resultB.added.length).toBe(1);
+    expect(a.get().items.filter((item) => item.kind === `credits.${threshold}`)).toHaveLength(2);
+    expect(b.get().items.filter((item) => item.kind === `credits.${threshold}`)).toHaveLength(2);
   });
 });

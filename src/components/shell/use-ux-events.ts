@@ -88,10 +88,12 @@ export function useUxEvents(status: ShellStatus | null, pathname: string) {
     // Conta mudou (ou saiu): recomeça do zero — baseline, sem comparar com a conta anterior.
     if (memory.current.namespace !== ns) memory.current = { namespace: ns, value: null };
     if (!target) return;
-    const { events, memory: next } = stepUx(memory.current.value, snapshotOf(status));
+    const snapshot = snapshotOf(status);
+    const { events, memory: next } = stepUx(memory.current.value, snapshot);
     memory.current = { namespace: ns, value: next };
-    if (!events.length) return;
-    for (const e of target.add(events)) {
+    const added = target.add(events, snapshot.credits);
+    if (!added.length) return;
+    for (const e of added) {
       if (!toastFor(e, pathRef.current)) continue;
       toast.show({ id: e.key, title: e.kind === "project.completed" ? `✓ ${e.title}` : e.title, description: e.description, tone: e.tone,
         ...(e.href && e.actionLabel ? { action: { label: e.actionLabel, onClick: () => router.push(e.href!) } } : {}) });
