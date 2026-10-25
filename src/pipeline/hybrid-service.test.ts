@@ -25,6 +25,8 @@ import { ELEVENLABS_VOICES } from "@/config/voices";
 import { VersionedMockRenderer } from "./offline-service";
 import { FileCostLedger } from "@/storage/file-cost-ledger";
 import { FilePipelineStore } from "@/storage/file-pipeline-store";
+import type { PipelineStore } from "@/storage/pipeline-store";
+import type { GenerationJob } from "@/domain/pipeline";
 import type { PipelineDeps } from "./pipeline-service";
 import { getCampaignView } from "@/application/campaign-actions";
 import { LocalUploadStore } from "@/storage/upload-store";
@@ -414,6 +416,65 @@ describe("execução híbrida por etapa — somente transportes falsos", () => {
     await api.retryFailedScene(id, sceneId, quote.token);
     expect(persistedRuns).toHaveLength(1);
     expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(2);
+  });
+  it.each([
+    { retryFails: false, expectedOutcome: "succeeded" as const },
+    { retryFails: true, expectedOutcome: "failed" as const },
+  ])("reconcilia intent running após tentativa e ledger persistidos ($expectedOutcome) sem novo submit", async ({ retryFails, expectedOutcome }) => {
+    const f = await setup({ scenes: "real" }, false);
+    const id = f.campaign.jobIds[0]!;
+    (f.videoOptions as { failure?: boolean }).failure = true;
+    const first = await f.service.quoteStage(id, "scenes");
+    await (await f.service.executeStage(id, "scenes", first.token)).completion;
+    const failed = await f.service.getJob(id);
+    const sceneId = failed.scenes.find(scene => scene.attempts.at(-1)?.status === "failed")!.sceneId;
+    const quote = await f.service.quoteFailedSceneRetry(id, sceneId);
+    const runs: JobRun[] = [];
+    const api = f.build({ dispatcher: { enqueuePlanning: async () => {}, enqueueJob: async (_job, run) => { runs.push(run); } } });
+    await api.retryFailedScene(id, sceneId, quote.token);
+    (f.videoOptions as { failure?: boolean }).failure = retryFails;
+
+    const durable = new FilePipelineStore(f.config.dataDir);
+    let crashOnce = true;
+    const crashingStore: PipelineStore = {
+      saveCampaign: campaign => durable.saveCampaign(campaign),
+      getCampaign: campaignId => durable.getCampaign(campaignId),
+      getJob: jobId => durable.getJob(jobId),
+      listJobs: campaignId => durable.listJobs(campaignId),
+      listCampaignIds: () => durable.listCampaignIds(),
+      saveJob: async (job: GenerationJob) => {
+        const intent = job.sceneRetryIntents?.find(item => item.quoteToken === quote.token);
+        const attemptPersisted = job.scenes.find(scene => scene.sceneId === sceneId)?.attempts.some(attempt => attempt.attemptNumber === 2);
+        if (crashOnce && intent?.state === "settled" && attemptPersisted) {
+          crashOnce = false;
+          throw new Error("queda simulada antes de encerrar a intent");
+        }
+        await durable.saveJob(job);
+      },
+    };
+    const submitsBefore = f.video.calls.filter(call => call.url.endsWith("/image_to_video")).length;
+    const ledgerBefore = (await f.ledger()).filter(entry => !entry.simulated).length;
+    await expect(f.build({ store: crashingStore }).runJobTask(id, runs[0]!)).rejects.toThrow(/queda simulada/);
+
+    const interrupted = await durable.getJob(id);
+    expect(interrupted.sceneRetryIntents?.find(item => item.quoteToken === quote.token)?.state).toBe("running");
+    expect(interrupted.scenes.find(scene => scene.sceneId === sceneId)?.attempts.some(attempt => attempt.attemptNumber === 2)).toBe(true);
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(submitsBefore + 1);
+    expect((await f.ledger()).filter(entry => !entry.simulated)).toHaveLength(ledgerBefore + 1);
+
+    const resumed = await f.build().runJobTask(id, runs[0]!);
+    const reconciled = await durable.getJob(id);
+    expect(reconciled.sceneRetryIntents?.find(item => item.quoteToken === quote.token)).toMatchObject({ state: "settled", outcome: expectedOutcome });
+    expect(resumed.kind).toBe(retryFails ? "FAILED" : "WAITING_STAGE");
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(submitsBefore + 1);
+    expect((await f.ledger()).filter(entry => !entry.simulated)).toHaveLength(ledgerBefore + 1);
+    if (retryFails) {
+      // A autorização antiga não vale para uma nova tentativa: replay do token não submete; nova cotação é outra decisão.
+      await (await f.build().retryFailedScene(id, sceneId, quote.token)).completion;
+      expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(submitsBefore + 1);
+      const next = await f.service.quoteFailedSceneRetry(id, sceneId);
+      expect(next.token).not.toBe(quote.token);
+    }
   });
   it("cotação stale é bloqueada antes do provider e libera uma nova decisão", async () => {
     const f = await setup({ scenes: "real" }, false);

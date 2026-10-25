@@ -634,6 +634,14 @@ export class PipelineService {
     const intent = ctx.job.sceneRetryIntents?.find(item => item.id === retryIntentId);
     if (!intent) throw new Error("Intenção de retry não encontrada.");
     if (intent.state === "settled") return this.outcomeForSettledRetry(ctx.job);
+    // Queda depois da tentativa persistida e antes do settle: reconcilia pela identidade da intent, sem reenviar.
+    const attempts = ctx.job.scenes.find(item => item.sceneId === intent.sceneId)?.attempts ?? [];
+    const persisted = attempts.find(attempt => attempt.attemptNumber === intent.nextAttemptNumber);
+    if (persisted && attempts[intent.nextAttemptNumber - 2]?.id === intent.failedAttemptId) {
+      return this.settleSceneRetryIntent(jobId, retryIntentId, persisted.status === "failed"
+        ? { kind: "FAILED", job: ctx.job, error: persisted.error ?? ctx.job.error ?? "A tentativa falhou." }
+        : { kind: "WAITING_STAGE", job: ctx.job });
+    }
     const target = this.failedSceneTarget(ctx, intent.sceneId);
     const quote = await this.quoteStage(jobId, target.stage, true, true, intent.sceneId);
     const unchanged = target.latest.id === intent.failedAttemptId
@@ -660,7 +668,12 @@ export class PipelineService {
       const current = await this.getJob(jobId); const now = this.deps.clock();
       await this.deps.store.saveJob({ ...current, sceneRetryIntents: current.sceneRetryIntents?.map(item => item.id === retryIntentId ? { ...item, state: "running" as const, updatedAt: now } : item) });
     });
-    let outcome = await this.performHybridStage(jobId, intent.stage, true, intent.sceneId);
+    return this.settleSceneRetryIntent(jobId, retryIntentId, await this.performHybridStage(jobId, intent.stage, true, intent.sceneId));
+  }
+
+  /** Trabalho gratuito restante (render) + settle da intent conforme o resultado real da tentativa. */
+  private async settleSceneRetryIntent(jobId: string, retryIntentId: string, result: GenerationOutcome): Promise<GenerationOutcome> {
+    let outcome = result;
     if (outcome.kind === "WAITING_STAGE") {
       const render = await this.quoteStage(jobId, "render", true);
       if (render.ready && render.estimatedBrl === 0) {
