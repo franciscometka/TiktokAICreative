@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GenerationJob } from "@/domain/pipeline";
+import { assertExecutionFence } from "@/config/execution-policy";
 import { PNG_BYTES } from "@/test/app-fixtures";
 import { cloudHarness, type CloudHarness } from "@/test/cloud-harness";
 import { TEST_USER } from "@/test/pglite";
@@ -104,8 +105,7 @@ describe("restart do worker", () => {
       const runtime = workerUserRuntime(infra, userId, roots);
       runtime.deps.service.runJobTask = async (id) => {
         if (blockBeforeProvider) { enteredA(); await blockedA; }
-        const policy = await import("@/config/execution-policy") as typeof import("@/config/execution-policy") & { assertExecutionFence?: () => Promise<void> };
-        await policy.assertExecutionFence?.();
+        await assertExecutionFence();
         providerSubmits++;
         const current = await runtime.store.getJob(id);
         const attemptId = `fenced_attempt_${providerSubmits}`;
@@ -116,7 +116,7 @@ describe("restart do worker", () => {
             attempts: [...scene.attempts, { id: attemptId, kind: "video" as const, sceneId, attemptNumber: scene.attempts.length + 1, provider: "fake-paid", model: "fake-v1", providerJobId: `op_${providerSubmits}`, status: "succeeded" as const, active: true, isMock: false, assetUri: `fake://${attemptId}`, durationSeconds: 4, createdAt: new Date().toISOString() }],
           } : scene),
         };
-        await policy.assertExecutionFence?.();
+        await assertExecutionFence();
         await runtime.store.saveJob(next);
         await new PostgresCostLedger(h.db, TEST_USER).record({ kind: "actual", id: `cost_${attemptId}`, campaignId, jobId, creativeId: current.creativeId, sceneId, attemptId, llmCallId: null, operation: "video_generation", category: "video", description: "fenced provider submit", provider: "fake-paid", model: "fake-v1", unit: "per_generation", quantity: 1, unitPriceUsd: 1, costUsd: 1, exchangeRate: 5, costBrl: 5, simulated: false, createdAt: new Date().toISOString() });
         return { kind: "WAITING_STAGE" as const, job: next };
