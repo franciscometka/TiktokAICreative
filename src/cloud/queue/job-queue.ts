@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isDeepStrictEqual } from "node:util";
 import type { Campaign, GenerationJob } from "@/domain/pipeline";
 import { isPaidRun, jobKey, planningKey, type ActivitySnapshot, type JobRun, type WorkDispatcher, type ActiveState } from "@/pipeline/dispatch";
 import { isUniqueViolation, type SqlClient } from "../db/sql";
@@ -201,7 +202,7 @@ export class QueueDispatcher implements WorkDispatcher {
       userId: this.userId, campaignId: job.campaignId, jobId: job.id, dedupeKey: jobKey(job.id),
       payload, paid: isPaidRun(run, job),
     });
-    if (!queued.created && JSON.stringify(queued.task.payload) !== JSON.stringify(payload)) {
+    if (!queued.created && !isDeepStrictEqual(queued.task.payload, payload)) {
       throw new Error("Este job já possui outra operação ativa; o retry específico não foi enfileirado.");
     }
   }
