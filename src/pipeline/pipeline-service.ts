@@ -648,7 +648,8 @@ export class PipelineService {
       const reason = quote.blocked ?? "A cotação mudou; revise e aprove novamente.";
       const blocked = await this.withJobLock(jobId, async () => {
         const current = await this.getJob(jobId); const now = this.deps.clock();
-        const next = { ...current, sceneRetryIntents: current.sceneRetryIntents?.map(item => item.id === retryIntentId ? { ...item, state: "settled" as const, outcome: "blocked" as const, updatedAt: now } : item), error: reason };
+        const terminal = current.status === "generating" || current.status === "rendering" ? transitionJob(current, "failed", now) : current;
+        const next = { ...terminal, sceneRetryIntents: terminal.sceneRetryIntents?.map(item => item.id === retryIntentId ? { ...item, state: "settled" as const, outcome: "blocked" as const, updatedAt: now } : item), error: reason };
         await this.deps.store.saveJob(next); return next;
       });
       return { kind: "FAILED", job: blocked, error: reason };

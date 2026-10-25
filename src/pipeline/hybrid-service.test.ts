@@ -393,6 +393,62 @@ describe("execução híbrida por etapa — somente transportes falsos", () => {
     expect(persistedRuns).toHaveLength(1);
     expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(2);
   });
+  it("cotação stale é bloqueada antes do provider e libera uma nova decisão", async () => {
+    const f = await setup({ scenes: "real" }, false);
+    const id = f.campaign.jobIds[0]!;
+    (f.videoOptions as { failure?: boolean }).failure = true;
+    const first = await f.service.quoteStage(id, "scenes");
+    await (await f.service.executeStage(id, "scenes", first.token)).completion;
+    const failed = await f.service.getJob(id);
+    const sceneId = failed.scenes.find(scene => scene.attempts.at(-1)?.status === "failed")!.sceneId;
+    const quote = await f.service.quoteFailedSceneRetry(id, sceneId);
+    const runs: JobRun[] = [];
+    const api = f.build({ dispatcher: { enqueuePlanning: async () => {}, enqueueJob: async (_job, run) => { runs.push(run); } } });
+    await api.retryFailedScene(id, sceneId, quote.token);
+    const store = new FilePipelineStore(f.config.dataDir);
+    const authorized = await store.getJob(id);
+    await store.saveJob({ ...authorized, stageRevision: (authorized.stageRevision ?? 0) + 1 });
+    const calls = f.video.calls.filter(call => call.url.endsWith("/image_to_video")).length;
+
+    const stale = await f.build().runJobTask(id, runs[0]!);
+    expect(stale.kind).toBe("FAILED");
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(calls);
+    expect((await f.service.getJob(id))).toMatchObject({ status: "failed", sceneRetryIntents: [{ state: "settled", outcome: "blocked" }] });
+
+    const fresh = await api.quoteFailedSceneRetry(id, sceneId);
+    expect(fresh.token).not.toBe(quote.token);
+    (f.videoOptions as { failure?: boolean }).failure = false;
+    await api.retryFailedScene(id, sceneId, fresh.token);
+    await f.build().runJobTask(id, runs[1]!);
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(calls + 1);
+  });
+  it("operação paga incerta bloqueia retry de cena em todos os recipes duráveis", async () => {
+    const f = await setup({ scenes: "real" }, false);
+    const id = f.campaign.jobIds[0]!;
+    (f.videoOptions as { failure?: boolean }).failure = true;
+    const first = await f.service.quoteStage(id, "scenes");
+    await (await f.service.executeStage(id, "scenes", first.token)).completion;
+    const store = new FilePipelineStore(f.config.dataDir);
+    const failed = await store.getJob(id);
+    const sceneId = failed.scenes.find(scene => scene.attempts.at(-1)?.status === "failed")!.sceneId;
+    const latest = failed.scenes.find(scene => scene.sceneId === sceneId)!.attempts.at(-1)!;
+    const now = failed.updatedAt;
+    const markers = [
+      { stageIntents: [{ stage: "scenes" as const, unit: sceneId, state: "running" as const, createdAt: now }] },
+      { presenterTasks: [{ attemptId: "presenter_uncertain", sceneId, avatarPresetId: "influencer" as const, state: "submitting" as const, requestedDurationSeconds: 4, audio: { narrationAttemptId: "audio_1", narrationVersion: "v1", startSeconds: 0, endSeconds: 4 }, estimatedCostUsd: 0.1, createdAt: now }] },
+      { videoTasks: [{ attemptId: latest.id, sceneId, state: "pending" as const, providerJobId: "video_op_1", provider: "runway", model: "gen4_turbo", createdAt: now }] },
+      { ugcVideoOperations: [{ attemptId: latest.id, sceneId, state: "uncertain" as const, provider: "veo", model: "veo-3.1-fast-generate-preview", referenceId: "ref_1", referenceVersion: "v1", requestedDurationSeconds: 8, estimatedCostUsd: 0.8, createdAt: now }] },
+    ];
+    const calls = f.video.calls.length;
+    for (const marker of markers) {
+      await store.saveJob({ ...failed, stageIntents: undefined, presenterTasks: undefined, videoTasks: undefined, ugcVideoOperations: undefined, ...marker });
+      const quote = await f.service.quoteFailedSceneRetry(id, sceneId);
+      expect(quote.ready).toBe(false);
+      expect(quote.blocked).toMatch(/segurança|sem confirmação/i);
+      await expect(f.service.retryFailedScene(id, sceneId, quote.token)).rejects.toThrow(/segurança|sem confirmação/i);
+      expect(f.video.calls).toHaveLength(calls);
+    }
+  });
   it("duas aprovações concorrentes usam uma intent e uma nova falha exige outra quote", async () => {
     const f = await setup({ scenes: "real" }, false);
     const id = f.campaign.jobIds[0]!;
