@@ -74,7 +74,7 @@ describe("AI UGC — pipeline MOCK completo, offline", () => {
     const approved = await h.service.approveUgcReference(h.jobId, reference.id, FULL_REVIEW);
     expect((await approved.completion!).kind).toBe("FAILED");
     job = await h.service.getJob(h.jobId);
-    const sceneId = job.scenes.find(scene => scene.attempts.at(-1)?.ugc)?.sceneId!;
+    const sceneId = job.scenes.find(scene => scene.attempts.at(-1)?.ugc)!.sceneId;
     const quote = await h.service.quoteFailedSceneRetry(h.jobId, sceneId);
     expect(quote.stage).toBe("ugc_video");
     videoOptions.fail = false;

@@ -483,7 +483,7 @@ describe("execução híbrida por etapa — somente transportes falsos", () => {
     const avatar = await f.service.quoteStage(id, "avatar");
     expect((await (await f.service.executeStage(id, "avatar", avatar.token)).completion).kind).toBe("FAILED");
     const failed = await f.service.getJob(id);
-    const sceneId = failed.scenes.find(scene => scene.attempts.at(-1)?.presenter)?.sceneId!;
+    const sceneId = failed.scenes.find(scene => scene.attempts.at(-1)?.presenter)!.sceneId;
     const before = (await f.ledger()).filter(entry => entry.sceneId === sceneId && !entry.simulated);
     const quote = await f.service.quoteFailedSceneRetry(id, sceneId);
     expect(quote.stage).toBe("avatar");
