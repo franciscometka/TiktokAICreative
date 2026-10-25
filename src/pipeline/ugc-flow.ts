@@ -5,6 +5,7 @@ import { buildActualCost, type Usage } from "@/costs/calculate";
 import type { CostLedger } from "@/costs/ledger";
 import type { CreativePlan, ScenePlan } from "@/domain/creative";
 import { checkClipDuration, clipRejectionMessage } from "@/domain/media-integrity";
+import { assertExecutionFence, ExecutionLeaseLostError } from "@/config/execution-policy";
 import type { Campaign, GenerationJob, MediaAttempt } from "@/domain/pipeline";
 import { fidelityPromptLines, initialFidelity } from "@/domain/fidelity";
 import {
@@ -190,6 +191,7 @@ export async function generateUgcReference(
     }));
 
   const recordCost = async (usage: Usage) => {
+    if (!provider.descriptor.isMock) await assertExecutionFence();
     const id = `cost_${reference.id}`;
     if ((await deps.ledger.list({ jobId: job.id })).some((e) => e.id === id)) return;
     await deps.ledger.record(buildActualCost({
@@ -209,7 +211,11 @@ export async function generateUgcReference(
         prepared = await provider.prepare(request, reference.metadata);
         reference = await persist({ ...reference, metadata: { ...(reference.metadata ?? {}), ...prepared.metadata } });
       }
-      if (!provider.descriptor.isMock) reference = await persist({ ...reference, metadata: { ...(reference.metadata ?? {}), paidSubmissionStarted: true } });
+      if (!provider.descriptor.isMock) {
+        await assertExecutionFence();
+        reference = await persist({ ...reference, metadata: { ...(reference.metadata ?? {}), paidSubmissionStarted: true } });
+        await assertExecutionFence();
+      }
       const ref = await provider.submit(request, prepared);
       reference = await persist({ ...reference, state: "pending", providerJobId: ref.providerJobId, ...(ref.requestId ? { requestId: ref.requestId } : {}) });
     }
@@ -228,9 +234,11 @@ export async function generateUgcReference(
       imageUri = stored.uri;
       version = stored.version;
     }
+    if (!provider.descriptor.isMock) await assertExecutionFence();
     reference = await persist({ ...reference, version, state: "succeeded", imageUri, ...(result.requestId ? { requestId: result.requestId } : {}),
       ...(result.metadata ? { metadata: { ...(reference.metadata ?? {}), ...result.metadata } } : {}) });
   } catch (error) {
+    if (error instanceof ExecutionLeaseLostError) throw error;
     if (error instanceof ProviderError && error.billedUsage) await recordCost(error.billedUsage);
     if (errorPhase(error, provider.descriptor.isMock) === "uncertain") {
       const message = error instanceof Error ? error.message : "Resultado incerto";
@@ -306,6 +314,7 @@ export async function generateUgcScene(
   };
   const base = { id: attemptId, kind: "video" as const, sceneId: scene.id, attemptNumber: previous.length + 1, provider: provider.descriptor.id, model: provider.descriptor.model, isMock: provider.descriptor.isMock, createdAt: deps.clock() };
   const recordCost = async (usage: Usage) => {
+    if (!provider.descriptor.isMock) await assertExecutionFence();
     if ((await deps.ledger.list({ jobId: job.id })).some(entry => entry.attemptId === attemptId && entry.operation === "ugc_video_generation")) return;
     await deps.ledger.record(buildActualCost({
       id: `cost_${attemptId}`, campaignId: campaign.id, jobId: job.id, creativeId: plan.id, sceneId: scene.id, attemptId,
@@ -334,6 +343,7 @@ export async function generateUgcScene(
       : undefined;
     if (!ref) {
       if (!provider.descriptor.isMock) {
+        await assertExecutionFence();
         await persistOperation({
           ...intent, attemptId, sceneId: scene.id, state: "submitting", provider: provider.descriptor.id, model: provider.descriptor.model,
           referenceId: reference.id, referenceVersion: reference.version, requestedDurationSeconds: quote.quantity,
@@ -349,6 +359,7 @@ export async function generateUgcScene(
       if (!provider.descriptor.isMock) {
         const preparedOperation = job.ugcVideoOperations?.find(item => item.attemptId === attemptId);
         if (preparedOperation) await persistOperation({ ...preparedOperation, metadata: { ...(preparedOperation.metadata ?? {}), paidSubmissionStarted: true }, updatedAt: deps.clock() });
+        await assertExecutionFence();
       }
       ref = await provider.submit(request, prepared);
       providerJobId = ref.providerJobId;
@@ -390,6 +401,7 @@ export async function generateUgcScene(
         ...(stored.audioSilence ? { audioSilence: stored.audioSilence } : {}) };
     }
   } catch (error) {
+    if (error instanceof ExecutionLeaseLostError) throw error;
     if (error instanceof ProviderError && error.billedUsage) await recordCost(error.billedUsage);
     const operation = job.ugcVideoOperations?.find(item => item.attemptId === attemptId);
     const message = error instanceof Error ? error.message : "Falha na cena UGC; sem retry automático.";
@@ -414,6 +426,7 @@ export async function generateUgcScene(
     scenes: job.scenes.map((s) => (s.sceneId === scene.id ? { ...s, attempts: [...s.attempts.map((a) => (attempt.active ? { ...a, active: false } : a)), attempt] } : s)),
     updatedAt: deps.clock(),
   };
+  if (!provider.descriptor.isMock) await assertExecutionFence();
   await deps.store.saveJob(job);
   return { job, attempt };
 }

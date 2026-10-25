@@ -118,6 +118,16 @@ export class PostgresJobQueue {
     return r.rowCount > 0;
   }
 
+  /** Fence do claim atual: task + worker + geração (`attempts`). Também renova o lease. */
+  async checkpoint(taskId: string, workerId: string, claimAttempt: number, leaseSeconds: number): Promise<boolean> {
+    const r = await this.db.query(
+      `update job_queue set heartbeat_at = now(), lease_expires_at = now() + make_interval(secs => $4), updated_at = now()
+       where id = $1 and locked_by = $2 and attempts = $3 and status = 'running' and lease_expires_at >= now()`,
+      [taskId, workerId, claimAttempt, leaseSeconds],
+    );
+    return r.rowCount > 0;
+  }
+
   async finish(taskId: string, workerId: string, result: { status: Exclude<QueueStatus, "queued" | "running">; outcome: string; error?: string; blockedReason?: string }): Promise<boolean> {
     const r = await this.db.query(
       `update job_queue set status = $3, outcome = $4, last_error = $5, blocked_reason = $6, finished_at = now(), updated_at = now(), lease_expires_at = null

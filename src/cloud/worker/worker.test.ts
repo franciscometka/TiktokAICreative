@@ -1,10 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { GenerationJob } from "@/domain/pipeline";
 import { PNG_BYTES } from "@/test/app-fixtures";
 import { cloudHarness, type CloudHarness } from "@/test/cloud-harness";
 import { TEST_USER } from "@/test/pglite";
 import { PostgresPipelineStore } from "../repos/pipeline-repository";
-import { finishForOutcome } from "./worker";
+import { workerUserRuntime } from "../runtime";
+import { PostgresCostLedger } from "../repos/ledger-repository";
+import { CloudWorker, finishForOutcome } from "./worker";
 import { QueueDispatcher } from "../queue/job-queue";
 
 let h: CloudHarness;
@@ -73,6 +78,74 @@ describe("fila durável (claim transacional)", () => {
 });
 
 describe("restart do worker", () => {
+  it("worker vivo que perdeu o lease não submete nem grava depois do novo claim", async () => {
+    const { campaignId, jobId } = await plannedProject("prod_fenced_retry");
+    const store = new PostgresPipelineStore(h.db, TEST_USER);
+    const original = await store.getJob(jobId);
+    const sceneId = original.scenes.find(scene => scene.requiresGeneratedVideo)!.sceneId;
+    const queued = await h.infra.queue.enqueue({
+      userId: TEST_USER,
+      campaignId,
+      jobId,
+      payload: { kind: "job_run", run: { kind: "scene_retry", retryIntentId: "scene_retry_fenced" } },
+      paid: true,
+      dedupeKey: `job:${jobId}`,
+    });
+    let releaseA!: () => void;
+    let enteredA!: () => void;
+    const blockedA = new Promise<void>(resolve => { releaseA = resolve; });
+    const aEntered = new Promise<void>(resolve => { enteredA = resolve; });
+    let providerSubmits = 0;
+    const tmp = await mkdtemp(join(tmpdir(), "worker-fence-"));
+    const heartbeat = h.infra.queue.heartbeat.bind(h.infra.queue);
+    h.infra.queue.heartbeat = async (taskId, workerId, leaseSeconds) => workerId === "worker-fence-a" ? false : heartbeat(taskId, workerId, leaseSeconds);
+
+    const runtimeFor = (blockBeforeProvider: boolean) => (infra: typeof h.infra, userId: string, roots: { projectRoot: string; assetRoot: string }) => {
+      const runtime = workerUserRuntime(infra, userId, roots);
+      runtime.deps.service.runJobTask = async (id) => {
+        if (blockBeforeProvider) { enteredA(); await blockedA; }
+        const policy = await import("@/config/execution-policy") as typeof import("@/config/execution-policy") & { assertExecutionFence?: () => Promise<void> };
+        await policy.assertExecutionFence?.();
+        providerSubmits++;
+        const current = await runtime.store.getJob(id);
+        const attemptId = `fenced_attempt_${providerSubmits}`;
+        const next = {
+          ...current,
+          scenes: current.scenes.map(scene => scene.sceneId === sceneId ? {
+            ...scene,
+            attempts: [...scene.attempts, { id: attemptId, kind: "video" as const, sceneId, attemptNumber: scene.attempts.length + 1, provider: "fake-paid", model: "fake-v1", providerJobId: `op_${providerSubmits}`, status: "succeeded" as const, active: true, isMock: false, assetUri: `fake://${attemptId}`, durationSeconds: 4, createdAt: new Date().toISOString() }],
+          } : scene),
+        };
+        await policy.assertExecutionFence?.();
+        await runtime.store.saveJob(next);
+        await new PostgresCostLedger(h.db, TEST_USER).record({ kind: "actual", id: `cost_${attemptId}`, campaignId, jobId, creativeId: current.creativeId, sceneId, attemptId, llmCallId: null, operation: "video_generation", category: "video", description: "fenced provider submit", provider: "fake-paid", model: "fake-v1", unit: "per_generation", quantity: 1, unitPriceUsd: 1, costUsd: 1, exchangeRate: 5, costBrl: 5, simulated: false, createdAt: new Date().toISOString() });
+        return { kind: "WAITING_STAGE" as const, job: next };
+      };
+      return runtime;
+    };
+    const workerA = new CloudWorker({ infra: h.infra, workerId: "worker-fence-a", tmpRoot: join(tmp, "a"), projectRoot: process.cwd(), leaseSeconds: 1, pollIntervalMs: 10, chdir: false, runtimeFor: runtimeFor(true) });
+    const workerB = new CloudWorker({ infra: h.infra, workerId: "worker-fence-b", tmpRoot: join(tmp, "b"), projectRoot: process.cwd(), leaseSeconds: 1, pollIntervalMs: 10, chdir: false, runtimeFor: runtimeFor(false) });
+
+    try {
+      const oldRun = workerA.tick();
+      await aEntered;
+      await sleep(1_300);
+      expect(await workerB.recoverExpired()).toBe(1);
+      expect((await h.infra.queue.get(queued.task.id))?.status).toBe("queued");
+      expect(await workerB.tick()).toBe("processed");
+      releaseA();
+      expect(await oldRun).toBe("processed");
+
+      expect(providerSubmits).toBe(1);
+      expect((await store.getJob(jobId)).scenes.find(scene => scene.sceneId === sceneId)!.attempts).toHaveLength(1);
+      expect((await new PostgresCostLedger(h.db, TEST_USER).list({ jobId })).filter(entry => !entry.simulated)).toHaveLength(1);
+    } finally {
+      releaseA();
+      h.infra.queue.heartbeat = heartbeat;
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("operação paga em voo + worker morto → blocked, sem novo POST; o resto da fila segue", async () => {
     const { jobId, token } = await plannedProject("prod_r1");
     expect((await h.call("POST", `/v1/jobs/${jobId}/generate`, { body: { token } })).status).toBe(202);

@@ -2,7 +2,7 @@ import type { ProjectFacts } from "@/application/project-facts";
 import { createHash } from "node:crypto";
 import { EXECUTION_STAGES, MOCK_STAGE_MODES, type StageModes, type ExecutionStage, type ExecutionMode, type JobQuote, type StageCapabilities, type StageQuote } from "@/domain/execution";
 import type { PreflightCheck } from "@/domain/readiness";
-import { MOCK_BLOCKED, withRealStageAuthorization } from "@/config/execution-policy";
+import { assertExecutionFence, ExecutionLeaseLostError, MOCK_BLOCKED, withRealStageAuthorization } from "@/config/execution-policy";
 import { RUNWAY_VIDEO } from "@/config/video-models";
 import { SIMPLE_QUALITY_PRESETS, SIMPLE_UGC_QUALITY_PRESETS } from "@/config/simple-presets";
 import type { PresetQuality } from "@/config/quality-presets";
@@ -645,6 +645,7 @@ export class PipelineService {
       && quote.provider === intent.provider && quote.model === intent.model
       && toCents(quote.estimatedBrl) === toCents(intent.estimatedBrl);
     if (!unchanged || quote.blocked || quote.done) {
+      await assertExecutionFence();
       const reason = quote.blocked ?? "A cotação mudou; revise e aprove novamente.";
       const blocked = await this.withJobLock(jobId, async () => {
         const current = await this.getJob(jobId); const now = this.deps.clock();
@@ -654,6 +655,7 @@ export class PipelineService {
       });
       return { kind: "FAILED", job: blocked, error: reason };
     }
+    await assertExecutionFence();
     await this.withJobLock(jobId, async () => {
       const current = await this.getJob(jobId); const now = this.deps.clock();
       await this.deps.store.saveJob({ ...current, sceneRetryIntents: current.sceneRetryIntents?.map(item => item.id === retryIntentId ? { ...item, state: "running" as const, updatedAt: now } : item) });
@@ -668,6 +670,7 @@ export class PipelineService {
     }
     const latest = await this.getJob(jobId);
     if (!paidOperationInFlight(latest)) {
+      await assertExecutionFence();
       const now = this.deps.clock();
       const settled = { ...latest, sceneRetryIntents: latest.sceneRetryIntents?.map(item => item.id === retryIntentId ? { ...item, state: "settled" as const, outcome: outcome.kind === "FAILED" ? "failed" as const : "succeeded" as const, updatedAt: now } : item) };
       await this.deps.store.saveJob(settled);
@@ -926,6 +929,7 @@ export class PipelineService {
               if (mode === "real") break; // Uma cena paga por clique, nunca a próxima automaticamente.
             }
           }
+          await assertExecutionFence();
           job = { ...job, stageIntents: job.stageIntents?.map(i => i.stage === stage ? { ...i, state: "settled" as const } : i) };
           if (stage === "narration" && activeAttempt(job.audioAttempts)?.narration?.fit?.action === "review") { const next = transitionJob(job, "audio_review", this.deps.clock()); await this.deps.store.saveJob(next); return { kind: "AUDIO_REVIEW", job: next }; }
           job = { ...job, renderStale: true, waitingForStage: stage, updatedAt: this.deps.clock() };
@@ -934,6 +938,7 @@ export class PipelineService {
         });
       });
     } catch (error) {
+      if (error instanceof ExecutionLeaseLostError) throw error;
       const job = await this.getJob(jobId);
       if (error instanceof PresenterPendingError || error instanceof UgcPendingError) return { kind: "WAITING_STAGE", job };
       if (error instanceof UgcCostChangedError) {
@@ -1345,8 +1350,10 @@ export class PipelineService {
 
     let outcome: { ok: true; result: PlanningResult } | { ok: false; error: unknown };
     try {
+      await assertExecutionFence();
       outcome = { ok: true, result: await (this.deps.hybrid ? this.deps.hybrid.planner(started.request.stageModes?.planning ?? "mock") : this.deps.planner).plan(this.toPlanningRequest(started.request, settings)) };
     } catch (error) {
+      if (error instanceof ExecutionLeaseLostError) throw error;
       outcome = { ok: false, error };
     }
 
@@ -2094,9 +2101,11 @@ export class PipelineService {
           catch (error) { if (error instanceof ProviderError && error.billedUsage) ctx.job = { ...ctx.job, videoTasks: ctx.job.videoTasks?.map(t => t.providerJobId === ref.providerJobId ? { ...t, state: "settled" as const } : t) }; throw error; }
         }
         if (durable) {
+          await assertExecutionFence();
           ctx.job = { ...ctx.job, videoTasks: [...(ctx.job.videoTasks ?? []), { attemptId, sceneId: scene.id, providerJobId: "", provider: provider.descriptor.id, model: provider.descriptor.model, createdAt: this.deps.clock(), state: "submitting" }] };
           await this.deps.store.saveJob(ctx.job);
         }
+        await assertExecutionFence();
         const ref = await provider.generateScene(this.videoRequest(ctx, scene));
         const task = { attemptId, sceneId: scene.id, providerJobId: ref.providerJobId, provider: provider.descriptor.id, model: provider.descriptor.model, createdAt: this.deps.clock(), ...(durable ? { state: "pending" as const } : {}) };
         ctx.job = { ...ctx.job, videoTasks: [...(ctx.job.videoTasks ?? []).filter(t => !(durable && t.sceneId === scene.id && t.state === "submitting")), task] };
@@ -2151,6 +2160,7 @@ export class PipelineService {
       operation: "audio_generation",
       description: `Narração (TTS · ${speaker.name})`,
       run: async () => {
+        await assertExecutionFence();
         const ref = await provider.generateAudio({
           trackId: "narration",
           text: script.spoken,
@@ -2307,6 +2317,7 @@ export class PipelineService {
     };
     const rate = (await this.deps.exchangeRates.getUsdBrl()).rate;
     const recordCost = async (usage: Usage) => {
+      if (!spec.provider.isMock) await assertExecutionFence();
       if (pendingVideoTask && (await this.deps.ledger.list({ jobId: ctx.job.id })).some(e => e.attemptId === attemptId)) return;
       return this.deps.ledger.record(
         buildActualCost({
@@ -2338,6 +2349,7 @@ export class PipelineService {
       };
       if (spec.finalize) {
         try {
+          if (!spec.provider.isMock) await assertExecutionFence();
           output = await spec.finalize(result, attemptId, ref);
         } catch (error) {
           // Custo já registrado acima; não registra de novo nem re-tenta.
@@ -2390,6 +2402,7 @@ export class PipelineService {
     spec: { kind: MediaKind; sceneId: string | null },
     attempt: MediaAttempt,
   ): Promise<{ job: GenerationJob; attempt: MediaAttempt }> {
+    if (!attempt.isMock) await assertExecutionFence();
     const { clock } = this.deps;
     const withAttempt = (list: readonly MediaAttempt[]) => [
       ...list.filter(a => a.id !== attempt.id).map((a) => (attempt.status === "succeeded" ? { ...a, active: false } : a)),
@@ -2762,6 +2775,7 @@ export class PipelineService {
       const costUsd = lines.reduce((acc, l) => acc + l.costUsd, 0);
       if (costUsd > 0 || lines.some((l) => l.quantity > 0)) {
         for (const line of lines) {
+          if (!meta.simulated) await assertExecutionFence();
           await ledger.record(
             buildActualCost({
               id: ids("cost"),
@@ -2783,6 +2797,7 @@ export class PipelineService {
           );
         }
       }
+      if (!meta.simulated) await assertExecutionFence();
       await llmCallLog.record({
         id: llmCallId,
         campaignId,

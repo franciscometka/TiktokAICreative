@@ -2,6 +2,7 @@ import type { GenerationOutcome } from "@/pipeline/pipeline-service";
 import type { Logger } from "../logger";
 import type { QueueStatus, QueueTask } from "../queue/job-queue";
 import { paidOperationInFlight } from "../repos/progress";
+import { ExecutionLeaseLostError, withExecutionFence } from "@/config/execution-policy";
 import { dataDirs, workerUserRuntime, type CloudInfra, type UserRuntime } from "../runtime";
 import { AssetSync } from "./asset-sync";
 import { cleanupStaleWorkspaces, createWorkspace, removeWorkspace } from "./temp-workspace";
@@ -117,17 +118,24 @@ export class CloudWorker {
     const sync = new AssetSync(infra.storage, rt.assets, dataDirs(infra.config), task.userId);
     try {
       log.info("tarefa iniciada", { kind: task.kind, attempt: task.attempts, paid: task.paid });
-      const campaign = await rt.store.getCampaign(task.campaignId);
-      const jobs = campaign.status === "planned" ? await rt.store.listJobs(campaign.id) : [];
-      await sync.hydrate(workspace, campaign, jobs);
-      if (task.payload.kind === "planning") {
-        const done = await rt.deps.service.runPlanningTask(task.campaignId, task.payload.planningRunId, task.payload.realAuthorized);
-        finish = done.status === "planned" ? { status: "completed", outcome: "planned" }
-          : done.status === "failed" ? { status: "failed", outcome: "planning_failed", error: done.error ?? "Falha no planejamento" }
-          : { status: "completed", outcome: "superseded" };
-      } else {
-        finish = finishForOutcome(await rt.deps.service.runJobTask(task.jobId!, task.payload.run));
-      }
+      await withExecutionFence({ checkpoint: async () => {
+        if (lost || !await infra.queue.checkpoint(task.id, this.options.workerId, task.attempts, this.options.leaseSeconds)) {
+          lost = true;
+          throw new ExecutionLeaseLostError("Execução interrompida: este worker perdeu a posse durável da tarefa.");
+        }
+      } }, async () => {
+        const campaign = await rt.store.getCampaign(task.campaignId);
+        const jobs = campaign.status === "planned" ? await rt.store.listJobs(campaign.id) : [];
+        await sync.hydrate(workspace, campaign, jobs);
+        if (task.payload.kind === "planning") {
+          const done = await rt.deps.service.runPlanningTask(task.campaignId, task.payload.planningRunId, task.payload.realAuthorized);
+          finish = done.status === "planned" ? { status: "completed", outcome: "planned" }
+            : done.status === "failed" ? { status: "failed", outcome: "planning_failed", error: done.error ?? "Falha no planejamento" }
+            : { status: "completed", outcome: "superseded" };
+        } else {
+          finish = finishForOutcome(await rt.deps.service.runJobTask(task.jobId!, task.payload.run));
+        }
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const job = task.jobId ? await rt.store.getJob(task.jobId).catch(() => undefined) : undefined;
@@ -138,10 +146,12 @@ export class CloudWorker {
       log.error("tarefa falhou", { error });
     } finally {
       try {
-        if (task.jobId) await rt.store.markProgress(task.jobId, "uploading", "Salvando arquivos");
-        const published = await this.publishWithRetry(sync, workspace, task.campaignId);
-        if (published.length) log.info("arquivos publicados no storage", { count: published.length });
-        if (task.jobId) await rt.store.refreshProgress(task.jobId);
+        if (!lost) {
+          if (task.jobId) await rt.store.markProgress(task.jobId, "uploading", "Salvando arquivos");
+          const published = await this.publishWithRetry(sync, workspace, task.campaignId);
+          if (published.length) log.info("arquivos publicados no storage", { count: published.length });
+          if (task.jobId) await rt.store.refreshProgress(task.jobId);
+        }
       } catch (error) {
         // Arquivos ficaram só no disco temporário: não limpa e bloqueia para decisão humana.
         keepWorkspace = true;
@@ -150,7 +160,7 @@ export class CloudWorker {
       }
       clearInterval(beat);
       if (this.options.chdir !== false) process.chdir(previousCwd);
-      if (finish.status === "blocked" && task.jobId) await rt.store.markProgress(task.jobId, "blocked", finish.blockedReason ?? "Bloqueado").catch(() => undefined);
+      if (!lost && finish.status === "blocked" && task.jobId) await rt.store.markProgress(task.jobId, "blocked", finish.blockedReason ?? "Bloqueado").catch(() => undefined);
       if (!keepWorkspace) await removeWorkspace(this.options.tmpRoot, key).catch((error: unknown) => log.warn("não removeu temporário", { error }));
       const recorded = await infra.queue.finish(task.id, this.options.workerId, finish).catch(() => false);
       log.info("tarefa encerrada", { status: finish.status, outcome: finish.outcome, recorded });

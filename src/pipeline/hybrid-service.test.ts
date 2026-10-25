@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadAppConfig } from "@/config/env";
 import { MOCK_STAGE_MODES, type ExecutionStage, type StageModes } from "@/domain/execution";
-import { withRealStageAuthorization, assertRealCallsEnabled } from "@/config/execution-policy";
+import { ExecutionLeaseLostError, withExecutionFence, withRealStageAuthorization, assertRealCallsEnabled } from "@/config/execution-policy";
 import { createHybridPipelineService, hybridCapabilities } from "./hybrid-service";
 import { MockCreativePlanner, buildMockDraft } from "@/ai/mock-planner";
 import { LlmCreativePlanner } from "@/ai/llm-planner";
@@ -357,6 +357,28 @@ describe("execução híbrida por etapa — somente transportes falsos", () => {
     const replay = await f.service.retryFailedScene(id, failedScene.sceneId, quote.token);
     await replay.completion;
     expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(callsAfterFailure + 1);
+  });
+  it("fence perdido antes do submit impede provider, tentativa e ledger", async () => {
+    const f = await setup({ scenes: "real" }, false);
+    const id = f.campaign.jobIds[0]!;
+    (f.videoOptions as { failure?: boolean }).failure = true;
+    const first = await f.service.quoteStage(id, "scenes");
+    await (await f.service.executeStage(id, "scenes", first.token)).completion;
+    const failed = await f.service.getJob(id);
+    const sceneId = failed.scenes.find(scene => scene.attempts.at(-1)?.status === "failed")!.sceneId;
+    const quote = await f.service.quoteFailedSceneRetry(id, sceneId);
+    const submits = f.video.calls.filter(call => call.url.endsWith("/image_to_video")).length;
+    const ledger = (await f.ledger()).filter(entry => !entry.simulated).length;
+    (f.videoOptions as { failure?: boolean }).failure = false;
+
+    await expect(withExecutionFence(
+      { checkpoint: async () => { throw new ExecutionLeaseLostError("claim perdido"); } },
+      async () => (await f.service.retryFailedScene(id, sceneId, quote.token)).completion,
+    )).rejects.toThrow(/claim perdido/);
+
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(submits);
+    expect((await f.service.getJob(id)).scenes.find(scene => scene.sceneId === sceneId)!.attempts).toHaveLength(1);
+    expect((await f.ledger()).filter(entry => !entry.simulated)).toHaveLength(ledger);
   });
   it("retoma intent autorizada após queda antes do enqueue e submete exatamente uma vez", async () => {
     const f = await setup({ scenes: "real" }, false);
