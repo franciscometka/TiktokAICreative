@@ -54,6 +54,8 @@ async function failedSceneProject(ownerId: string) {
     } : item),
   });
   const quote = await (await apiUserRuntime(h.infra, TEST_USER)).deps.service.quoteFailedSceneRetry(jobId, scene.sceneId);
+  const failedView = await h.call("GET", `/v1/projects/${job.campaignId}`);
+  expect(failedView.json.value.v2.error).toMatchObject({ retry: "scene", sceneId: scene.sceneId, sceneToken: quote.token, sceneEstimatedBrl: quote.estimatedBrl });
   return { campaignId: job.campaignId, jobId, sceneId: scene.sceneId, token: quote.token };
 }
 
