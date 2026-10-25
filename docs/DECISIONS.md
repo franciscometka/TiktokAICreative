@@ -629,3 +629,13 @@ Contexto: o upload de foto (avatar e produto) na Vercel mostrava "Ocorreu um err
 - `/api/runtime`: diagnóstico do deploy (modo, ambiente, host da API e booleanos das variáveis públicas, sem segredo).
 - API: `StorageError`/`AssetPathError` viram erro de upload claro. Um usuário de sessão ausente em `auth.users` do banco (login e `DATABASE_URL` em projetos Supabase diferentes) vira erro de configuração explícito, não "inesperado".
 - O fluxo de upload continua Browser → Supabase Storage direto (URL assinada `/object/upload/sign`, PUT com `Content-Type` e `x-upsert: false`, CORS aceito). Nenhum arquivo passa pela Vercel nem pela Render. As validações de tipo, tamanho, bytes reais, ownership e caminho continuam.
+
+## D110 — Retry seguro de uma cena falha usa intent durável (L8.8.2)
+
+- `retryQuote` é exclusiva para tentativa terminalmente falha; `regenerationQuote` continua exclusiva para nova versão de cena pronta.
+- O cliente envia somente job, cena e token. O servidor deriva `avatar`, `ugc_video` ou `scenes` do plano persistido.
+- Aceitar a quote grava aprovação, auditoria e `SceneRetryIntent` no mesmo save, antes do enqueue. Queda nessa janela é retomada pelo mesmo token e gera um único `JobRun`.
+- A intent fixa tentativa falha, próximo attempt, estimate, revisões, provider, modelo, modo e custo. Mudança torna a execução stale: zero submit, intent `blocked`, job `failed` e nova decisão obrigatória.
+- A fila mantém `job:<jobId>` para serializar o job. Replay com payload idêntico deduplica; payload diferente durante uma tarefa ativa é recusado, nunca aceito silenciosamente.
+- A rota não usa a tabela genérica de idempotência: `in_progress` sem takeover após crash impediria a retomada. A intent persistida é a fonte de replay.
+- Operação paga incerta em qualquer recipe bloqueia quote e submit. Cada retry liquidado cria novo attempt/ledger; MOCK não cria custo real. Nunca há retry pago automático.

@@ -333,3 +333,15 @@ Guia: [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md).
 - [ ] Manual: criar projeto Supabase, aplicar migration, criar usuário; criar Render Web + Worker; criar projeto Vercel (ver docs/DEPLOYMENT.md)
 - [ ] Manual: primeiro teste na nuvem com mocks (ALLOW_MOCKS=true só nesse teste) e depois UMA validação REAL aprovada na tela
 - [ ] Futuro: migração dos jobs locais (script dry-run), tela técnica antiga no cloud, mais de uma tarefa por processo no worker
+
+## L8.8.2 — Safe Scene Retry ✅ (sem chamada paga; D110)
+- [x] Quote específica para cena terminalmente falha, separada de regeneração de cena pronta
+- [x] Recipe derivado no servidor para Presenter, Product UGC e produto/B-roll
+- [x] Aprovação single-use com `SceneRetryIntent` persistida antes do enqueue
+- [x] Retomada da janela approval → enqueue e replay após resposta perdida, com um submit
+- [x] Dedupe da fila valida payload: mesma intent deduplica; operação diferente não é engolida
+- [x] Stale quote bloqueia antes do provider, liquida a intent e permite nova decisão
+- [x] Operação paga incerta bloqueia Presenter, UGC e vídeo comum
+- [x] Ownership, cena/job/token cruzados e recipe falso cobertos na API cloud
+- [x] UI mostra “Tentar novamente” com estimativa; sem quote segura, sem botão
+- [x] Ledger append-only por novo attempt; retomada não duplica; MOCK sem custo real

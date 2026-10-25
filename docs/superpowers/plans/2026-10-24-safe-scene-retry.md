@@ -4,7 +4,7 @@
 
 **Objetivo:** fazer uma cena terminalmente falha receber nova cotação específica, exigir aprovação explícita e executar no máximo um retry daquela cena, preservando orçamento, retomada, versionamento e ledger.
 
-**Estratégia:** adicionar um contrato de recovery no `PipelineService` que derive o recipe no servidor e reutilize `quoteStage`/`executeStage`; separar `retryQuote` de `regenerationQuote` na view; aplicar a idempotência HTTP existente à rota. Nenhuma mudança na fila, nos providers ou nos preços.
+**Estratégia executada:** adicionar um contrato de recovery no `PipelineService` que derive o recipe no servidor, persista uma intent antes do enqueue e separe `retryQuote` de `regenerationQuote` na view. O dedupe da fila mantém a chave por job, mas valida que o payload ativo é o mesmo. Providers e preços não mudam.
 
 **Regra TDD:** em cada tarefa, escrever o teste RED primeiro, executar o comando indicado e confirmar que a falha é a esperada antes de alterar produção. Não usar transporte real.
 
@@ -148,7 +148,7 @@ npx vitest run src/application/generation-view.test.ts src/components/generation
 - modificar `src/cloud/cloud-runtime.test.ts`;
 - modificar `src/cloud/worker/worker.test.ts` somente se o caso de queue não couber no runtime test.
 
-**Interfaces:** o recovery usa `retryFailedSceneAction({jobId, sceneId, token})`; o endpoint deixa de aceitar `stage`. A regeneração técnica de cena pronta pode manter a ação atual. A rota de recovery usa `idempotent` com escopo `retry_scene:<jobId>:<sceneId>`.
+**Interfaces:** o recovery usa `retryFailedSceneAction({jobId, sceneId, token})`; o endpoint deixa de aceitar `stage`. A regeneração técnica de cena pronta mantém a ação atual. A rota usa a `SceneRetryIntent` como âncora de replay; não usa o wrapper HTTP genérico, pois seu estado `in_progress` não tem takeover seguro após queda.
 
 **Teste RED:**
 
@@ -165,7 +165,7 @@ npx vitest run src/application/generation-view.test.ts src/components/generation
 npm run test:cloud -- --run src/cloud/cloud-runtime.test.ts -t "retry individual idempotente"
 ```
 
-**Implementação mínima:** gerar `Idempotency-Key` com o helper existente a partir de `{jobId, sceneId, token}`; envolver a rota com `idempotent`; chamar a nova ação sem stage; manter `PostgresPipelineStore`, `QueueDispatcher`, lease e heartbeat inalterados.
+**Implementação mínima:** chamar a nova ação sem stage; persistir a intent antes do enqueue; aceitar replay do mesmo payload e recusar payload diferente sob a mesma tarefa ativa. Manter `PostgresPipelineStore`, lease e heartbeat inalterados.
 
 **GREEN:**
 
@@ -242,7 +242,7 @@ Não executar scripts `*:real`, não carregar `.env` e não chamar providers.
 ## Riscos
 
 - O snapshot de atividade da API pode ficar defasado durante uma request; segurança não pode depender só dele. Token sob lock e intent persistida continuam obrigatórios.
-- Cair depois de persistir aprovação e antes do enqueue deixa o job sem tarefa, mas não pode autorizar submit implícito. A recuperação deve ser explícita.
+- Cair depois de persistir aprovação e antes do enqueue deixa uma intent `authorized`; repetir a ação explicitamente agenda essa mesma operação uma vez.
 - `paidOperationInFlight` é por job, não por cena; o bloqueio conservador é intencional porque a fila serializa o job inteiro.
 - UGC e Presenter têm retomadas diferentes; a camada comum apenas escolhe recipe e preserva os guards específicos.
 - Ledger de vídeo, Presenter e UGC deduplica por caminhos diferentes; testar cada um, sem unificá-los neste lote.

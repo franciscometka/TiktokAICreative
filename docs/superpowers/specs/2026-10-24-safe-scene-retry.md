@@ -59,25 +59,22 @@ O servidor localiza a cena no plano e deriva o stage com a regra já existente:
 
 O contrato exige: cena pertencente ao job, `requiresGeneratedVideo`, nenhuma tentativa ativa e última tentativa terminal `failed`. Cena pronta, planejada ou de outra campanha é rejeitada. O cliente não escolhe o recipe.
 
-### Reutilizar quote e aprovação existentes
+### Quote existente + intent durável de autorização
 
-Não criar um segundo schema persistente de autorização. Após os guards de elegibilidade, reutilizar `quoteStage(jobId, derivedStage, false, true, sceneId)` e `executeStage`.
+Após os guards de elegibilidade, a cotação reutiliza `quoteStage(jobId, derivedStage, false, true, sceneId)`. Ao aceitar o token, `retryFailedScene` grava no mesmo save a aprovação, o `stageApproval` e uma `SceneRetryIntent` durável antes de tentar enfileirar.
 
-O token atual já vincula o contexto necessário: job/campaign, `unit = sceneId`, histórico de attempts, modo, provider, modelo, custo, budget decision, estimate, `stageRevision`, `storyboardRevision` e `regenerate`. `retryFailedScene` repete o guard de última tentativa falha antes da preparação sob lock. `stageApprovals` continua auditando stage, unidade, token, provider, modelo e custo.
+A intent vincula token, cena, tentativa falha, próximo número de tentativa, estimate, revisões, recipe, modo, provider, modelo e custo. Ela pode estar `authorized`, `queued`, `running` ou `settled`. Assim, uma queda depois da aprovação e antes do enqueue não perde a autorização: o replay encontra a intent `authorized` e agenda exatamente o mesmo `JobRun`, sem pedir novo gasto.
 
 Não há validade por relógio. A validade é por contexto: mudar tentativa, estado, preço, câmbio, provider, modelo, modo, revisão ou decisão de orçamento torna a quote stale. O orçamento é rechecado sob lock mesmo quando o token não muda.
 
-### Idempotência existente, em camadas
+### Idempotência em camadas
 
-Aplicar o wrapper `idempotent` à rota de retry e enviar uma `Idempotency-Key` estável derivada de `{jobId, sceneId, token}`. Escopo sugerido: `retry_scene:<jobId>:<sceneId>`.
+- lock: duas aprovações concorrentes criam uma única intent;
+- `SceneRetryIntent`: é a âncora de replay antes e depois do enqueue, inclusive quando a resposta HTTP se perde;
+- dedupe ativo continua `job:<jobId>`, mas a fila compara o payload: replay do mesmo `scene_retry` é aceito; operação diferente enquanto o job está ativo é recusada em vez de ser engolida silenciosamente;
+- operation/attempt ID: depois do submit, só permite polling/download do mesmo trabalho.
 
-- repositório de idempotência: replay HTTP devolve a mesma resposta;
-- lock: duas aprovações concorrentes não passam juntas;
-- fingerprint do job: o token torna-se single-use após persistir status/approval;
-- dedupe `job:<jobId>`: uma tarefa ativa por job;
-- intent/operação/attempt ID: impede novo POST depois do início e permite apenas polling/download com ID conhecido.
-
-Se a API cair depois de persistir aprovação e antes do enqueue, nenhum submit ocorreu e o token anterior já não autoriza outra tentativa. A recuperação permanece explícita; não haverá compensação com submit automático.
+O wrapper HTTP genérico não é usado nesta rota. Uma queda enquanto sua tabela estivesse em `in_progress` não possui takeover seguro e poderia bloquear justamente a recuperação necessária. O replay da rota retorna o estado aceito atual a partir da intent durável; não promete repetir byte a byte a primeira resposta.
 
 ### Operação paga incerta
 
@@ -93,6 +90,8 @@ Não criar novos status:
 - aprovação: job `generating`, tarefa `queued/running`;
 - sucesso: nova tentativa ativa, versões anteriores preservadas, cena `ready`, render stale e recomposição grátis opcional;
 - nova falha: nova tentativa no histórico, cena `failed`, token anterior inválido e nova aprovação obrigatória.
+
+Se a intent fica stale entre aprovação e execução, ela é liquidada como `blocked`, o job volta a `failed` e uma nova quote pode ser apresentada. Nenhum provider é chamado nesse caminho.
 
 ## Invariantes de segurança
 
@@ -118,7 +117,7 @@ Não criar novos status:
 
 ## Não objetivos
 
-- Não alterar fila, lease, heartbeat ou recovery do worker.
+- Não alterar lease, heartbeat ou recovery geral do worker. A fila recebe apenas a validação mínima de payload no dedupe ativo.
 - Não alterar providers, requests, preços, credits, Product Fidelity ou áudio.
 - Não criar retry automático nem reutilizar autorização velha.
 - Não redesenhar telas; apenas alimentar a UI existente e ajustar copy mínimo se necessário.
