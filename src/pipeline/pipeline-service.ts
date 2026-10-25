@@ -869,6 +869,15 @@ export class PipelineService {
     if (budgetStillBlocked) return { job, completion: Promise.resolve({ kind: "WAITING_STAGE" as const, job }) };
     return { job, completion: (await this.dispatchJob(jobId, { kind: "hybrid_stage", stage, ...(options.regenerate ? { regenerate: true } : {}), ...(options.sceneId ? { sceneId: options.sceneId } : {}), ...(options.thenFreeRender ? { thenFreeRender: true } : {}) })).completion };
   }
+  /** Regeneração voluntária de cena PRONTA (≠ recovery de falha). O servidor deriva o recipe da cena persistida. */
+  async regenerateReadyScene(jobId: string, sceneId: string, token: string) {
+    const ctx = await this.load(jobId);
+    const scene = ctx.creative.scenes.find(item => item.id === sceneId && item.requiresGeneratedVideo);
+    const attempts = ctx.job.scenes.find(item => item.sceneId === sceneId)?.attempts ?? [];
+    if (!scene) throw new Error(`A cena ${sceneId} não pertence a este job.`);
+    if (!activeAttempt(attempts) || attempts.at(-1)?.status !== "succeeded") throw new Error("A cena não está pronta; use a recuperação de cena com falha.");
+    return this.executeStage(jobId, this.sceneStage(scene), token, { regenerate: true, sceneId, thenFreeRender: true });
+  }
   /** Aprovação da etapa sob lock (sem executar). `inTask` = já dentro da tarefa do worker/processo. */
   private async prepareStage(jobId: string, stage: ExecutionStage, token: string, options: { regenerate?: boolean; authorizeOverBudget?: boolean; sceneId?: string } = {}, inTask = false) {
     if (stage === "planning") throw new Error("Use a ação de planejamento do projeto.");

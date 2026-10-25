@@ -59,6 +59,30 @@ async function failedSceneProject(ownerId: string) {
   return { campaignId: job.campaignId, jobId, sceneId: scene.sceneId, token: quote.token };
 }
 
+/** Cena PRONTA (tentativa ativa concluída) + cotação de regeneração voluntária exibida na tela. */
+async function readySceneProject(ownerId: string) {
+  const failed = await failedSceneProject(ownerId);
+  const store = new PostgresPipelineStore(h.db, TEST_USER);
+  const job = await store.getJob(failed.jobId);
+  await store.saveJob({
+    ...job,
+    status: "completed",
+    error: undefined,
+    scenes: job.scenes.map(item => item.sceneId === failed.sceneId ? {
+      ...item,
+      attempts: [{ id: "ready_cloud_attempt", kind: "video", sceneId: item.sceneId, attemptNumber: 1, provider: "mock", model: "mock-video", providerJobId: null, status: "succeeded", active: true, isMock: true, assetUri: "mock://ready", durationSeconds: 4, createdAt: job.updatedAt }],
+    } : item),
+  });
+  const view = await h.call("GET", `/v1/projects/${failed.campaignId}`);
+  const scene = (view.json.value.view.creatives as { scenes: { id: string; status: string; regenerationQuote?: { ready: boolean; token: string; stage: string } }[] }[])
+    .flatMap(creative => creative.scenes).find(item => item.id === failed.sceneId)!;
+  expect(scene.status).toBe("ready");
+  expect(scene.regenerationQuote?.ready).toBe(true);
+  return { ...failed, token: scene.regenerationQuote!.token, stage: scene.regenerationQuote!.stage };
+}
+
+const queueCount = async (jobId: string) => Number((await h.db.query<{ n: number }>("select count(*)::int as n from job_queue where job_id = $1", [jobId])).rows[0]?.n);
+
 describe("API pública", () => {
   it("/health simples e /ready checa banco + storage + config, sem API paga", async () => {
     const health = await h.call("GET", "/health", { user: null });
@@ -94,6 +118,36 @@ describe("fluxo de geração na nuvem", () => {
     expect((await h.call("POST", `/v1/jobs/${ctx.jobId}/scenes/wrong_scene/retry`, { body: { token: ctx.token } })).status).not.toBe(202);
     expect((await h.call("POST", `/v1/jobs/${ctx.jobId}/scenes/${ctx.sceneId}/retry`, { body: { token: "0".repeat(64) } })).status).not.toBe(202);
     await h.drain();
+  });
+
+  it("regeneração de cena PRONTA tem contrato próprio; recipe vem do servidor; recovery e regeneração não se misturam", async () => {
+    const ctx = await readySceneProject("prod_regen_ready");
+    const before = await queueCount(ctx.jobId);
+
+    // Cena pronta no endpoint de recovery: rejeitada, nada enfileirado.
+    expect((await h.call("POST", `/v1/jobs/${ctx.jobId}/scenes/${ctx.sceneId}/retry`, { body: { token: ctx.token } })).status).not.toBe(202);
+    expect(await queueCount(ctx.jobId)).toBe(before);
+    // Outro usuário: 404, nada enfileirado.
+    expect((await h.call("POST", `/v1/jobs/${ctx.jobId}/scenes/${ctx.sceneId}/regenerate`, { user: "b", body: { token: ctx.token } })).status).toBe(404);
+    expect(await queueCount(ctx.jobId)).toBe(before);
+
+    // Cliente tenta impor stage/recipe: ignorado; a tarefa usa o recipe derivado no servidor.
+    const forged = ctx.stage === "avatar" ? "scenes" : "avatar";
+    const first = await h.call("POST", `/v1/jobs/${ctx.jobId}/scenes/${ctx.sceneId}/regenerate`, { body: { token: ctx.token, stage: forged, recipe: "veo-ultra" } });
+    expect(first.status).toBe(202);
+    const replay = await h.call("POST", `/v1/jobs/${ctx.jobId}/scenes/${ctx.sceneId}/regenerate`, { body: { token: ctx.token } });
+    expect(replay.status).not.toBe(202);
+    const tasks = (await h.db.query<{ payload: { run: unknown } }>("select payload from job_queue where job_id = $1 order by created_at desc", [ctx.jobId])).rows;
+    expect(tasks).toHaveLength(before + 1);
+    expect(tasks[0]!.payload.run).toEqual({ kind: "hybrid_stage", stage: ctx.stage, regenerate: true, sceneId: ctx.sceneId, thenFreeRender: true });
+    await h.drain();
+  });
+
+  it("cena FALHA no endpoint de regeneração: rejeitada, nada enfileirado", async () => {
+    const ctx = await failedSceneProject("prod_regen_failed");
+    const before = await queueCount(ctx.jobId);
+    expect((await h.call("POST", `/v1/jobs/${ctx.jobId}/scenes/${ctx.sceneId}/regenerate`, { body: { token: ctx.token } })).status).not.toBe(202);
+    expect(await queueCount(ctx.jobId)).toBe(before);
   });
 
   it("cria → enfileira → worker planeja → aprovar → worker gera; navegador fecha e API reinicia sem perder nada", async () => {

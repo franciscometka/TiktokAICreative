@@ -10,6 +10,7 @@ import {
   executeHybridPlanning,
   getCampaignView,
   retryFailedScene,
+  regenerateStoryboardScene,
   regenerateUgcReference,
   rerenderCreative,
   retryCampaignPlanning,
@@ -242,6 +243,11 @@ export function createApiHandler(options: ApiOptions): (req: IncomingMessage, re
     route("POST", "/v1/jobs/:id/scenes/:sceneId/retry", async (ctx, { id, sceneId }) => {
       const body = parse(z.object({ token: z.string().length(64) }), ctx.body);
       result(ctx, await retryFailedScene((await ctx.runtime()).deps, { jobId: id!, sceneId: sceneId!, token: body.token }), 202);
+    }),
+    // Regeneração voluntária de cena PRONTA; só o token vem do cliente, o recipe é derivado no servidor.
+    route("POST", "/v1/jobs/:id/scenes/:sceneId/regenerate", async (ctx, { id, sceneId }) => {
+      const body = parse(z.object({ token: z.string().length(64) }), ctx.body);
+      result(ctx, await regenerateStoryboardScene((await ctx.runtime()).deps, { jobId: id!, sceneId: sceneId!, token: body.token }), 202);
     }),
     // Retry SEM custo (render/retomada segura). Retry pago passa por /generate com nova cotação aprovada.
     route("POST", "/v1/jobs/:id/retry", async (ctx, { id }) => result(ctx, await rerenderCreative((await ctx.runtime()).deps, id!), 202)),

@@ -454,10 +454,10 @@ export async function executeHybridStage(deps: AppDeps, input: { jobId: string; 
 }
 
 /** Nova versão de uma cena + recomposição local/MOCK. O render só segue automaticamente quando custa zero. */
-export async function regenerateStoryboardScene(deps: AppDeps, input: { jobId: string; sceneId: string; stage: "scenes" | "avatar" | "ugc_video"; token: string }): Promise<ActionResult<{ started: boolean }>> {
+export async function regenerateStoryboardScene(deps: AppDeps, input: { jobId: string; sceneId: string; token: string }): Promise<ActionResult<{ started: boolean }>> {
   try {
     // A recomposição grátis encadeada roda na MESMA tarefa (processo local ou worker), nunca no browser.
-    const result = await deps.service.executeStage(input.jobId, input.stage, input.token, { regenerate: true, sceneId: input.sceneId, thenFreeRender: true });
+    const result = await deps.service.regenerateReadyScene(input.jobId, input.sceneId, input.token);
     logBackground(input.jobId, result.completion);
     return { ok: true, value: { started: true } };
   } catch (error) {

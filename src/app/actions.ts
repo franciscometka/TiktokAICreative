@@ -151,9 +151,9 @@ export async function executeStageAction(input: unknown): Promise<ActionResult<{
 }
 
 export async function regenerateStoryboardSceneAction(input: unknown): Promise<ActionResult<{ started: boolean }>> {
-  const parsed = z.object({ jobId: id, sceneId: id, stage: z.enum(["scenes", "avatar", "ugc_video"]), token: z.string().length(64) }).safeParse(input);
+  const parsed = z.object({ jobId: id, sceneId: id, token: z.string().length(64) }).safeParse(input);
   if (!parsed.success) return badInput();
-  if (cloud()) return remoteAction("POST", `/v1/jobs/${parsed.data.jobId}/scenes/${parsed.data.sceneId}/retry`, { stage: parsed.data.stage, token: parsed.data.token });
+  if (cloud()) return remoteAction("POST", `/v1/jobs/${parsed.data.jobId}/scenes/${parsed.data.sceneId}/regenerate`, { token: parsed.data.token });
   return regenerateStoryboardScene(getRuntime().deps, parsed.data);
 }
 export async function retryFailedSceneAction(input: unknown): Promise<ActionResult<{ started: boolean }>> {

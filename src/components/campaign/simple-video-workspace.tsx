@@ -180,8 +180,7 @@ function SceneCard({ scene, sources, jobId, reference, editable, onChanged }: { 
   function redo() {
     if (!jobId || !scene.regenerationQuote) return;
     startTransition(async () => {
-      const stage = scene.visualSource === "presenter" ? "avatar" : scene.ugc && scene.visualSource.startsWith("ugc_") ? "ugc_video" : "scenes";
-      const result = await regenerateStoryboardSceneAction({ jobId, stage, token: scene.regenerationQuote!.token, sceneId: scene.id });
+      const result = await regenerateStoryboardSceneAction({ jobId, token: scene.regenerationQuote!.token, sceneId: scene.id });
       setError(result.ok ? "Nova versão iniciada. A anterior continua preservada." : result.error.message);
       setConfirmRedo(false);
       onChanged();
