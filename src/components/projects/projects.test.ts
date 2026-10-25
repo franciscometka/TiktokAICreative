@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { ShellStatus } from "@/app/api/shell/route";
 import { buildGenerationView } from "@/application/generation-view";
 import type { ProjectCard } from "@/application/project-v2-view";
-import { GENERATION_STATES, sourceFixture } from "@/test/generation-fixtures";
+import { GENERATION_STATES, sourceFixture, v2Fixture } from "@/test/generation-fixtures";
 import { GenerationScreen } from "../generation/generation-screen";
 import { isDarkRoute } from "../shell/nav";
 import { ShellStatusContext } from "../shell/shell-status-context";
@@ -118,7 +118,11 @@ describe("Result Studio (projeto concluído)", () => {
   });
 
   it("sem cotação de cena: falha de cena não ganha botão de retry por cena", () => {
-    const failed = buildGenerationView(sourceFixture({ ...GENERATION_STATES.scene_failed!, jobQuote: { estimatedBrl: 3, ready: false } }), { creditsPerBrl: 100 });
+    const failed = buildGenerationView(sourceFixture({
+      ...GENERATION_STATES.scene_failed!,
+      v2: v2Fixture({ phase: "failed", error: { message: "Não concluída.", details: "Sem cotação.", retry: "job", sceneId: "scene_4" } }),
+      jobQuote: { estimatedBrl: 3, ready: false },
+    }), { creditsPerBrl: 100 });
     expect(failed.action).toBeNull();
   });
 
