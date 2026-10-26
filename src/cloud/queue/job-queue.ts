@@ -109,11 +109,11 @@ export class PostgresJobQueue {
     }
   }
 
-  /** Renova o lease. false = a tarefa não é mais deste worker (foi recuperada): pare de escrever. */
-  async heartbeat(taskId: string, workerId: string, leaseSeconds: number): Promise<boolean> {
+  /** Renova o lease do claim `claimAttempt`. false = a tarefa não é mais deste claim (foi recuperada): pare de escrever. */
+  async heartbeat(taskId: string, workerId: string, claimAttempt: number, leaseSeconds: number): Promise<boolean> {
     const r = await this.db.query(
-      "update job_queue set heartbeat_at = now(), lease_expires_at = now() + make_interval(secs => $3), updated_at = now() where id = $1 and locked_by = $2 and status = 'running'",
-      [taskId, workerId, leaseSeconds],
+      "update job_queue set heartbeat_at = now(), lease_expires_at = now() + make_interval(secs => $4), updated_at = now() where id = $1 and locked_by = $2 and attempts = $3 and status = 'running'",
+      [taskId, workerId, claimAttempt, leaseSeconds],
     );
     return r.rowCount > 0;
   }
@@ -128,11 +128,12 @@ export class PostgresJobQueue {
     return r.rowCount > 0;
   }
 
-  async finish(taskId: string, workerId: string, result: { status: Exclude<QueueStatus, "queued" | "running">; outcome: string; error?: string; blockedReason?: string }): Promise<boolean> {
+  /** Encerra SÓ o claim `claimAttempt`: um callback de um claim antigo nunca encerra o claim novo da mesma tarefa. */
+  async finish(taskId: string, workerId: string, claimAttempt: number, result: { status: Exclude<QueueStatus, "queued" | "running">; outcome: string; error?: string; blockedReason?: string }): Promise<boolean> {
     const r = await this.db.query(
-      `update job_queue set status = $3, outcome = $4, last_error = $5, blocked_reason = $6, finished_at = now(), updated_at = now(), lease_expires_at = null
-       where id = $1 and locked_by = $2 and status = 'running'`,
-      [taskId, workerId, result.status, result.outcome.slice(0, 120), result.error?.slice(0, 1000) ?? null, result.blockedReason?.slice(0, 500) ?? null],
+      `update job_queue set status = $4, outcome = $5, last_error = $6, blocked_reason = $7, finished_at = now(), updated_at = now(), lease_expires_at = null
+       where id = $1 and locked_by = $2 and attempts = $3 and status = 'running'`,
+      [taskId, workerId, claimAttempt, result.status, result.outcome.slice(0, 120), result.error?.slice(0, 1000) ?? null, result.blockedReason?.slice(0, 500) ?? null],
     );
     return r.rowCount > 0;
   }

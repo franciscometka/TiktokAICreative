@@ -53,11 +53,31 @@ describe("fila durável (claim transacional)", () => {
     // A segunda tarefa da MESMA campanha espera a primeira terminar.
     expect(await h.infra.queue.claim("w3", 30)).toBeUndefined();
     const owner = claimed[0]!.lockedBy!;
-    expect(await h.infra.queue.finish(claimed[0]!.id, owner === "w1" ? "w2" : "w1", { status: "completed", outcome: "x" })).toBe(false); // só o dono encerra
-    expect(await h.infra.queue.finish(claimed[0]!.id, owner, { status: "completed", outcome: "x" })).toBe(true);
+    expect(await h.infra.queue.finish(claimed[0]!.id, owner === "w1" ? "w2" : "w1", claimed[0]!.attempts, { status: "completed", outcome: "x" })).toBe(false); // só o dono encerra
+    expect(await h.infra.queue.finish(claimed[0]!.id, owner, claimed[0]!.attempts, { status: "completed", outcome: "x" })).toBe(true);
     const next = await h.infra.queue.claim("w3", 30);
     expect(next?.dedupeKey).toBe(claimed[0]!.dedupeKey === "test:race:1" ? "test:race:2" : "test:race:1");
-    await h.infra.queue.finish(next!.id, "w3", { status: "completed", outcome: "x" });
+    await h.infra.queue.finish(next!.id, "w3", next!.attempts, { status: "completed", outcome: "x" });
+  });
+
+  it("callback do claim N não renova nem encerra o claim N+1 do MESMO worker", async () => {
+    const { campaignId } = await plannedProject("prod_q_generation");
+    const base = { userId: TEST_USER, campaignId, jobId: null, payload: { kind: "planning" as const, planningRunId: "x", realAuthorized: false }, paid: false };
+    const queued = await h.infra.queue.enqueue({ ...base, dedupeKey: "test:generation" });
+    const n = (await h.infra.queue.claim("worker-same", 30))!;
+    expect(n.id).toBe(queued.task.id);
+    // Lease de N expira; a tarefa volta à fila e o MESMO workerId faz o claim N+1.
+    await h.db.query("update job_queue set lease_expires_at = now() - interval '1 second' where id = $1", [n.id]);
+    expect(await h.infra.queue.recover(n.id, { action: "requeue" })).toBe(true);
+    const next = (await h.infra.queue.claim("worker-same", 30))!;
+    expect(next).toMatchObject({ id: n.id, attempts: n.attempts + 1 });
+
+    expect(await h.infra.queue.heartbeat(n.id, "worker-same", n.attempts, 30)).toBe(false);
+    expect(await h.infra.queue.finish(n.id, "worker-same", n.attempts, { status: "failed", outcome: "stale" })).toBe(false);
+    expect(await h.infra.queue.get(n.id)).toMatchObject({ status: "running", attempts: next.attempts, outcome: null });
+
+    expect(await h.infra.queue.heartbeat(n.id, "worker-same", next.attempts, 30)).toBe(true);
+    expect(await h.infra.queue.finish(n.id, "worker-same", next.attempts, { status: "completed", outcome: "x" })).toBe(true);
   });
 
   it("dedupe do job aceita replay da mesma intent e recusa engolir outra operação", async () => {
@@ -185,8 +205,8 @@ describe("restart do worker", () => {
     const status = await h.call("GET", `/v1/jobs/${jobId}`);
     expect(status.json.value).toMatchObject({ progress: "blocked", task: { status: "blocked" } });
     // O worker morto "acorda": não consegue mais escrever na tarefa recuperada.
-    expect(await h.infra.queue.heartbeat(task!.id, "dead-worker", 30)).toBe(false);
-    expect(await h.infra.queue.finish(task!.id, "dead-worker", { status: "completed", outcome: "late" })).toBe(false);
+    expect(await h.infra.queue.heartbeat(task!.id, "dead-worker", task!.attempts, 30)).toBe(false);
+    expect(await h.infra.queue.finish(task!.id, "dead-worker", task!.attempts, { status: "completed", outcome: "late" })).toBe(false);
   });
 
   it("sem operação paga em voo → volta para a fila e o novo worker continua a sequência aprovada", async () => {
@@ -275,6 +295,6 @@ describe("L8.6 — fila × gerando (só leitura)", () => {
     const running = (await h.call("GET", `/v1/projects/${campaignId}`)).json.value;
     expect(running.view.creatives[0].queued).toBe(false);
     expect((await h.call("GET", "/v1/projects")).json.value.find((c: { id: string }) => c.id === campaignId)).toMatchObject({ status: "generating", statusLabel: "Gerando" });
-    await h.infra.queue.finish(task!.id, "w86", { status: "completed", outcome: "test" });
+    await h.infra.queue.finish(task!.id, "w86", task!.attempts, { status: "completed", outcome: "test" });
   });
 });

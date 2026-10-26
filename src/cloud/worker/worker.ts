@@ -105,7 +105,7 @@ export class CloudWorker {
     const previousCwd = process.cwd();
     let lost = false;
     const beat = setInterval(() => {
-      void infra.queue.heartbeat(task.id, this.options.workerId, this.options.leaseSeconds).then((ok) => {
+      void infra.queue.heartbeat(task.id, this.options.workerId, task.attempts, this.options.leaseSeconds).then((ok) => {
         if (!ok && !lost) { lost = true; log.warn("lease perdido: a tarefa foi recuperada por outro processo"); }
       }).catch((error: unknown) => log.warn("heartbeat falhou", { error }));
     }, Math.max(1_000, (this.options.leaseSeconds * 1000) / 3));
@@ -162,7 +162,7 @@ export class CloudWorker {
       if (this.options.chdir !== false) process.chdir(previousCwd);
       if (!lost && finish.status === "blocked" && task.jobId) await rt.store.markProgress(task.jobId, "blocked", finish.blockedReason ?? "Bloqueado").catch(() => undefined);
       if (!keepWorkspace) await removeWorkspace(this.options.tmpRoot, key).catch((error: unknown) => log.warn("não removeu temporário", { error }));
-      const recorded = await infra.queue.finish(task.id, this.options.workerId, finish).catch(() => false);
+      const recorded = await infra.queue.finish(task.id, this.options.workerId, task.attempts, finish).catch(() => false);
       log.info("tarefa encerrada", { status: finish.status, outcome: finish.outcome, recorded });
     }
   }
