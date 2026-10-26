@@ -383,6 +383,26 @@ describe("execução híbrida por etapa — somente transportes falsos", () => {
     expect((await f.ledger()).filter(entry => !entry.simulated)).toHaveLength(ledger);
   });
   const lostFence = { checkpoint: async () => { throw new ExecutionLeaseLostError("claim perdido"); } };
+  it("fence que falha só no checkpoint colado ao POST: 0 POST, marcador incerto preservado", async () => {
+    const f = await setup({ scenes: "real" }, false);
+    const id = f.campaign.jobIds[0]!;
+    const quote = await f.service.quoteStage(id, "scenes");
+    let passed = 0;
+    // Passa em todos os checkpoints anteriores; perde a posse no primeiro depois do marcador "submitting" gravado.
+    const fence = { checkpoint: async () => {
+      if ((await f.service.getJob(id)).videoTasks?.some(task => task.state === "submitting")) throw new ExecutionLeaseLostError("claim perdido antes do POST");
+      passed++;
+    } };
+
+    await expect(withExecutionFence(fence, async () => (await f.service.executeStage(id, "scenes", quote.token)).completion)).rejects.toThrow(/antes do POST/);
+
+    expect(passed).toBeGreaterThanOrEqual(2);
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(0);
+    const job = await f.service.getJob(id);
+    expect(job.videoTasks?.filter(task => task.state === "submitting")).toHaveLength(1);
+    expect(job.scenes.flatMap(scene => scene.attempts).filter(attempt => !attempt.isMock)).toHaveLength(0);
+    expect((await f.ledger()).filter(entry => !entry.simulated)).toHaveLength(0);
+  });
   it("worker sem lease não altera etapa já concluída por outro worker", async () => {
     const f = await setup({}, false);
     const id = f.campaign.jobIds[0]!;

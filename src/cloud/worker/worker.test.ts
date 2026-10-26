@@ -98,8 +98,17 @@ describe("restart do worker", () => {
     const aEntered = new Promise<void>(resolve => { enteredA = resolve; });
     let providerSubmits = 0;
     const tmp = await mkdtemp(join(tmpdir(), "worker-fence-"));
+    // A acredita que continua dono: o heartbeat "funciona" mas não renova nada no banco (processo travado/partição).
+    // Só o checkpoint() SQL pode descobrir que o claim mudou.
     const heartbeat = h.infra.queue.heartbeat.bind(h.infra.queue);
-    h.infra.queue.heartbeat = async (taskId, workerId, leaseSeconds) => workerId === "worker-fence-a" ? false : heartbeat(taskId, workerId, leaseSeconds);
+    h.infra.queue.heartbeat = async (...args: Parameters<typeof heartbeat>) => args[1] === "worker-fence-a" ? true : heartbeat(...args);
+    const checkpoint = h.infra.queue.checkpoint.bind(h.infra.queue);
+    const checkpointsOfA: boolean[] = [];
+    h.infra.queue.checkpoint = async (...args: Parameters<typeof checkpoint>) => {
+      const owned = await checkpoint(...args);
+      if (args[1] === "worker-fence-a") checkpointsOfA.push(owned);
+      return owned;
+    };
 
     const runtimeFor = (blockBeforeProvider: boolean) => (infra: typeof h.infra, userId: string, roots: { projectRoot: string; assetRoot: string }) => {
       const runtime = workerUserRuntime(infra, userId, roots);
@@ -133,15 +142,23 @@ describe("restart do worker", () => {
       expect(await workerB.recoverExpired()).toBe(1);
       expect((await h.infra.queue.get(queued.task.id))?.status).toBe("queued");
       expect(await workerB.tick()).toBe("processed");
+      const afterB = await store.getJob(jobId);
+      const taskAfterB = await h.infra.queue.get(queued.task.id);
       releaseA();
       expect(await oldRun).toBe("processed");
 
+      // Quem detectou a perda foi o SQL do checkpoint (o heartbeat de A nunca reportou perda).
+      expect(checkpointsOfA).toEqual([false]);
       expect(providerSubmits).toBe(1);
       expect((await store.getJob(jobId)).scenes.find(scene => scene.sceneId === sceneId)!.attempts).toHaveLength(1);
       expect((await new PostgresCostLedger(h.db, TEST_USER).list({ jobId })).filter(entry => !entry.simulated)).toHaveLength(1);
+      // Nenhuma escrita de A depois da perda: job e tarefa ficam exatamente como B deixou.
+      expect(await store.getJob(jobId)).toEqual(afterB);
+      expect(await h.infra.queue.get(queued.task.id)).toEqual(taskAfterB);
     } finally {
       releaseA();
       h.infra.queue.heartbeat = heartbeat;
+      h.infra.queue.checkpoint = checkpoint;
       await rm(tmp, { recursive: true, force: true });
     }
   });
