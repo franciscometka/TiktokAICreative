@@ -382,6 +382,35 @@ describe("execução híbrida por etapa — somente transportes falsos", () => {
     expect((await f.service.getJob(id)).scenes.find(scene => scene.sceneId === sceneId)!.attempts).toHaveLength(1);
     expect((await f.ledger()).filter(entry => !entry.simulated)).toHaveLength(ledger);
   });
+  const lostFence = { checkpoint: async () => { throw new ExecutionLeaseLostError("claim perdido"); } };
+  it("worker sem lease não altera etapa já concluída por outro worker", async () => {
+    const f = await setup({}, false);
+    const id = f.campaign.jobIds[0]!;
+    await f.execute("narration"); await f.execute("scenes");
+    const before = await f.service.getJob(id);
+    expect((await f.service.quoteStage(id, "scenes", true)).done).toBe(true);
+
+    await expect(withExecutionFence(lostFence, () => f.build().runJobTask(id, { kind: "hybrid_stage", stage: "scenes" }))).rejects.toThrow(/claim perdido/);
+
+    expect(await f.service.getJob(id)).toEqual(before);
+  });
+  it("worker sem lease não grava stageIntent nem currentStage em job com cenas pendentes", async () => {
+    const f = await setup({ scenes: "real" }, false);
+    const id = f.campaign.jobIds[0]!;
+    const first = await f.service.quoteStage(id, "scenes");
+    await (await f.service.executeStage(id, "scenes", first.token)).completion;
+    const before = await f.service.getJob(id);
+    expect(before.scenes.filter(scene => scene.requiresGeneratedVideo && scene.attempts.some(a => a.active)).length).toBeGreaterThan(0);
+    expect(before.scenes.some(scene => scene.requiresGeneratedVideo && !scene.attempts.some(a => a.active))).toBe(true);
+    const submits = f.video.calls.filter(call => call.url.endsWith("/image_to_video")).length;
+
+    await expect(withExecutionFence(lostFence, () => f.build().runJobTask(id, { kind: "hybrid_stage", stage: "scenes" }))).rejects.toThrow(/claim perdido/);
+
+    const after = await f.service.getJob(id);
+    expect(after.stageIntents?.some(intent => intent.state === "running")).toBe(false);
+    expect(after).toEqual(before);
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(submits);
+  });
   it("retoma intent autorizada após queda antes do enqueue e submete exatamente uma vez", async () => {
     const f = await setup({ scenes: "real" }, false);
     const id = f.campaign.jobIds[0]!;

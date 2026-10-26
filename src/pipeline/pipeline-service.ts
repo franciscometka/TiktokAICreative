@@ -908,10 +908,12 @@ export class PipelineService {
       if ((await this.getJob(jobId)).stageModes?.[stage] !== "real" && !this.mocksAllowed()) throw new Error(this.mockBlocked(stage));
       return await withRealStageAuthorization(stage, async () => {
         if (stage === "render") {
-          await this.withJobLock(jobId, async () => { const job = await this.getJob(jobId); await this.deps.store.saveJob(transitionJob(job, "rendering", this.deps.clock())); });
+          await this.withJobLock(jobId, async () => { await assertExecutionFence(); const job = await this.getJob(jobId); await this.deps.store.saveJob(transitionJob(job, "rendering", this.deps.clock())); });
           return this.renderPhase(jobId);
         }
         return this.withJobLock(jobId, async () => {
+          // Primeira operação sob o lock: um worker que perdeu o claim não lê para decidir nem grava nada da etapa.
+          await assertExecutionFence();
           let ctx = await this.load(jobId); let job = ctx.job;
           assertCanStartPaidCall(job);
           const quote = await this.quoteStage(jobId, stage, true, regenerate, targetSceneId);
@@ -961,6 +963,8 @@ export class PipelineService {
       });
     } catch (error) {
       if (error instanceof ExecutionLeaseLostError) throw error;
+      // fail/pause/settle abaixo gravam o job: só com a posse do claim confirmada.
+      await assertExecutionFence();
       const job = await this.getJob(jobId);
       if (error instanceof PresenterPendingError || error instanceof UgcPendingError) return { kind: "WAITING_STAGE", job };
       if (error instanceof UgcCostChangedError) {
