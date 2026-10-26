@@ -892,7 +892,8 @@ export class PipelineService {
       // Dentro de uma tarefa (encadeamento grátis), aprovar de novo exige a posse do claim.
       await assertExecutionFence();
       if (!inTask) this.assertJobIdle(jobId);
-      const quote = await this.quoteStage(jobId, stage, false, options.regenerate, options.sceneId);
+      // Continuação dentro da própria tarefa: o job "ativo" é esta execução, não um bloqueio. Chamada externa segue barrada.
+      const quote = await this.quoteStage(jobId, stage, inTask, options.regenerate, options.sceneId);
       if (token !== quote.token || (!quote.ready && !(options.authorizeOverBudget && quote.budgetDecision?.canAuthorizeOverBudget))) throw new Error(quote.blocked ?? "Estimativa alterada ou etapa concluída; revise novamente.");
       await this.adoptOfflineCampaign(await this.getCampaign((await this.getJob(jobId)).campaignId));
       let job = await this.getJob(jobId);

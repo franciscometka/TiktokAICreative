@@ -572,6 +572,71 @@ describe("execução híbrida por etapa — somente transportes falsos", () => {
     expect(await renderApprovals()).toBe(before);
     expect((await f.service.getJob(id)).renders.filter(r => r.status === "rendering")).toHaveLength(0);
   });
+  /** Job MOCK completo (narração, cenas, render): ponto de partida para "Refazer esta cena" e retry. */
+  async function renderedJob(f: Awaited<ReturnType<typeof setup>>) {
+    const id = f.campaign.jobIds[0]!;
+    await f.execute("narration"); await f.execute("scenes"); await f.execute("render");
+    const job = await f.service.getJob(id);
+    expect(job.status).toBe("completed");
+    return { id, job, sceneId: job.scenes.find(scene => scene.requiresGeneratedVideo)!.sceneId };
+  }
+  const completedRenders = (job: GenerationJob) => job.renders.filter(render => render.status === "completed").length;
+  const finalAssetOf = (job: GenerationJob, sceneId: string) => job.manifest?.assets.find(asset => asset.sceneId === sceneId)?.uri;
+  it("refazer cena pronta encadeia o render grátis na mesma tarefa e atualiza o vídeo final", async () => {
+    const f = await setup({}, false);
+    const { id, job: before, sceneId } = await renderedJob(f);
+    const quote = await f.service.quoteStage(id, "scenes", false, true, sceneId);
+    expect(quote.ready, quote.blocked).toBe(true);
+
+    const outcome = await (await f.build().regenerateReadyScene(id, sceneId, quote.token)).completion;
+
+    expect(outcome.kind, JSON.stringify((outcome as { error?: string }).error)).toBe("COMPLETED");
+    const after = await f.service.getJob(id);
+    const attempts = after.scenes.find(scene => scene.sceneId === sceneId)!.attempts;
+    expect(attempts).toHaveLength(2);
+    expect(completedRenders(after)).toBe(completedRenders(before) + 1);
+    // A nova versão é a ativa e foi ela que entrou no render novo (o mock reinicia a numeração das URIs por instância).
+    expect(attempts.find(attempt => attempt.active)!.id).toBe(attempts[1]!.id);
+    expect(finalAssetOf(after, sceneId)).toBe(attempts[1]!.assetUri);
+    expect(after.renders.at(-1)!.id).not.toBe(before.renders.at(-1)!.id);
+    expect((await f.ledger()).filter(entry => !entry.simulated)).toHaveLength(0);
+  });
+  it("retry de cena falha aprovado encadeia o render grátis e liquida a intent", async () => {
+    const f = await setup({}, false);
+    const { id, job, sceneId } = await renderedJob(f);
+    // Cena com falha terminal (a última tentativa falhou), como depois de uma geração que deu erro.
+    await new FilePipelineStore(f.config.dataDir).saveJob({ ...job, status: "failed", error: "Falha simulada.",
+      scenes: job.scenes.map(scene => scene.sceneId === sceneId ? { ...scene, attempts: scene.attempts.map(attempt => ({ ...attempt, status: "failed" as const, active: false, error: "Falha simulada." })) } : scene) });
+    const before = await f.service.getJob(id);
+    const quote = await f.service.quoteFailedSceneRetry(id, sceneId);
+    expect(quote.ready, quote.blocked).toBe(true);
+
+    const outcome = await (await f.build().retryFailedScene(id, sceneId, quote.token)).completion;
+
+    expect(outcome.kind, JSON.stringify((outcome as { error?: string }).error)).toBe("COMPLETED");
+    const after = await f.service.getJob(id);
+    expect(after.sceneRetryIntents?.find(intent => intent.quoteToken === quote.token)).toMatchObject({ state: "settled", outcome: "succeeded" });
+    expect(completedRenders(after)).toBe(completedRenders(before) + 1);
+    expect(finalAssetOf(after, sceneId)).toBe(after.scenes.find(scene => scene.sceneId === sceneId)!.attempts.find(attempt => attempt.active)!.assetUri);
+    expect((await f.ledger()).filter(entry => !entry.simulated)).toHaveLength(0);
+  });
+  it("render externo/manual com job ativo continua bloqueado", async () => {
+    const f = await setup({}, false);
+    const { id } = await renderedJob(f);
+    const busy = f.build({ activity: { isActive: () => true } });
+    const quote = await busy.quoteStage(id, "render");
+    expect(quote.blocked).toBe("Etapa em andamento");
+    await expect(busy.executeStage(id, "render", quote.token)).rejects.toThrow(/sendo gerado|andamento/);
+  });
+  it("premissa do encadeamento: render (mock e real) custa zero; só assim segue sem nova aprovação", async () => {
+    for (const render of ["mock", "real"] as const) {
+      const f = await setup({ render }, false);
+      const id = f.campaign.jobIds[0]!;
+      await f.execute("narration"); await f.execute("scenes");
+      // Se um dia o render passar a custar, o encadeamento interno deixa de rodar (render.estimatedBrl !== 0) e exige aprovação.
+      expect((await f.service.quoteStage(id, "render", true)).estimatedBrl).toBe(0);
+    }
+  });
   it("retoma intent autorizada após queda antes do enqueue e submete exatamente uma vez", async () => {
     const f = await setup({ scenes: "real" }, false);
     const id = f.campaign.jobIds[0]!;
