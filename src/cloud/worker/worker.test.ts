@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,7 @@ import { PostgresPipelineStore } from "../repos/pipeline-repository";
 import { workerUserRuntime } from "../runtime";
 import { PostgresCostLedger } from "../repos/ledger-repository";
 import { CloudWorker, finishForOutcome } from "./worker";
+import { AssetSync } from "./asset-sync";
 import { QueueDispatcher } from "../queue/job-queue";
 
 let h: CloudHarness;
@@ -179,6 +180,58 @@ describe("restart do worker", () => {
       releaseA();
       h.infra.queue.heartbeat = heartbeat;
       h.infra.queue.checkpoint = checkpoint;
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("tarefa grátis que termina depois da perda do lease não publica assets nem grava progresso", async () => {
+    const { campaignId, jobId } = await plannedProject("prod_fenced_publish");
+    const queued = await h.infra.queue.enqueue({ userId: TEST_USER, campaignId, jobId, payload: { kind: "job_run", run: { kind: "render" } }, paid: false, dedupeKey: `job:${jobId}` });
+    let releaseA!: () => void;
+    let enteredA!: () => void;
+    const blockedA = new Promise<void>(resolve => { releaseA = resolve; });
+    const aEntered = new Promise<void>(resolve => { enteredA = resolve; });
+    const tmp = await mkdtemp(join(tmpdir(), "worker-publish-"));
+    const heartbeat = h.infra.queue.heartbeat.bind(h.infra.queue);
+    h.infra.queue.heartbeat = async (...args: Parameters<typeof heartbeat>) => args[1] === "worker-publish-a" ? true : heartbeat(...args);
+    const publish = vi.spyOn(AssetSync.prototype, "publish");
+    const progressWritesOfA: string[] = [];
+    const runtimeFor = (isA: boolean) => (infra: typeof h.infra, userId: string, roots: { projectRoot: string; assetRoot: string }) => {
+      const runtime = workerUserRuntime(infra, userId, roots);
+      // Trabalho grátis sem nenhum fence no caminho: só o fim da tarefa pode barrar A.
+      runtime.deps.service.runJobTask = async (id) => {
+        if (isA) { enteredA(); await blockedA; }
+        return { kind: "WAITING_STAGE" as const, job: await runtime.store.getJob(id) };
+      };
+      if (isA) {
+        const mark = runtime.store.markProgress.bind(runtime.store);
+        const refresh = runtime.store.refreshProgress.bind(runtime.store);
+        runtime.store.markProgress = async (...args: Parameters<typeof mark>) => { progressWritesOfA.push(`mark:${args[1]}`); return mark(...args); };
+        runtime.store.refreshProgress = async (...args: Parameters<typeof refresh>) => { progressWritesOfA.push("refresh"); return refresh(...args); };
+      }
+      return runtime;
+    };
+    const workerA = new CloudWorker({ infra: h.infra, workerId: "worker-publish-a", tmpRoot: join(tmp, "a"), projectRoot: process.cwd(), leaseSeconds: 1, pollIntervalMs: 10, chdir: false, runtimeFor: runtimeFor(true) });
+    const workerB = new CloudWorker({ infra: h.infra, workerId: "worker-publish-b", tmpRoot: join(tmp, "b"), projectRoot: process.cwd(), leaseSeconds: 1, pollIntervalMs: 10, chdir: false, runtimeFor: runtimeFor(false) });
+    try {
+      const oldRun = workerA.tick();
+      await aEntered;
+      await sleep(1_300);
+      expect(await workerB.recoverExpired()).toBe(1);
+      expect(await workerB.tick()).toBe("processed");
+      const publishesOfB = publish.mock.calls.length;
+      const taskAfterB = await h.infra.queue.get(queued.task.id);
+      releaseA();
+      expect(await oldRun).toBe("processed");
+
+      expect(publishesOfB).toBeGreaterThan(0);
+      expect(publish.mock.calls.filter(([workspace]) => workspace.startsWith(join(tmp, "a")))).toHaveLength(0);
+      expect(progressWritesOfA).toEqual([]);
+      expect(await h.infra.queue.get(queued.task.id)).toEqual(taskAfterB);
+    } finally {
+      releaseA();
+      publish.mockRestore();
+      h.infra.queue.heartbeat = heartbeat;
       await rm(tmp, { recursive: true, force: true });
     }
   });

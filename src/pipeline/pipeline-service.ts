@@ -2553,6 +2553,8 @@ export class PipelineService {
     }
 
     return this.withJobLock(jobId, async () => {
+      // Conclusão do render (status, versão, ledger) só com a posse do claim confirmada.
+      await assertExecutionFence();
       let job = await this.deps.store.getJob(jobId);
       const finishedAt = clock();
       const updateRecord = (patch: Partial<RenderRecord>) =>

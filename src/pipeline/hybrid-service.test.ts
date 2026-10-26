@@ -422,6 +422,24 @@ describe("execução híbrida por etapa — somente transportes falsos", () => {
     expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(1);
     expect((await f.ledger()).filter(entry => !entry.simulated)).toHaveLength(1);
   });
+  it("posse perdida durante o render: não conclui, não registra ledger de render", async () => {
+    const f = await setup({}, false);
+    const id = f.campaign.jobIds[0]!;
+    await f.execute("narration"); await f.execute("scenes");
+    const ledgerBefore = (await f.ledger()).length;
+    const quote = await f.service.quoteStage(id, "render");
+    const fence = { checkpoint: async () => {
+      if ((await f.service.getJob(id)).renders.some(render => render.status === "rendering")) throw new ExecutionLeaseLostError("claim perdido durante o render");
+    } };
+
+    await expect(withExecutionFence(fence, async () => (await f.service.executeStage(id, "render", quote.token)).completion)).rejects.toThrow(/durante o render/);
+
+    const job = await f.service.getJob(id);
+    expect(job.status).not.toBe("completed");
+    expect(job.renders.some(render => render.status === "completed")).toBe(false);
+    expect((await f.ledger()).filter(entry => entry.operation === "render")).toHaveLength(0);
+    expect((await f.ledger()).length).toBe(ledgerBefore);
+  });
   it("worker sem lease não altera etapa já concluída por outro worker", async () => {
     const f = await setup({}, false);
     const id = f.campaign.jobIds[0]!;

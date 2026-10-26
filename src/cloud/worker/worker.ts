@@ -145,12 +145,21 @@ export class CloudWorker {
         : { status: "failed", outcome: "error", error: message };
       log.error("tarefa falhou", { error });
     } finally {
+      // Escritas finais (publicação, progresso) só com a posse DURÁVEL confirmada no banco, não só pelo flag local.
+      const stillOwned = async () => {
+        if (!lost && !await infra.queue.checkpoint(task.id, this.options.workerId, task.attempts, this.options.leaseSeconds).catch(() => false)) lost = true;
+        return !lost;
+      };
       try {
-        if (!lost) {
+        if (await stillOwned()) {
           if (task.jobId) await rt.store.markProgress(task.jobId, "uploading", "Salvando arquivos");
           const published = await this.publishWithRetry(sync, workspace, task.campaignId);
           if (published.length) log.info("arquivos publicados no storage", { count: published.length });
-          if (task.jobId) await rt.store.refreshProgress(task.jobId);
+          if (task.jobId && await stillOwned()) await rt.store.refreshProgress(task.jobId);
+        } else {
+          // Sem posse: não publica; os arquivos ficam no temporário (limpeza por idade) em vez de serem apagados.
+          keepWorkspace = true;
+          log.warn("posse do claim não confirmada: nada publicado");
         }
       } catch (error) {
         // Arquivos ficaram só no disco temporário: não limpa e bloqueia para decisão humana.
@@ -160,7 +169,7 @@ export class CloudWorker {
       }
       clearInterval(beat);
       if (this.options.chdir !== false) process.chdir(previousCwd);
-      if (!lost && finish.status === "blocked" && task.jobId) await rt.store.markProgress(task.jobId, "blocked", finish.blockedReason ?? "Bloqueado").catch(() => undefined);
+      if (finish.status === "blocked" && task.jobId && await stillOwned()) await rt.store.markProgress(task.jobId, "blocked", finish.blockedReason ?? "Bloqueado").catch(() => undefined);
       if (!keepWorkspace) await removeWorkspace(this.options.tmpRoot, key).catch((error: unknown) => log.warn("não removeu temporário", { error }));
       const recorded = await infra.queue.finish(task.id, this.options.workerId, task.attempts, finish).catch(() => false);
       log.info("tarefa encerrada", { status: finish.status, outcome: finish.outcome, recorded });
