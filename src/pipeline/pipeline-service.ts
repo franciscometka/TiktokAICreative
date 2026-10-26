@@ -2374,8 +2374,9 @@ export class PipelineService {
         durationSeconds: result.durationSeconds,
       };
       if (spec.finalize) {
+        // Fora do try: erro de posse/infra no fence nunca vira "mídia não salva" (falha de provider).
+        if (!spec.provider.isMock) await assertExecutionFence();
         try {
-          if (!spec.provider.isMock) await assertExecutionFence();
           output = await spec.finalize(result, attemptId, ref);
         } catch (error) {
           // Custo já registrado acima; não registra de novo nem re-tenta.

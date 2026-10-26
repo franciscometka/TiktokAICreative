@@ -18,9 +18,20 @@ export function assertRealCallsEnabled(paid = true): void {
 export function withExecutionFence<T>(fence: { checkpoint: () => Promise<void> }, run: () => Promise<T>): Promise<T> {
   return executionFence.run(fence, run);
 }
-/** Local/testes sem fila não precisam de fence; dentro do worker a ausência de posse lança. */
+/**
+ * Local/testes sem fila não precisam de fence; dentro do worker a ausência de posse lança.
+ * Não conseguir PROVAR a posse (erro de banco no checkpoint) é tratado como perda: para sem gravar,
+ * e nunca vira falha de provider.
+ */
 export async function assertExecutionFence(): Promise<void> {
-  await executionFence.getStore()?.checkpoint();
+  const fence = executionFence.getStore();
+  if (!fence) return;
+  try {
+    await fence.checkpoint();
+  } catch (error) {
+    if (error instanceof ExecutionLeaseLostError) throw error;
+    throw new ExecutionLeaseLostError(`Posse da tarefa não confirmada: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
 }
 let mocksForcedForTests: boolean | undefined;
 /** Só o setup do Vitest (e testes que verificam a política) usa isto. Nunca em runtime. */

@@ -403,6 +403,25 @@ describe("execução híbrida por etapa — somente transportes falsos", () => {
     expect(job.scenes.flatMap(scene => scene.attempts).filter(attempt => !attempt.isMock)).toHaveLength(0);
     expect((await f.ledger()).filter(entry => !entry.simulated)).toHaveLength(0);
   });
+  it("erro de banco no checkpoint não vira falha do provider nem descarta mídia paga", async () => {
+    const f = await setup({ scenes: "real" }, false);
+    const id = f.campaign.jobIds[0]!;
+    const quote = await f.service.quoteStage(id, "scenes");
+    let failedOnce = false;
+    // Um blip de conexão no checkpoint depois do custo registrado (antes de salvar a mídia).
+    const fence = { checkpoint: async () => {
+      if (!failedOnce && (await f.ledger()).some(entry => !entry.simulated)) { failedOnce = true; throw new Error("conexão com o banco perdida"); }
+    } };
+
+    await expect(withExecutionFence(fence, async () => (await f.service.executeStage(id, "scenes", quote.token)).completion)).rejects.toThrow(ExecutionLeaseLostError);
+
+    expect(failedOnce).toBe(true);
+    const job = await f.service.getJob(id);
+    expect(job.scenes.flatMap(scene => scene.attempts).filter(attempt => !attempt.isMock)).toHaveLength(0);
+    expect(job.videoTasks?.filter(task => task.state === "pending" && task.providerJobId)).toHaveLength(1);
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(1);
+    expect((await f.ledger()).filter(entry => !entry.simulated)).toHaveLength(1);
+  });
   it("worker sem lease não altera etapa já concluída por outro worker", async () => {
     const f = await setup({}, false);
     const id = f.campaign.jobIds[0]!;
