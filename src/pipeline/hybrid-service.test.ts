@@ -468,6 +468,58 @@ describe("execução híbrida por etapa — somente transportes falsos", () => {
     expect(after).toEqual(before);
     expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(submits);
   });
+  /** Job "authorized" pronto para o worker: autorização ativa persistida, tarefa capturada (não executada). */
+  async function authorizedJob(f: Awaited<ReturnType<typeof setup>>) {
+    const id = f.campaign.jobIds[0]!;
+    const quote = await f.service.quoteJob(id);
+    const runs: JobRun[] = [];
+    await f.build({ dispatcher: { enqueuePlanning: async () => {}, enqueueJob: async (_job, run) => { runs.push(run); } } }).authorizeAndRunJob(id, quote.token);
+    expect(runs).toEqual([{ kind: "authorized" }]);
+    expect((await f.service.getJob(id)).jobAuthorization?.status).toBe("active");
+    return id;
+  }
+  it("tarefa authorized com fence perdido não grava nada", async () => {
+    const f = await setup({}, false);
+    const id = await authorizedJob(f);
+    const before = await f.service.getJob(id);
+
+    await expect(withExecutionFence(lostFence, () => f.build().runJobTask(id, { kind: "authorized" }))).rejects.toThrow(ExecutionLeaseLostError);
+
+    const after = await f.service.getJob(id);
+    expect(after.stageApprovals).toEqual(before.stageApprovals);
+    expect(after.jobAuthorization).toEqual(before.jobAuthorization);
+    expect(after.error).toEqual(before.error);
+    expect(after).toEqual(before);
+  });
+  it("authorized A→B→A: A conclui a etapa K, perde a posse, B avança K+1, A volta e não grava nada", async () => {
+    const f = await setup({}, false);
+    const id = await authorizedJob(f);
+    let owner: "A" | "B" | "ninguém" = "A";
+    const fenceOf = (who: "A" | "B") => ({ checkpoint: async () => { if (owner !== who) throw new ExecutionLeaseLostError(`claim de ${who} perdido`); } });
+    const generatedDone = async () => (await f.service.getJob(id)).scenes.filter(s => s.requiresGeneratedVideo).every(s => s.attempts.some(a => a.active));
+    // A "trava" numa leitura (sem fence) logo depois de concluir a narração (etapa K).
+    const durable = new FileCostLedger(f.config.dataDir);
+    let stalledOnce = false; let stalled!: () => void; let releaseA!: () => void;
+    const aStalled = new Promise<void>(resolve => { stalled = resolve; });
+    const aReleased = new Promise<void>(resolve => { releaseA = resolve; });
+    const ledgerA = { record: durable.record.bind(durable), list: async (filter?: Parameters<typeof durable.list>[0]) => {
+      if (!stalledOnce && (await f.service.getJob(id)).audioAttempts.some(a => a.active)) { stalledOnce = true; stalled(); await aReleased; }
+      return durable.list(filter);
+    } };
+    const runA = withExecutionFence(fenceOf("A"), () => f.build({ ledger: ledgerA }).runJobTask(id, { kind: "authorized" }));
+    await aStalled;
+
+    // B assume e avança a etapa K+1 (cenas); perde a posse logo depois (para em um estado intermediário válido).
+    owner = "B";
+    const fenceB = { checkpoint: async () => { if (await generatedDone()) owner = "ninguém"; await fenceOf("B").checkpoint(); } };
+    await expect(withExecutionFence(fenceB, () => f.build().runJobTask(id, { kind: "authorized" }))).rejects.toThrow(ExecutionLeaseLostError);
+    expect(await generatedDone()).toBe(true);
+    const afterB = await f.service.getJob(id);
+
+    releaseA();
+    await expect(runA).rejects.toThrow(/claim de A perdido/);
+    expect(await f.service.getJob(id)).toEqual(afterB);
+  });
   it("retoma intent autorizada após queda antes do enqueue e submete exatamente uma vez", async () => {
     const f = await setup({ scenes: "real" }, false);
     const id = f.campaign.jobIds[0]!;

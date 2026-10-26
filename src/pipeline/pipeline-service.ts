@@ -790,6 +790,7 @@ export class PipelineService {
 
   private async pauseAuthorizedJob(jobId: string, reason: string, waitingFor?: GenerationJob["waitingForStage"]): Promise<GenerationOutcome> {
     const job = await this.withJobLock(jobId, async () => {
+      await assertExecutionFence();
       const current = await this.getJob(jobId);
       const next = {
         ...current,
@@ -808,6 +809,8 @@ export class PipelineService {
   private async runAuthorizedJob(jobId: string): Promise<GenerationOutcome> {
     for (const stage of JOB_STAGE_ORDER) {
       while (true) {
+        // Cada passo da tarefa "authorized" começa provando a posse do claim (outro worker pode ter assumido).
+        await assertExecutionFence();
         const job = await this.getJob(jobId);
         const authorization = job.jobAuthorization;
         if (!authorization || authorization.status !== 'active') return this.pauseAuthorizedJob(jobId, 'A autorização do job não está ativa.');
@@ -822,6 +825,7 @@ export class PipelineService {
           return this.pauseAuthorizedJob(jobId, 'A cotação aumentou além do teto aprovado. Revise o novo custo antes de continuar.');
         }
         await this.withJobLock(jobId, async () => {
+          await assertExecutionFence();
           const current = await this.getJob(jobId);
           const approval = current.jobAuthorization;
           if (!approval || approval.status !== 'active') throw new Error('Autorização do job expirada.');
@@ -842,6 +846,7 @@ export class PipelineService {
         if (outcome.kind !== 'WAITING_STAGE') {
           if (outcome.kind === 'COMPLETED') {
             const completed = await this.withJobLock(jobId, async () => {
+              await assertExecutionFence();
               const current = await this.getJob(jobId);
               const next = { ...current, jobAuthorization: current.jobAuthorization ? { ...current.jobAuthorization, status: 'completed' as const, pausedReason: undefined } : undefined };
               await this.deps.store.saveJob(next);
@@ -853,6 +858,7 @@ export class PipelineService {
             : outcome.kind === 'AUDIO_REVIEW' ? 'A duração da narração precisa de revisão.'
             : 'O orçamento precisa de uma nova decisão.';
           const paused = await this.withJobLock(jobId, async () => {
+            await assertExecutionFence();
             const current = await this.getJob(jobId);
             const next = { ...current, jobAuthorization: current.jobAuthorization ? { ...current.jobAuthorization, status: 'paused' as const, pausedReason: reason } : undefined };
             await this.deps.store.saveJob(next);
