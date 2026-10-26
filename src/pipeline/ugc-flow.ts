@@ -239,6 +239,8 @@ export async function generateUgcReference(
       ...(result.metadata ? { metadata: { ...(reference.metadata ?? {}), ...result.metadata } } : {}) });
   } catch (error) {
     if (error instanceof ExecutionLeaseLostError) throw error;
+    // As gravações abaixo (custo, incerto, falha) exigem a posse do claim; sem ela, nada é gravado.
+    await assertExecutionFence();
     if (error instanceof ProviderError && error.billedUsage) await recordCost(error.billedUsage);
     if (errorPhase(error, provider.descriptor.isMock) === "uncertain") {
       const message = error instanceof Error ? error.message : "Resultado incerto";
@@ -402,6 +404,8 @@ export async function generateUgcScene(
     }
   } catch (error) {
     if (error instanceof ExecutionLeaseLostError) throw error;
+    // As gravações abaixo (custo, incerto, settled/falha) exigem a posse do claim; sem ela, nada é gravado.
+    await assertExecutionFence();
     if (error instanceof ProviderError && error.billedUsage) await recordCost(error.billedUsage);
     const operation = job.ugcVideoOperations?.find(item => item.attemptId === attemptId);
     const message = error instanceof Error ? error.message : "Falha na cena UGC; sem retry automático.";

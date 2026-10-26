@@ -889,6 +889,8 @@ export class PipelineService {
     if (stage === "planning") throw new Error("Use a ação de planejamento do projeto.");
     let budgetStillBlocked = false;
     const job = await this.withJobLock(jobId, async () => {
+      // Dentro de uma tarefa (encadeamento grátis), aprovar de novo exige a posse do claim.
+      await assertExecutionFence();
       if (!inTask) this.assertJobIdle(jobId);
       const quote = await this.quoteStage(jobId, stage, false, options.regenerate, options.sceneId);
       if (token !== quote.token || (!quote.ready && !(options.authorizeOverBudget && quote.budgetDecision?.canAuthorizeOverBudget))) throw new Error(quote.blocked ?? "Estimativa alterada ou etapa concluída; revise novamente.");
@@ -2486,6 +2488,8 @@ export class PipelineService {
     this.assertHybridInvocation(current, "render");
     const renderer = this.deps.hybrid ? this.deps.hybrid.renderer(current.stageModes?.render ?? "mock") : this.deps.renderer;
     const prepared = await this.withJobLock(jobId, async () => {
+      // Preparação (currentStage, manifest, registro "rendering") só com a posse do claim confirmada.
+      await assertExecutionFence();
       const ctx = await this.load(jobId);
       let job = ctx.job;
       assertStatus(job, "rendering");

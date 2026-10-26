@@ -112,6 +112,8 @@ export async function generatePresenter(deps: PresenterFlowDeps, input: { campai
     }
   } catch (error) {
     if (error instanceof ExecutionLeaseLostError) throw error;
+    // As gravações abaixo (custo, incerto, falha) exigem a posse do claim; sem ela, nada é gravado.
+    await assertExecutionFence();
     if (error instanceof ProviderError && error.billedUsage && !costRecorded) await recordCost(error.billedUsage);
     const terminal = error instanceof ProviderError && ["FAILED", "CANCELLED"].includes(error.diagnostic?.providerStatus ?? "");
     const uncertain = error instanceof ProviderError && !error.billedUsage && error.diagnostic?.billing !== "rejected" && !terminal;

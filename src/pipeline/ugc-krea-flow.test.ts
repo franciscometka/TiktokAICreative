@@ -11,6 +11,7 @@ import { FAKE_KREA_KEY, KREA_ASSET_ID, kreaFake, type KreaFakeOptions } from "@/
 import { ugcHarness, FULL_REVIEW } from "@/test/ugc-harness";
 import { FilePipelineStore } from "@/storage/file-pipeline-store";
 import { activeAttempt } from "./guards";
+import { ExecutionLeaseLostError, withExecutionFence } from "@/config/execution-policy";
 import { hybridCapabilities } from "./hybrid-service";
 
 const env = { KREA_API_KEY: FAKE_KREA_KEY, UGC_PROVIDER: "krea", UGC_REAL_ALLOWED: "true" };
@@ -89,6 +90,37 @@ describe("AI UGC via Krea no pipeline (fetch falso)", () => {
     expect((await h.service.quoteStage(h.jobId, "ugc_reference")).blocked).toMatch(/incerto/);
     expect((await h.run()).kind).toBe("WAITING_STAGE");
     expect(h.fake.posts()).toBe(1);
+  });
+
+  /** Fence que confirma a posse até o POST pago e a perde logo depois; guarda o último estado com posse. */
+  const fenceUntilPost = (h: Awaited<ReturnType<typeof kreaHarness>>, kind: "image" | "video") => {
+    const state: { lastOwned?: unknown } = {};
+    const fence = { checkpoint: async () => {
+      if (h.fake.posts(kind) > 0) throw new ExecutionLeaseLostError("claim perdido após o POST");
+      state.lastOwned = await h.job();
+    } };
+    return { fence, state };
+  };
+
+  it("referência incerta depois da perda do lease: o catch não grava uncertain", async () => {
+    const h = await kreaHarness({ create: "network" });
+    const { fence, state } = fenceUntilPost(h, "image");
+    await expect(withExecutionFence(fence, () => h.run())).rejects.toThrow(ExecutionLeaseLostError);
+    expect(h.fake.posts("image")).toBe(1);
+    expect((await h.job()).ugc!.references.at(-1)!.state).toBe("submitting");
+    expect(await h.job()).toEqual(state.lastOwned);
+  });
+
+  it("vídeo UGC incerto depois da perda do lease: o catch não grava uncertain", async () => {
+    const h = await kreaHarness({}, true);
+    expect((await h.run()).kind).toBe("WAITING_STAGE");
+    const reference = (await h.job()).ugc!.references.at(-1)!;
+    h.options.create = "network";
+    const { fence, state } = fenceUntilPost(h, "video");
+    await expect(withExecutionFence(fence, async () => (await h.service.approveUgcReference(h.jobId, reference.id, FULL_REVIEW)).completion!)).rejects.toThrow(ExecutionLeaseLostError);
+    expect(h.fake.posts("video")).toBe(1);
+    expect((await h.job()).ugcVideoOperations?.at(-1)?.state).toBe("submitting");
+    expect(await h.job()).toEqual(state.lastOwned);
   });
 
   it("restart após upload: reutiliza asset persistido e faz somente o primeiro submit pago", async () => {

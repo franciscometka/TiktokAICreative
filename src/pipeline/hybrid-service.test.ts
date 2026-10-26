@@ -520,6 +520,58 @@ describe("execução híbrida por etapa — somente transportes falsos", () => {
     await expect(runA).rejects.toThrow(/claim de A perdido/);
     expect(await f.service.getJob(id)).toEqual(afterB);
   });
+  it("Presenter incerto depois da perda do lease: o catch não grava diagnóstico", async () => {
+    const f = await setup({ narration: "real", avatar: "real" });
+    const id = f.campaign.jobIds[0]!;
+    await f.execute("narration");
+    (f.presenter.options as { timeout?: boolean }).timeout = true;
+    const quote = await f.service.quoteStage(id, "avatar");
+    let lastOwned: GenerationJob | undefined;
+    // Posse confirmada até o POST; perdida logo depois (o POST deu timeout: resultado incerto).
+    const fence = { checkpoint: async () => {
+      if (f.presenter.posts > 0) throw new ExecutionLeaseLostError("claim perdido após o POST");
+      lastOwned = await f.service.getJob(id);
+    } };
+
+    await expect(withExecutionFence(fence, async () => (await f.service.executeStage(id, "avatar", quote.token)).completion)).rejects.toThrow(ExecutionLeaseLostError);
+
+    expect(f.presenter.posts).toBe(1);
+    const job = await f.service.getJob(id);
+    expect(job.presenterTasks?.at(-1)).toMatchObject({ state: "submitting" });
+    expect(job.presenterTasks?.at(-1)?.diagnostic).toBeUndefined();
+    expect(job).toEqual(lastOwned);
+  });
+  it("preparação do render com fence perdido: sem currentStage, manifest nem registro rendering", async () => {
+    const f = await setup({}, false);
+    const id = f.campaign.jobIds[0]!;
+    await f.execute("narration"); await f.execute("scenes");
+    const ready = await f.service.getJob(id);
+    await new FilePipelineStore(f.config.dataDir).saveJob({ ...ready, status: "rendering" });
+    const before = await f.service.getJob(id);
+
+    await expect(withExecutionFence(lostFence, () => f.build().runJobTask(id, { kind: "render" }))).rejects.toThrow(ExecutionLeaseLostError);
+
+    expect(await f.service.getJob(id)).toEqual(before);
+  });
+  it("thenFreeRender depois da perda do lease não cria aprovação de render", async () => {
+    const f = await setup({}, false);
+    const id = f.campaign.jobIds[0]!;
+    await f.execute("narration"); await f.execute("scenes"); await f.execute("render");
+    const sceneId = (await f.service.getJob(id)).scenes.find(scene => scene.requiresGeneratedVideo)!.sceneId;
+    const quote = await f.service.quoteStage(id, "scenes", false, true, sceneId);
+    const renderApprovals = async () => ((await f.service.getJob(id)).stageApprovals ?? []).filter(a => a.stage === "render").length;
+    const before = await renderApprovals();
+    // Posse perdida assim que a etapa de cena termina (antes do encadeamento grátis do render).
+    const fence = { checkpoint: async () => {
+      const job = await f.service.getJob(id);
+      if (job.waitingForStage === "scenes" && job.scenes.find(s => s.sceneId === sceneId)!.attempts.length === 2) throw new ExecutionLeaseLostError("claim perdido após a cena");
+    } };
+
+    await expect(withExecutionFence(fence, async () => (await f.build().regenerateReadyScene(id, sceneId, quote.token)).completion)).rejects.toThrow(/após a cena/);
+
+    expect(await renderApprovals()).toBe(before);
+    expect((await f.service.getJob(id)).renders.filter(r => r.status === "rendering")).toHaveLength(0);
+  });
   it("retoma intent autorizada após queda antes do enqueue e submete exatamente uma vez", async () => {
     const f = await setup({ scenes: "real" }, false);
     const id = f.campaign.jobIds[0]!;
