@@ -5,7 +5,7 @@ import { paidOperationInFlight } from "../repos/progress";
 import { ExecutionLeaseLostError, withExecutionFence } from "@/config/execution-policy";
 import { dataDirs, workerUserRuntime, type CloudInfra, type UserRuntime } from "../runtime";
 import { AssetSync } from "./asset-sync";
-import { cleanupStaleWorkspaces, createWorkspace, removeWorkspace } from "./temp-workspace";
+import { cleanupStaleWorkspaces, createWorkspace, removeWorkspace, workspaceKey } from "./temp-workspace";
 
 /**
  * Render Background Worker (D104). Consome tarefas persistidas e executa as etapas pesadas
@@ -100,7 +100,7 @@ export class CloudWorker {
   async process(task: QueueTask): Promise<void> {
     const { infra } = this.options;
     const log = this.log.child({ taskId: task.id, projectId: task.campaignId, jobId: task.jobId ?? undefined, stage: task.payload.kind === "job_run" ? (task.payload.run as { stage?: string }).stage ?? task.payload.run.kind : "planning" });
-    const key = task.jobId ?? `planning_${task.campaignId}`;
+    const key = workspaceKey(task.jobId ?? `planning_${task.campaignId}`, this.options.workerId);
     const workspace = await createWorkspace(this.options.tmpRoot, key);
     const previousCwd = process.cwd();
     let lost = false;

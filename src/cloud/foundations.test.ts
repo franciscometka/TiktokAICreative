@@ -7,7 +7,7 @@ import { SupabaseAssetStore } from "./assets/supabase-asset-store";
 import { classifyLocalUri, storageKeyForLocalUri, type DataDirs } from "./assets/storage-layout";
 import { assertNoPublicSecrets, CloudConfigError, loadApiEnv, loadFrontendEnv, loadWorkerEnv } from "./config";
 import { createLogger, redact } from "./logger";
-import { cleanupStaleWorkspaces, createWorkspace, removeWorkspace, workspaceDir } from "./worker/temp-workspace";
+import { cleanupStaleWorkspaces, createWorkspace, removeWorkspace, workspaceDir, workspaceKey } from "./worker/temp-workspace";
 import { TEST_USER } from "@/test/pglite";
 
 const SUPA = { PERSISTENCE_DRIVER: "supabase", DATABASE_URL: "postgresql://u:p@db.example.supabase.co:5432/postgres", SUPABASE_URL: "https://proj.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "service-role-secret-value-0123456789" };
@@ -143,5 +143,23 @@ describe("workspace temporário por job", () => {
     expect(removed).toEqual(["job_old"]);
     await removeWorkspace(root, "job_active");
     expect(active).toContain("job_active");
+  });
+
+  it("workspace por worker: mesmo job em dois workers = pastas diferentes; limpeza por idade continua", async () => {
+    const root = await tmp();
+    const a = workspaceKey("job_shared", "render-host.internal-1a2b3c4d");
+    const b = workspaceKey("job_shared", "render-host.internal-9f8e7d6c");
+    expect(a).not.toBe(b);
+    expect(a).toBe(workspaceKey("job_shared", "render-host.internal-1a2b3c4d"));
+    expect(a.startsWith("job_shared-")).toBe(true);
+    const dirA = await createWorkspace(root, a);
+    const dirB = await createWorkspace(root, b);
+    expect(dirA).not.toBe(dirB);
+    // O workerId (hostname com ponto) nunca vira nome inseguro, e a limpeza encontra o diretório antigo.
+    expect(() => workspaceDir(root, a)).not.toThrow();
+    const old = new Date(Date.now() - 48 * 3600_000);
+    await utimes(dirA, old, old);
+    expect(await cleanupStaleWorkspaces(root, { maxAgeMs: 12 * 3600_000 })).toEqual([a]);
+    await removeWorkspace(root, b);
   });
 });

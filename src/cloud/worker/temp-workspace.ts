@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 
 /**
- * Disco TEMPORÁRIO do worker: `{root}/{jobId}/`. Fonte de verdade é o Storage; aqui só ficam
- * cópias baixadas (hidratação) e arquivos recém-gerados antes do upload.
+ * Disco TEMPORÁRIO do worker: `{root}/{jobId}-w{hash do workerId}/`. Fonte de verdade é o Storage; aqui só ficam
+ * cópias baixadas (hidratação) e arquivos recém-gerados antes do upload. Cada processo worker tem a
+ * própria pasta por job: dois workers no mesmo host (mesma raiz) nunca leem/publicam/apagam os arquivos um do outro.
  *
  * Limpeza: ao concluir a tarefa, ao falhar (depois que os arquivos novos já subiram) e, na
  * inicialização, diretórios abandonados mais velhos que o limite. Um job ainda em andamento em
@@ -14,6 +16,11 @@ const SAFE_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 export class TempWorkspaceError extends Error {
   override name = "TempWorkspaceError";
+}
+
+/** Nome da pasta do job PARA ESTE worker. O hash mantém o nome seguro (hostname pode ter ponto) e curto. */
+export function workspaceKey(baseKey: string, workerId: string): string {
+  return `${baseKey}-w${createHash("sha256").update(workerId).digest("hex").slice(0, 12)}`;
 }
 
 export function workspaceDir(root: string, key: string): string {

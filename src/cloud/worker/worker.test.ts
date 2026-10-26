@@ -236,6 +236,34 @@ describe("restart do worker", () => {
     }
   });
 
+  it("dois workers no mesmo host e mesmo job usam workspaces temporários diferentes", async () => {
+    const { campaignId, jobId } = await plannedProject("prod_workspace_isolation");
+    const tmp = await mkdtemp(join(tmpdir(), "worker-shared-tmp-"));
+    const hydrate = vi.spyOn(AssetSync.prototype, "hydrate");
+    const runtimeFor = (infra: typeof h.infra, userId: string, roots: { projectRoot: string; assetRoot: string }) => {
+      const runtime = workerUserRuntime(infra, userId, roots);
+      runtime.deps.service.runJobTask = async (id) => ({ kind: "WAITING_STAGE" as const, job: await runtime.store.getJob(id) });
+      return runtime;
+    };
+    // MESMO WORKER_TMP_ROOT para os dois processos.
+    const options = { infra: h.infra, tmpRoot: tmp, projectRoot: process.cwd(), leaseSeconds: 30, pollIntervalMs: 10, chdir: false, runtimeFor };
+    const workerA = new CloudWorker({ ...options, workerId: "same-host-aaaa1111" });
+    const workerB = new CloudWorker({ ...options, workerId: "same-host-bbbb2222" });
+    try {
+      for (const worker of [workerA, workerB]) {
+        await h.infra.queue.enqueue({ userId: TEST_USER, campaignId, jobId, payload: { kind: "job_run", run: { kind: "render" } }, paid: false, dedupeKey: `job:${jobId}` });
+        expect(await worker.tick()).toBe("processed");
+      }
+      const workspaces = hydrate.mock.calls.filter(([workspace]) => workspace.startsWith(tmp)).map(([workspace]) => workspace);
+      expect(workspaces).toHaveLength(2);
+      expect(workspaces[0]).not.toBe(workspaces[1]);
+      expect(workspaces.every(workspace => workspace.includes(jobId))).toBe(true);
+    } finally {
+      hydrate.mockRestore();
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("operação paga em voo + worker morto → blocked, sem novo POST; o resto da fila segue", async () => {
     const { jobId, token } = await plannedProject("prod_r1");
     expect((await h.call("POST", `/v1/jobs/${jobId}/generate`, { body: { token } })).status).toBe(202);
