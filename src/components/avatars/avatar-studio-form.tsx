@@ -124,7 +124,7 @@ export function AvatarStudioForm({ avatarId, initial, voices }: { avatarId: stri
           <div className="grid gap-6 sm:grid-cols-[minmax(0,13rem)_minmax(0,1fr)]">
             <div>
               <p className="mb-2 text-sm font-medium text-fg">Foto de referência</p>
-              <PhotoDrop productId={avatarId} images={images} onChange={(next) => setImages(next.slice(-1))} max={1} error={errors.referenceImage} />
+              <PhotoDrop productId={avatarId} images={images} onChange={(next) => setImages(next.slice(-1))} max={1} error={errors.referenceImage} label="Foto do avatar" />
               <p className="mt-2 text-caption text-fg-subtle">Pessoa adulta, rosto visível; use só fotos com consentimento. Com foto, os vídeos usam este rosto.</p>
             </div>
             <div className="min-w-0 space-y-5">

@@ -28,10 +28,12 @@ export interface PhotoDropViewProps {
   onRemove?: (imageId: string) => void;
   removing?: string | null;
   drag?: { onDragEnter: (e: DragEvent) => void; onDragOver: (e: DragEvent) => void; onDragLeave: (e: DragEvent) => void; onDrop: (e: DragEvent) => void };
+  /** Rótulo do bloco e alt da foto (padrão: produto; o avatar usa o seu). */
+  label?: string;
 }
 
 /** Apresentacional (testável sem browser): todo estado vem por props. */
-export function PhotoDropView({ state, images, max, message, size = "panel", disabled, onPick, onRemove, removing, drag }: PhotoDropViewProps) {
+export function PhotoDropView({ state, images, max, message, size = "panel", disabled, onPick, onRemove, removing, drag, label = "Foto do produto" }: PhotoDropViewProps) {
   const main = images[0];
   const extra = images.slice(1);
   const canAdd = images.length < max && state !== "uploading";
@@ -41,7 +43,7 @@ export function PhotoDropView({ state, images, max, message, size = "panel", dis
       {main ? (
         <figure className={cx("relative overflow-hidden rounded-2xl bg-surface-sunken ring-1 ring-line", tile ? "aspect-square" : "aspect-[4/3] sm:aspect-[4/5]")}>
           {/* eslint-disable-next-line @next/next/no-img-element -- imagem do upload servida por rota com IDs */}
-          <img key={main.id} src={main.previewUrl} alt="Foto do produto" className="size-full animate-reveal object-cover" />
+          <img key={main.id} src={main.previewUrl} alt={label} className="size-full animate-reveal object-cover" />
           <span className="absolute bottom-2 left-2 inline-flex h-6 animate-fade-in items-center gap-1 rounded-full bg-canvas/80 px-2 text-xs font-medium text-success ring-1 ring-success/30 backdrop-blur-sm">
             <Check className="size-3.5" aria-hidden strokeWidth={2.5} />Imagem pronta
           </span>
@@ -70,7 +72,7 @@ export function PhotoDropView({ state, images, max, message, size = "panel", dis
               <span className={cx("grid size-10 place-items-center rounded-xl ring-1 ring-inset", interactive, state === "drag" ? "bg-primary text-on-primary ring-primary" : "bg-surface text-primary-light ring-line group-hover:ring-primary/40")}>
                 <ImagePlus className="size-5" aria-hidden />
               </span>
-              <span className="text-sm font-medium text-fg">{state === "drag" ? "Solte para enviar" : "Foto do produto"}</span>
+              <span className="text-sm font-medium text-fg">{state === "drag" ? "Solte para enviar" : label}</span>
               {tile ? null : <span className="text-caption text-fg-subtle">Arraste aqui ou clique · JPG, PNG ou WebP · até {MAX_IMAGE_MB} MB</span>}
             </span>
           )}
@@ -112,7 +114,7 @@ export function PhotoDropView({ state, images, max, message, size = "panel", dis
 }
 
 /** Container: estado, envio (camada compartilhada), arrastar-e-soltar e remoção. */
-export function PhotoDrop({ productId, images, onChange, max = 1, error, size, disabled }: {
+export function PhotoDrop({ productId, images, onChange, max = 1, error, size, disabled, label }: {
   productId: string;
   images: ImageView[];
   onChange: (images: ImageView[]) => void;
@@ -121,6 +123,7 @@ export function PhotoDrop({ productId, images, onChange, max = 1, error, size, d
   error?: string | undefined;
   size?: "tile" | "panel";
   disabled?: boolean;
+  label?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const depth = useRef(0);
@@ -164,7 +167,7 @@ export function PhotoDrop({ productId, images, onChange, max = 1, error, size, d
 
   return (
     <>
-      <PhotoDropView state={state} images={images} max={max} message={message} size={size} disabled={disabled} removing={removing}
+      <PhotoDropView state={state} images={images} max={max} message={message} size={size} disabled={disabled} removing={removing} {...(label ? { label } : {})}
         onPick={() => inputRef.current?.click()} onRemove={(id) => void remove(id)}
         drag={{
           onDragEnter: (e) => { e.preventDefault(); depth.current += 1; if (images.length < max) setDragging(true); },

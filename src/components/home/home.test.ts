@@ -99,6 +99,14 @@ describe("upload compartilhado", () => {
     expect(text(view("drag"))).toContain("Solte para enviar");
   });
 
+  it("rótulo próprio (avatar) no bloco e no alt, sem \"Foto do produto\"", () => {
+    const idle = view("idle", { label: "Foto do avatar" });
+    const done = view("success", { label: "Foto do avatar", images: [{ id: "img_1.png", previewUrl: "/x.png" }] });
+    expect(text(idle)).toContain("Foto do avatar");
+    expect(done).toContain('alt="Foto do avatar"');
+    expect(idle + done).not.toContain("Foto do produto");
+  });
+
   it("uploading: skeleton + texto, sem porcentagem", () => {
     const html = view("uploading", { message: "Enviando foto…" });
     expect(text(html)).toContain("Enviando foto…");
