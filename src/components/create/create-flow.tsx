@@ -46,18 +46,23 @@ export function CreateFlow({ initial, avatars, estimates, credits, planningAvail
   const [failure, setFailure] = useState<UserError | null>(null);
   const [personalizeOpen, setPersonalizeOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+  // `pending` só desabilita o botão no próximo render: cliques no mesmo tick criariam projetos duplicados.
+  const submitting = useRef(false);
   const { step, draft, errors } = state;
   const review = creditsReview({ estimates, duration: draft.duration, quality: draft.quality, credits });
   const set = (patch: Partial<CreateDraft>) => dispatch({ type: "set", patch });
 
   function create() {
+    if (submitting.current) return;
     setFailure(null);
     const invalid = firstInvalidStep(draft);
     if (invalid) { dispatch({ type: "goto", step: invalid }); return; }
+    submitting.current = true;
     startTransition(async () => {
-      const result = await submit(toCreateInput(draft));
-      if (result.ok) onCreated(result.value.campaignId);
-      else { setFailure(result.error); if (result.fieldErrors) dispatch({ type: "serverErrors", errors: result.fieldErrors }); }
+      const result = await submit(toCreateInput(draft)).catch((error: unknown) => { submitting.current = false; throw error; });
+      if (result.ok) { onCreated(result.value.campaignId); return; }
+      submitting.current = false;
+      setFailure(result.error); if (result.fieldErrors) dispatch({ type: "serverErrors", errors: result.fieldErrors });
     });
   }
 
