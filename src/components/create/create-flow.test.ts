@@ -31,6 +31,7 @@ describe("etapas", () => {
     for (const s of ["01", "Produto", "02", "Avatar", "03", "Estilo", "04", "Revisão"]) expect(text(html)).toContain(s);
     expect(html).toContain('aria-current="step"');
     expect(html).toContain('data-create-step="product"');
+    expect(html).toMatch(/<main[^>]*data-create-step="product"/);
   });
 
   it("Produto: upload compartilhado + nome + ideia; link para o modo avançado", () => {

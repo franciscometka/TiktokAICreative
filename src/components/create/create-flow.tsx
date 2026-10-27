@@ -62,7 +62,7 @@ export function CreateFlow({ initial, avatars, estimates, credits, planningAvail
   }
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 pt-8 pb-12 sm:px-8 sm:pt-12" data-create-step={step}>
+    <main className="mx-auto w-full max-w-4xl px-4 pt-8 pb-12 sm:px-8 sm:pt-12" data-create-step={step}>
       <header>
         <h1 className="text-[28px] leading-tight font-semibold tracking-tight text-fg sm:text-title">Criar vídeo</h1>
         <p className="mt-2 text-body text-fg-muted">Foto, avatar e estilo. A gente cuida do roteiro, da apresentadora e da edição.</p>
@@ -103,7 +103,7 @@ export function CreateFlow({ initial, avatars, estimates, credits, planningAvail
       </Card>
 
       <PersonalizeSheet open={personalizeOpen} onClose={() => setPersonalizeOpen(false)} draft={draft} set={set} />
-    </div>
+    </main>
   );
 }
 
