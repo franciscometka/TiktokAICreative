@@ -2,7 +2,7 @@
 
 import { ArrowLeft, Info, PauseCircle, WifiOff } from "lucide-react";
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { buildGenerationView, withWorker, type GenerationCredits, type GenerationSource, type GenerationView } from "@/application/generation-view";
 import { formatCredits } from "@/costs/credits";
 import { AmbientGlow, Button, buttonClass, Card, cx, focusRing, interactive, Progress, Skeleton, Spark } from "../ds";
@@ -37,12 +37,23 @@ export function GenerationScreen({ source, campaignId, handlers, advancedHref }:
   const { status } = useShellStatusContext();
   const view = withWorker(buildGenerationView(source, { creditsPerBrl: status?.credits?.creditsPerBrl ?? null }), status?.mode === "cloud" ? status.worker : null);
   const [pending, startTransition] = useTransition();
-  const [message, setMessage] = useState<string>();
-  const run = (action: () => Promise<Outcome>) => startTransition(async () => {
-    const r = await action();
-    setMessage(r.ok ? undefined : r.error?.message ?? "Não foi possível continuar.");
-    handlers.refresh();
-  });
+  // Erro de ação vale só para o estado em que aconteceu: ao mudar de fase, some (sem "aguarde" velho).
+  const [failure, setFailure] = useState<{ kind: string; text: string }>();
+  const message = failure?.kind === view.kind ? failure.text : undefined;
+  // `pending` só desabilita no próximo render: cliques no mesmo tick não chegam ao servidor.
+  const inFlight = useRef(false);
+  const run = (action: () => Promise<Outcome>) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    const kind = view.kind;
+    startTransition(async () => {
+      try {
+        const r = await action();
+        setFailure(r.ok ? undefined : { kind, text: r.error?.message ?? "Não foi possível continuar." });
+      } finally { inFlight.current = false; }
+      handlers.refresh();
+    });
+  };
   const v2 = source.v2;
   const progress = PROGRESS_KINDS.has(view.kind);
 
