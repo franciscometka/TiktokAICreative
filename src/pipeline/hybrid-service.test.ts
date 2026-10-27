@@ -678,6 +678,22 @@ describe("execução híbrida por etapa — somente transportes falsos", () => {
     await expect(provider.submit({ avatarPresetId: "influencer", audio: wav(5), durationSeconds: 5 })).rejects.toThrow(/RUNWAYML_API_SECRET/);
     expect(calls).toBe(0);
   });
+  it("token de uma cena/job não autoriza outra cena nem outro job (nenhuma tentativa nova)", async () => {
+    const f = await setup({}, false);
+    const { id, job } = await renderedJob(f);
+    const [sceneA, sceneB] = job.scenes.filter(scene => scene.requiresGeneratedVideo).map(scene => scene.sceneId);
+    const tokenA = (await f.service.quoteStage(id, "scenes", false, true, sceneA)).token;
+    const other = await setup({}, false);
+    const { id: otherId, sceneId: otherScene } = await renderedJob(other);
+    const attempts = async (svc: typeof f.service, jobId: string) => (await svc.getJob(jobId)).scenes.reduce((n, scene) => n + scene.attempts.length, 0);
+    const before = [await attempts(f.service, id), await attempts(other.service, otherId)];
+
+    await expect(f.service.regenerateReadyScene(id, sceneB!, tokenA)).rejects.toThrow();
+    await expect(other.service.regenerateReadyScene(otherId, otherScene, tokenA)).rejects.toThrow();
+
+    expect([await attempts(f.service, id), await attempts(other.service, otherId)]).toEqual(before);
+    expect((await f.ledger()).filter(entry => !entry.simulated)).toHaveLength(0);
+  });
   it("render externo/manual com job ativo continua bloqueado", async () => {
     const f = await setup({}, false);
     const { id } = await renderedJob(f);
