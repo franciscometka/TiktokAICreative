@@ -9,7 +9,7 @@ export function cx(...classes: (string | false | null | undefined)[]): string {
 }
 
 /** Anel de foco único (teclado). */
-export const focusRing = "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-light";
+export const focusRing = "outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-light";
 
 /** Transição padrão de interação (cor/borda/sombra/transform, 140ms, curva da marca). */
 export const interactive = "transition-[color,background-color,border-color,box-shadow,transform,opacity] duration-(--dur-fast) ease-cf";

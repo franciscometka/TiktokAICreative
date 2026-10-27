@@ -52,7 +52,7 @@ export function WorkerStatus({ status, variant = "pill", now, className }: { sta
       <span role="status" tabIndex={0} data-worker-state={status.state}
         className={cx(
           "inline-flex h-8 items-center gap-2 rounded-full border border-line px-3 text-caption font-medium whitespace-nowrap text-fg-muted",
-          "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-light",
+          "outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-light",
           className,
         )}>
         <Dot status={status} />{copy.label}
