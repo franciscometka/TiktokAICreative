@@ -685,7 +685,8 @@ export class PipelineService {
     if (!paidOperationInFlight(latest)) {
       await assertExecutionFence();
       const now = this.deps.clock();
-      const settled = { ...latest, sceneRetryIntents: latest.sceneRetryIntents?.map(item => item.id === retryIntentId ? { ...item, state: "settled" as const, outcome: outcome.kind === "FAILED" ? "failed" as const : "succeeded" as const, updatedAt: now } : item) };
+      // A intent liquida o retry da cena (`result`), não o render grátis encadeado: falha do render fica só no job.
+      const settled = { ...latest, sceneRetryIntents: latest.sceneRetryIntents?.map(item => item.id === retryIntentId ? { ...item, state: "settled" as const, outcome: result.kind === "FAILED" ? "failed" as const : "succeeded" as const, updatedAt: now } : item) };
       await this.deps.store.saveJob(settled);
       outcome = { ...outcome, job: settled };
     }

@@ -42,13 +42,14 @@ async function setup(modes: Partial<StageModes> = {}, avatar = true, options: { 
   const audio = fakeElevenLabs({ secondsPerChar: 0.045, timeout: options.timeout });
   const presenter = fakePresenter(options);
   const mockRenderer = new VersionedMockRenderer(); let realRenders = 0;
+  const renderControl = { fail: false };
   const hybrid: NonNullable<PipelineDeps["hybrid"]> = {
     capabilities: Object.fromEntries(["planning", "narration", "scenes", "avatar", "render"].map(s => [s, { available: true, provider: "fake" }])) as NonNullable<PipelineDeps["hybrid"]>["capabilities"],
     planner: mode => mode === "real" ? new LlmCreativePlanner(llm, randomId, { maxValidationAttempts: 1 }) : new MockCreativePlanner(randomId),
     audio: (pricing, mode) => mode === "real" ? new ElevenLabsAudioProvider({ pricing, apiKey: "fake-secret", voices: ELEVENLABS_VOICES, timeoutMs: 5000, transport: audio.transport }) : new MockAudioProvider({ pricing }),
     video: (pricing, mode) => mode === "real" ? new RunwayVideoProvider({ pricing, apiKey: "fake-video", uploadsDir: config.uploadsDir, transport: video.transport }) : new MockVideoProvider({ pricing }),
     presenter: (pricing, mode) => mode === "real" ? new RunwayPresenterProvider({ pricing, apiKey: "fake-avatar", transport: presenter.transport }) : new MockPresenterProvider(pricing),
-    renderer: mode => mode === "mock" ? mockRenderer : { id: "remotion", isMock: false, render: async manifest => { realRenders++; return { outputUri: `fake-render-v${realRenders}`, renderId: `v${realRenders}`, usage: { generations: 1 }, isMock: false, durationSeconds: manifest.duration, warnings: [] }; } },
+    renderer: mode => renderControl.fail ? { id: "remotion", isMock: false, render: async () => { throw new Error("Render falhou (simulado)."); } } : mode === "mock" ? mockRenderer : { id: "remotion", isMock: false, render: async manifest => { realRenders++; return { outputUri: `fake-render-v${realRenders}`, renderId: `v${realRenders}`, usage: { generations: 1 }, isMock: false, durationSeconds: manifest.duration, warnings: [] }; } },
   };
   const build = (overrides: Partial<PipelineDeps> = {}) => createHybridPipelineService(config, { hybrid, stageDelayMs: 0, presenterAudioSlicer: async (_path, window) => wav(window.endSeconds-window.startSeconds), pollOptions: { maxPolls: 2, intervalMs: 0, sleep: async () => {} }, ...overrides });
   const service = build(); const campaign = await service.planCampaign(input);
@@ -58,7 +59,7 @@ async function setup(modes: Partial<StageModes> = {}, avatar = true, options: { 
     const q = await target.quoteStage(id, stage); expect(q.ready, q.blocked).toBe(true);
     return (await target.executeStage(id, stage, q.token)).completion;
   };
-  return { root, config, service, campaign, input, llm, audio, presenter, video, videoOptions, build, ledger, execute, get realRenders() { return realRenders; } };
+  return { root, config, service, campaign, input, llm, audio, presenter, video, videoOptions, renderControl, build, ledger, execute, get realRenders() { return realRenders; } };
 }
 
 describe("execução híbrida por etapa — somente transportes falsos", () => {
@@ -619,6 +620,45 @@ describe("execução híbrida por etapa — somente transportes falsos", () => {
     expect(completedRenders(after)).toBe(completedRenders(before) + 1);
     expect(finalAssetOf(after, sceneId)).toBe(after.scenes.find(scene => scene.sceneId === sceneId)!.attempts.find(attempt => attempt.active)!.assetUri);
     expect((await f.ledger()).filter(entry => !entry.simulated)).toHaveLength(0);
+  });
+  it("retry pago recuperado + render grátis encadeado falha: intent settled/succeeded e o job mostra a falha do render", async () => {
+    const f = await setup({ scenes: "real" }, false);
+    const id = f.campaign.jobIds[0]!;
+    const imageToVideo = () => f.video.calls.filter(call => call.url.endsWith("/image_to_video")).length;
+    await f.execute("narration");
+    // Cena REAL é aprovada por unidade: uma execução por cena.
+    while ((await f.service.getJob(id)).scenes.some(scene => scene.requiresGeneratedVideo && scene.attempts.length === 0)) await f.execute("scenes");
+    const job = await f.service.getJob(id);
+    const sceneId = job.scenes.find(scene => scene.requiresGeneratedVideo)!.sceneId;
+    // 1. Cena com falha terminal (a última tentativa REAL falhou).
+    await new FilePipelineStore(f.config.dataDir).saveJob({ ...job, status: "failed", error: "Falha simulada.",
+      scenes: job.scenes.map(scene => scene.sceneId === sceneId ? { ...scene, attempts: scene.attempts.map(attempt => ({ ...attempt, status: "failed" as const, active: false, error: "Falha simulada." })) } : scene) });
+    // 2. Cotação válida do retry.
+    const quote = await f.service.quoteFailedSceneRetry(id, sceneId);
+    expect(quote.ready, quote.blocked).toBe(true);
+    f.renderControl.fail = true;
+    const callsBefore = imageToVideo();
+    const paidBefore = (await f.ledger()).filter(entry => !entry.simulated);
+
+    const outcome = await (await f.build().retryFailedScene(id, sceneId, quote.token)).completion;
+
+    const after = await f.service.getJob(id);
+    const attempts = after.scenes.find(scene => scene.sceneId === sceneId)!.attempts;
+    expect(attempts.at(-1)).toMatchObject({ status: "succeeded" });
+    expect(after.sceneRetryIntents?.find(intent => intent.quoteToken === quote.token)).toMatchObject({ state: "settled", outcome: "succeeded" });
+    // A falha do render continua visível no job e permite rerender grátis.
+    expect(outcome.kind).toBe("FAILED");
+    expect(after.status).toBe("failed");
+    expect(after.error).toMatch(/Render falhou/);
+    f.renderControl.fail = false;
+    const rerender = await f.service.quoteStage(id, "render");
+    expect(rerender.ready, rerender.blocked).toBe(true);
+    expect(rerender.estimatedBrl).toBe(0);
+    // Exatamente uma chamada paga nova (a do retry) e um lançamento novo no ledger.
+    expect(imageToVideo()).toBe(callsBefore + 1);
+    const paidAfter = (await f.ledger()).filter(entry => !entry.simulated);
+    expect(paidAfter).toHaveLength(paidBefore.length + 1);
+    expect(new Set(paidAfter.map(entry => entry.id)).size).toBe(paidAfter.length);
   });
   it("render externo/manual com job ativo continua bloqueado", async () => {
     const f = await setup({}, false);
