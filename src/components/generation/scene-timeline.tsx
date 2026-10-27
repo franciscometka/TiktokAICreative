@@ -32,7 +32,7 @@ function StatusIcon({ status }: { status: SceneStatus }) {
 function OnDemandPlayer({ scene }: { scene: GenerationScene }) {
   const [open, setOpen] = useState<string | null>(null);
   if (!scene.videoUrl) {
-    return <div className="grid aspect-[9/16] w-full place-items-center rounded-xl bg-surface-sunken text-center text-caption text-fg-subtle ring-1 ring-inset ring-line">{scene.status === "failed" ? "Sem vídeo" : "Ainda não gerada"}</div>;
+    return <div className="grid aspect-[9/16] w-full place-items-center rounded-xl bg-surface-sunken text-center text-caption text-fg-subtle ring-1 ring-inset ring-line">{scene.status === "failed" ? "Sem vídeo" : scene.simulated ? "Simulação: sem vídeo real" : "Ainda não gerada"}</div>;
   }
   if (open === scene.videoUrl) {
     return <video key={scene.videoUrl} src={scene.videoUrl} controls playsInline preload="metadata" aria-label={`Cena ${scene.number}`} className="aspect-[9/16] w-full animate-reveal rounded-xl bg-black object-contain" />;

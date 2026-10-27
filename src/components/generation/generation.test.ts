@@ -119,6 +119,14 @@ describe("prévia e timeline", () => {
     expect(html).not.toMatch(/Regenerar|Editar/);
   });
 
+  it("cena pronta em simulação não diz \"Ainda não gerada\"", () => {
+    const view = buildGenerationView(GENERATION_STATES.generating!, { creditsPerBrl: 100 });
+    const scenes = view.scenes.map((s) => ({ ...s, status: "ready" as const, videoUrl: null, simulated: true }));
+    const t = text(renderToStaticMarkup(createElement(SceneTimeline, { scenes, defaultSelected: scenes[0]!.id })));
+    expect(t).toContain("Simulação: sem vídeo real");
+    expect(t).not.toContain("Ainda não gerada");
+  });
+
   it("projeto é rota dark; ?view=advanced segue na ilha clara (LegacyIsland na página)", () => {
     expect(isDarkRoute("/campaigns/abc")).toBe(true);
   });
