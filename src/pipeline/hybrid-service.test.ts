@@ -17,6 +17,7 @@ import { fakePresenter, wav } from "@/test/presenter-fake";
 import { runwayFixture } from "@/test/runway-fake";
 import { ElevenLabsAudioProvider } from "@/providers/audio/elevenlabs-audio-provider";
 import { RunwayPresenterProvider } from "@/providers/presenter/runway-presenter-provider";
+import { RUNWAY_PRESENTER } from "@/config/presenters";
 import { RunwayVideoProvider } from "@/providers/video/runway-video-provider";
 import { MockPresenterProvider } from "@/providers/presenter/mock-presenter-provider";
 import { MockAudioProvider } from "@/providers/audio/mock-audio-provider";
@@ -659,6 +660,23 @@ describe("execução híbrida por etapa — somente transportes falsos", () => {
     const paidAfter = (await f.ledger()).filter(entry => !entry.simulated);
     expect(paidAfter).toHaveLength(paidBefore.length + 1);
     expect(new Set(paidAfter.map(entry => entry.id)).size).toBe(paidAfter.length);
+  });
+  it("projeto com avatar REAL abre (cotação/visão) mesmo sem RUNWAYML_API_SECRET; nada é enviado", async () => {
+    const f = await setup({ narration: "real", avatar: "real" });
+    const id = f.campaign.jobIds[0]!;
+    // Servidor sem a chave (removida/rotacionada): ver o projeto não pode quebrar a página.
+    const keyless = createHybridPipelineService(f.config, { stageDelayMs: 0 }, {});
+    const quote = await keyless.quoteJob(id);
+    expect(quote.ready).toBe(false);
+    const view = await getCampaignView({ service: keyless, uploads: new LocalUploadStore(f.config.uploadsDir), rendersDir: f.config.rendersDir, audioDir: f.config.audioDir }, f.campaign.id);
+    expect(view.ok).toBe(true);
+    expect(f.presenter.posts).toBe(0);
+    // A chave continua obrigatória para enviar: falha antes de qualquer requisição.
+    let calls = 0;
+    const pricing = { provider: "runway", model: RUNWAY_PRESENTER.model, unit: "per_second" as const, priceUsd: 0.1, updatedAt: "2026-01-01", isPlaceholder: true };
+    const provider = new RunwayPresenterProvider({ pricing, apiKey: "", transport: async () => { calls++; return new Response("{}"); } });
+    await expect(provider.submit({ avatarPresetId: "influencer", audio: wav(5), durationSeconds: 5 })).rejects.toThrow(/RUNWAYML_API_SECRET/);
+    expect(calls).toBe(0);
   });
   it("render externo/manual com job ativo continua bloqueado", async () => {
     const f = await setup({}, false);
