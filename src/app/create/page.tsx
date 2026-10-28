@@ -2,20 +2,67 @@ import type { Metadata } from "next";
 import { newProductId } from "@/application/campaign-actions";
 import { formInputFromRequest, type CampaignFormInput } from "@/application/campaign-form";
 import { imagePreviewUrl, type ImageView } from "@/application/campaign-view";
+import { initialCreateState } from "@/application/create-flow";
+import type { CreditsResult } from "@/application/credits";
 import { CampaignWizard } from "@/components/create/campaign-wizard";
+import { CreateFlowScreen } from "@/components/create/create-flow-screen";
 import { ReadinessPanel } from "@/components/readiness-panel";
+import { LegacyIsland } from "@/components/shell/legacy-island";
 import { DEFAULT_SPEAKER_PROFILE_ID, SPEAKER_PROFILES } from "@/config/voices";
 import { getPresetSummaries, getPublicConfig, getRuntime } from "@/server/runtime";
+import { LocalOnly, ServiceUnavailable } from "@/components/v2/service-unavailable";
+import { getBackend, loadOr } from "@/server/backend";
+import { runtimeMode } from "@/server/session";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Criar campanha · Creative Factory" };
+export const metadata: Metadata = { title: "Criar vídeo · Creative Factory" };
 
 function toInput(n: number): string {
   return n.toFixed(2).replace(".", ",");
 }
 
-export default async function CreatePage({ searchParams }: { searchParams: Promise<{ from?: string; edit?: string }> }) {
-  const { from, edit } = await searchParams;
+type Search = Record<string, string | string[] | undefined>;
+const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+
+/**
+ * L8.4 — Create Cinematic em 4 passos (local e cloud, pelos mesmos view models). O rascunho vindo
+ * da Home (foto, ideia, preset) e qualquer parâmetro da URL são revalidados em initialCreateState.
+ */
+async function CinematicCreate({ search }: { search: Search }) {
+  const backend = await getBackend("/create");
+  const [data, credits] = await Promise.all([
+    loadOr(() => backend.bootstrap(0)),
+    backend.credits().catch((): CreditsResult => ({ configured: false })),
+  ]);
+  if (!data.ok) return <ServiceUnavailable />;
+  const avatars = data.value.avatars.filter((a) => a.active);
+  const initial = initialCreateState({ newProductId: newProductId(), search, avatarIds: avatars.map((a) => a.id) });
+  return (
+    <CreateFlowScreen
+      initial={initial}
+      avatars={avatars.map((a) => ({ id: a.id, name: a.name, imageUrl: a.imageUrl, tags: a.tags, defaultForTags: a.defaultForTags, preferredProductCategories: a.preferredProductCategories, voiceName: a.voiceName, revision: a.revision, updatedAt: a.updatedAt }))}
+      estimates={data.value.estimates}
+      credits={credits.configured ? { perBrl: credits.creditsPerBrl, remaining: credits.remaining } : null}
+      planningAvailable={data.value.config.planningAvailable}
+    />
+  );
+}
+
+export default async function CreatePage({ searchParams }: { searchParams: Promise<Search> }) {
+  const search = await searchParams;
+  const from = one(search.from);
+  const edit = one(search.edit);
+  const mode = one(search.mode);
+  if (runtimeMode() === "cloud") {
+    // Lote 7: o wizard técnico antigo fica no modo local.
+    if (from || mode === "advanced") return <LocalOnly title="Criação avançada disponível no modo local" />;
+    return <CinematicCreate search={search} />;
+  }
+
+  // Lote 6: Create V2 é o padrão. "Planejar de novo" (from) e a criação avançada (mode=advanced)
+  // continuam no wizard completo, com todas as opções técnicas.
+  if (!from && mode !== "advanced") return <CinematicCreate search={search} />;
+
   const publicConfig = getPublicConfig();
   const { service } = getRuntime().deps;
 
@@ -68,6 +115,7 @@ export default async function CreatePage({ searchParams }: { searchParams: Promi
   }
 
   return (
+    <LegacyIsland>
     <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
       <div className="mb-8">
         <p className="text-xs font-semibold tracking-wider text-zinc-500 uppercase">Nova campanha</p>
@@ -89,7 +137,9 @@ export default async function CreatePage({ searchParams }: { searchParams: Promi
         planningAvailable={publicConfig.planningAvailable}
         voices={SPEAKER_PROFILES.map((v) => ({ id: v.id, name: v.name, description: v.description }))}
         audioProvider={publicConfig.audioProvider}
+        allowMocks={publicConfig.allowMocks}
       />
     </main>
+    </LegacyIsland>
   );
 }

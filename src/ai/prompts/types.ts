@@ -16,5 +16,7 @@ export interface PromptDefinition<TInput, TOutput> {
   outputSchema: z.ZodType<TOutput>;
   /** Schema de validação final, podendo incluir regras que dependem da entrada (ex.: quantidade). */
   validationSchemaFor(input: TInput): z.ZodType<TOutput>;
+  /** Normalização determinística aplicada ao JSON parseado antes da validação final. */
+  normalizeParsedOutput?(value: unknown): unknown;
   maxTokensFor(input: TInput): number;
 }

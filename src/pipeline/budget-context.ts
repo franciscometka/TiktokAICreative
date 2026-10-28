@@ -1,4 +1,5 @@
 import type { CostEstimate, CostLineItem, GenerationCost } from "@/domain/cost";
+import { approvedReference } from "@/domain/ugc";
 import type { GenerationJob, JobStatus } from "@/domain/pipeline";
 import { activeAttempt } from "./guards";
 
@@ -15,7 +16,11 @@ const usdToBrl = (usd: number, estimate: CostEstimate) => usd * estimate.exchang
 
 function isLineDone(line: CostLineItem, job: GenerationJob): boolean {
   switch (line.category) {
-    case "video": {
+    case "ugc_reference":
+      return approvedReference(job.ugc) !== undefined;
+    case "video":
+    case "ugc_scene":
+    case "broll": {
       const scene = job.scenes.find((s) => s.sceneId === line.sceneId);
       return scene !== undefined && activeAttempt(scene.attempts) !== undefined;
     }

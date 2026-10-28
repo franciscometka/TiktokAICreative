@@ -1,3 +1,6 @@
+import { realOnlyUgcView } from "./ugc-view";
+import type { UgcEnvironmentChoice, UgcPresenterChoice } from "@/domain/ugc";
+import { LocalUgcAssetStore } from "@/storage/ugc-asset-store";
 import type { ExecutionStage, ExecutionMode } from "@/domain/execution";
 import type { VisualSource } from "@/domain/creative";
 import { randomUUID } from "node:crypto";
@@ -9,7 +12,8 @@ import type { PipelineService } from "@/pipeline/pipeline-service";
 import { StaleEstimateError } from "@/pipeline/guards";
 import { FINAL_FILE, RENDER_ID, renderDir, SAFE_ENTITY_ID } from "@/render/output-paths";
 import { LocalAudioAssetStore } from "@/storage/audio-asset-store";
-import type { LocalUploadStore } from "@/storage/upload-store";
+import type { UploadStore } from "@/storage/upload-store";
+import type { AvatarLibraryStore } from "@/storage/avatar-store";
 import { parseCampaignForm, toCampaignRequest, type FieldErrors } from "./campaign-form";
 import { recommendedNextAction } from "./job-workflow";
 import {
@@ -32,14 +36,20 @@ import { toUserError, type UserError } from "./user-errors";
 export interface AppDeps {
   service: PipelineService;
   offlineOnly?: boolean;
-  uploads: LocalUploadStore;
+  uploads: UploadStore;
   /** Pasta dos renders (RENDERS_DIR), para servir os MP4 por ID. */
   rendersDir: string;
   /** Pasta das narrações (AUDIO_DIR), para servir o áudio por ID. */
   audioDir: string;
   videosDir?: string;
+  /** Pasta das referências AI UGC (UGC_DIR), para servir a imagem por ID. */
+  ugcDir?: string;
+  /** Lote 5.5: false = fluxo REAL-only (UI sem resultado simulado). Ausente = permitido (testes). */
+  allowMocks?: boolean;
   /** Provider de narração configurado (só o id; nunca a chave). */
   audioProvider?: "mock" | "elevenlabs";
+  /** Lote 6: biblioteca de avatares e perfis de voz (DATA_DIR/avatars). */
+  avatars?: AvatarLibraryStore;
 }
 
 export type ActionResult<T> =
@@ -104,12 +114,13 @@ export async function getCampaignView(deps: AppDeps, campaignId: string): Promis
   try {
     const { service } = deps;
     const campaign = await service.getCampaign(campaignId);
+    for (const jobId of campaign.jobIds) await service.adoptAvailableRealStages(jobId).catch((error: unknown) => console.warn(`[modos ${jobId}]`, error));
     const jobs = await service.listJobs(campaignId);
     const jobActuals = new Map<string, ActualCostSummary>();
     const jobActivity = new Map<string, JobActivity>();
     for (const job of jobs) {
       jobActuals.set(job.id, (await service.getJobCostReport(job.id)).actual);
-      jobActivity.set(job.id, { active: service.isJobActive(job.id), progress: service.getRenderProgress(job.id) });
+      jobActivity.set(job.id, { active: service.isJobActive(job.id), progress: service.getRenderProgress(job.id), queued: service.executionState({ jobId: job.id }) === "queued" });
     }
     const view = buildCampaignView({
       campaign,
@@ -120,6 +131,8 @@ export async function getCampaignView(deps: AppDeps, campaignId: string): Promis
       jobActivity,
       audioProvider: deps.audioProvider,
     });
+    if (view.state === "planning") view.planning.queued = service.executionState({ campaignId }) === "queued";
+    if (deps.allowMocks === false) for (const creative of view.creatives) if (creative.ugc) creative.ugc = realOnlyUgcView(creative.ugc);
     const capabilities = service.getStageCapabilities();
     if (capabilities && ["hybrid", "offline"].includes(campaign.executionMode ?? "")) {
       view.stageCapabilities = capabilities;
@@ -128,17 +141,21 @@ export async function getCampaignView(deps: AppDeps, campaignId: string): Promis
       for (const creative of view.creatives) {
         if (!creative.jobId) continue;
         creative.hybrid = true;
-        creative.stageQuotes = await Promise.all((["narration", "scenes", "avatar", "render"] as const).map(stage => service.quoteStage(creative.jobId!, stage)));
+        const stages = creative.ugc ? (["ugc_reference", "narration", "ugc_video", "scenes", "render"] as const) : (["narration", "scenes", "avatar", "render"] as const);
+        creative.stageQuotes = await Promise.all(stages.map(stage => service.quoteStage(creative.jobId!, stage)));
         creative.jobQuote = await service.quoteJob(creative.jobId);
         for (const quote of creative.stageQuotes) if (quote.done) quote.repeat = await service.quoteStage(creative.jobId, quote.stage, false, true);
         for (const scene of creative.scenes.filter(item => item.isGenerated && item.status === "ready")) {
           scene.regenerationQuote = await service.quoteStage(
             creative.jobId,
-            scene.visualSource === "presenter" ? "avatar" : "scenes",
+            scene.visualSource === "presenter" ? "avatar" : scene.ugc && scene.visualSource.startsWith("ugc_") ? "ugc_video" : "scenes",
             false,
             true,
             scene.id,
           );
+        }
+        for (const scene of creative.scenes.filter(item => item.isGenerated && item.status === "failed")) {
+          scene.retryQuote = await service.quoteFailedSceneRetry(creative.jobId, scene.id);
         }
         const job = jobs.find(item => item.id === creative.jobId);
         const plan = campaign.plan?.creatives.find(item => item.id === creative.id);
@@ -438,16 +455,22 @@ export async function executeHybridStage(deps: AppDeps, input: { jobId: string; 
 }
 
 /** Nova versão de uma cena + recomposição local/MOCK. O render só segue automaticamente quando custa zero. */
-export async function regenerateStoryboardScene(deps: AppDeps, input: { jobId: string; sceneId: string; stage: "scenes" | "avatar"; token: string }): Promise<ActionResult<{ started: boolean }>> {
+export async function regenerateStoryboardScene(deps: AppDeps, input: { jobId: string; sceneId: string; token: string }): Promise<ActionResult<{ started: boolean }>> {
   try {
-    const result = await deps.service.executeStage(input.jobId, input.stage, input.token, { regenerate: true, sceneId: input.sceneId });
-    const completion = result.completion.then(async outcome => {
-      if (outcome.kind !== "WAITING_STAGE") return outcome;
-      const render = await deps.service.quoteStage(input.jobId, "render");
-      if (!render.ready || render.estimatedBrl !== 0) return outcome;
-      return (await deps.service.executeStage(input.jobId, "render", render.token)).completion;
-    });
-    logBackground(input.jobId, completion);
+    // A recomposição grátis encadeada roda na MESMA tarefa (processo local ou worker), nunca no browser.
+    const result = await deps.service.regenerateReadyScene(input.jobId, input.sceneId, input.token);
+    logBackground(input.jobId, result.completion);
+    return { ok: true, value: { started: true } };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+/** Recupera uma cena falha; o servidor deriva o recipe do estado persistido. */
+export async function retryFailedScene(deps: AppDeps, input: { jobId: string; sceneId: string; token: string }): Promise<ActionResult<{ started: boolean }>> {
+  try {
+    const result = await deps.service.retryFailedScene(input.jobId, input.sceneId, input.token);
+    logBackground(input.jobId, result.completion);
     return { ok: true, value: { started: true } };
   } catch (error) {
     return fail(error);
@@ -470,6 +493,62 @@ export async function authorizeAndRunJob(deps: AppDeps, input: { jobId: string; 
   } catch (error) {
     return fail(error);
   }
+}
+
+// ---------------------------------------------------------------- AI UGC (Lote 5.3)
+
+/** "Aprovar": a pessoa da referência apresenta o produto. Retoma o job pausado, no mesmo teto. */
+export async function approveUgcReference(deps: AppDeps, input: { jobId: string; referenceId: string; fidelityConfirmed: boolean; observedTexts?: string[]; confirmedSpecs?: string[]; note?: string }): Promise<ActionResult<{ resumed: boolean }>> {
+  try {
+    const result = await deps.service.approveUgcReference(input.jobId, input.referenceId, { fidelityConfirmed: input.fidelityConfirmed, observedTexts: input.observedTexts, confirmedSpecs: input.confirmedSpecs, note: input.note });
+    if (result.completion) logBackground(input.jobId, result.completion);
+    return { ok: true, value: { resumed: result.resumed } };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+/** "Gerar outra referência": nova versão (novo custo, dentro do teto); a anterior fica no histórico. */
+/** Lote 5.5: projeto antigo MOCK passa a usar REAL; a referência simulada vira histórico. */
+export async function switchJobToReal(deps: AppDeps, input: { jobId: string }): Promise<ActionResult<{ switched: true }>> {
+  try {
+    await deps.service.switchJobToReal(input.jobId);
+    return { ok: true, value: { switched: true } };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+export async function regenerateUgcReference(deps: AppDeps, input: { jobId: string; fidelityRejection?: { observedTexts?: string[]; note?: string } }): Promise<ActionResult<{ resumed: boolean }>> {
+  try {
+    const result = await deps.service.regenerateUgcReference(input.jobId, input.fidelityRejection);
+    if (result.completion) logBackground(input.jobId, result.completion);
+    return { ok: true, value: { resumed: result.resumed } };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+/** "Trocar apresentador" / "Trocar ambiente": nova identidade, exige nova referência aprovada. */
+export async function updateUgcIdentity(deps: AppDeps, input: { jobId: string; presenter?: UgcPresenterChoice; environment?: UgcEnvironmentChoice }): Promise<ActionResult<{ resumed: boolean }>> {
+  try {
+    const result = await deps.service.updateUgcIdentity(input.jobId, { presenter: input.presenter, environment: input.environment });
+    if (result.completion) logBackground(input.jobId, result.completion);
+    return { ok: true, value: { resumed: result.resumed } };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+/** Imagem de referência AI UGC por IDs: só versões reais registradas no job; nunca caminho do browser. */
+export async function resolveUgcReferenceFile(deps: AppDeps, ids: { campaignId: string; creativeId: string; version: string }) {
+  if (!deps.ugcDir || !SAFE_ENTITY_ID.test(ids.campaignId) || !SAFE_ENTITY_ID.test(ids.creativeId) || !RENDER_ID.test(ids.version)) return undefined;
+  let jobs;
+  try { jobs = await deps.service.listJobs(ids.campaignId); } catch { return undefined; }
+  const registered = jobs.find((j) => j.creativeId === ids.creativeId)?.ugc?.references.some((r) => r.state === "succeeded" && !r.isMock && r.version === ids.version);
+  if (!registered) return undefined;
+  const file = await new LocalUgcAssetStore(deps.ugcDir).resolveReference(ids);
+  return file ? { ...file, fileName: `referencia-${ids.creativeId}-${ids.version}.${file.mimeType.split("/")[1]}` } : undefined;
 }
 
 export async function updateStoryboardScene(deps: AppDeps, input: { jobId: string; sceneId: string; narration: string; visualDescription: string; visualSource: VisualSource }): Promise<ActionResult<{ saved: boolean }>> {

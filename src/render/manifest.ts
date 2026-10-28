@@ -22,6 +22,8 @@ export interface BuildManifestInput {
   product: ProductInput;
   /** sceneId → URI do vídeo gerado ATIVO daquela cena (pode ser "mock://..."). */
   sceneVideos: ReadonlyMap<string, string>;
+  /** AI UGC (native_speech): cenas cujo clipe traz a fala. Nunca junto com narração real separada. */
+  clipAudioSceneIds?: ReadonlySet<string>;
   narration?: {
     uri: string;
     durationSeconds: number;
@@ -42,6 +44,10 @@ export interface BuildManifestInput {
  */
 export function buildRenderManifest(input: BuildManifestInput): RenderManifest {
   const { plan, product, sceneVideos } = input;
+  // Nunca duas vozes: fala nativa dos clipes UGC exclui uma narração real separada (D79).
+  if ((input.clipAudioSceneIds?.size ?? 0) > 0 && input.narration) {
+    throw new Error("Áudio duplicado: clipes AI UGC com fala nativa não podem ser combinados com narração separada.");
+  }
   const images = product.images;
   const warnings: RenderWarning[] = [];
   let cursor = 0;
@@ -67,7 +73,7 @@ export function buildRenderManifest(input: BuildManifestInput): RenderManifest {
     if (strategy.kind === "generated_video") {
       const uri = sceneVideos.get(scene.id);
       if (!uri) throw new MissingAssetError(`Cena ${scene.id} exige vídeo gerado, mas não há asset ativo`);
-      return { ...base, kind: "generated_video", uri, motion: "none" };
+      return { ...base, kind: "generated_video", uri, motion: "none", ...(input.clipAudioSceneIds?.has(scene.id) ? { clipAudio: true } : {}) };
     }
     if (strategy.kind === "product_image") {
       const image = images[imageIndex % images.length];

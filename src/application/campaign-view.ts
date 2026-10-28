@@ -1,5 +1,8 @@
 import type { JobQuote, StageQuote, StageCapabilities } from "@/domain/execution";
 import { jobWorkflow, type RecommendedAction, type WorkflowStep } from "./job-workflow";
+import { buildUgcView, ugcSceneInfo, type UgcSceneInfo, type UgcView } from "./ugc-view";
+import { previewEditorialTimeline } from "@/ai/ugc-editorial";
+import { isUgcPersonSource } from "@/domain/ugc";
 import { presenterSceneViews, type PresenterSceneView } from "./presenter-view";
 import { claudeModelName } from "@/config/llm-models";
 import type { ActualCostSummary } from "@/costs/ledger";
@@ -9,6 +12,7 @@ import type { CreativePlan, VisualSource } from "@/domain/creative";
 import type { Campaign, GenerationJob, JobStatus, StyleSelection } from "@/domain/pipeline";
 import type { RenderRecord } from "@/domain/render";
 import { activeAttempt, mediaComplete } from "@/pipeline/guards";
+import { paidOperationInFlight } from "@/pipeline/paid-operation";
 import type { CreativeReview } from "@/domain/plan-evaluation";
 import type { Range } from "@/domain/quality";
 import { STORED_IMAGE_NAME } from "@/domain/upload";
@@ -66,6 +70,10 @@ export interface SceneView {
   videoUrl?: string;
   simulated: boolean;
   regenerationQuote?: StageQuote;
+  /** Cotação single-use para recuperar somente uma tentativa terminalmente falha. */
+  retryQuote?: StageQuote;
+  /** AI UGC: quem aparece, o que segura, o que fala e o que faz. */
+  ugc?: UgcSceneInfo;
 }
 
 export interface PresetAdjustmentView {
@@ -112,15 +120,29 @@ function renderView(record: RenderRecord, campaignId: string, creativeId: string
 
 export interface JobActivity {
   active: boolean;
+  /** L8.6: ativo mas ainda na fila (nenhum worker assumiu). */
+  queued?: boolean;
   progress?: { renderedFrames: number; totalFrames: number };
 }
 
 export interface CreativeView {
+  /** Lote 6: autorização única do job (ativa/pausada/concluída) — a UX V2 decide a próxima ação. */
+  authorization?: { status: "active" | "paused" | "completed"; pausedReason?: string; /** L8.5: estimativa aprovada (BRL) e custo real já existente na aprovação. */ estimatedBrl?: number; baselineActualBrl?: number };
+  /** L8.5: operação PAGA sem confirmação no documento (mesma regra da retomada do worker). Só leitura. */
+  uncertainPaidOperation?: string;
+  /** Lote 6: estratégia de voz decidida (Voice Lock ou fala nativa) e o motivo. */
+  voiceLock?: { strategyLabel: string; reason: string; available: boolean };
+  /** Lote 6: avatar/revisão usados pelo job. */
+  avatar?: { avatarId: string; avatarRevision: number };
+  /** Lote 6: roteiro mestre (contagem e segmentos). */
+  masterScript?: { text: string; wordCount: number; segments: number; tone: string; warnings: string[] };
   jobQuote?: JobQuote;
   stageQuotes?: StageQuote[];
   hybrid?: boolean;
   nextAction?: RecommendedAction;
   workflow?: WorkflowStep[];
+  /** AI UGC (Lote 5.3): personagem, produto e referência pessoa + produto para aprovação visual. */
+  ugc?: UgcView;
   offline?: boolean;
   presenters?: PresenterSceneView[];
   number: number;
@@ -148,6 +170,8 @@ export interface CreativeView {
     | undefined;
   /** Job em generating/rendering sem execução no processo (servidor caiu/reiniciou). */
   interrupted: boolean;
+  /** L8.6: execução aprovada aguardando um worker (fila durável). Só leitura. */
+  queued: boolean;
   /** Último render real concluído (MP4 em disco), para player e download. */
   latestRender: RenderView | undefined;
   /** Versões anteriores concluídas (mais nova primeiro, sem a última). */
@@ -163,6 +187,11 @@ export interface CreativeView {
 }
 
 export interface CampaignView {
+  /** Lote 6: 2 = projeto criado pela UX V2. */
+  uxVersion?: 2;
+  targetDurationSeconds?: 30 | 45 | 60;
+  /** Lote 6: quem apresenta e por quê (sem IDs técnicos para o usuário). */
+  avatarSelection?: { mode: "auto" | "manual" | "synthetic"; name: string | null; reason: string; avatarId: string | null; avatarRevision: number | null };
   stageCapabilities?: StageCapabilities;
   planningQuote?: StageQuote;
   projectName?: string;
@@ -194,7 +223,7 @@ export interface CampaignView {
     finalVideoSeconds: Range;
   };
   budget: CostBudget;
-  planning: { startedAt: string | undefined; runs: number; simulated: boolean };
+  planning: { startedAt: string | undefined; runs: number; simulated: boolean; /** L8.6: planejamento na fila, sem worker ainda. */ queued?: boolean };
   error: (UserError & { detail: string | undefined }) | undefined;
   analysis: ProductAnalysis | undefined;
   hooks: { id: string; text: string; angle: string; styleLabel: string }[];
@@ -206,6 +235,8 @@ export interface CampaignView {
     pendingFutureBrl: number;
     /** Já utilizado + futuro pendente. */
     projectedBrl: number;
+    /** L8.6: custo REAL por categoria do ledger (só quando nada é simulado). Só leitura. */
+    actualByCategoryBrl?: Partial<Record<string, number>>;
     containsPlaceholderPrices: boolean;
   };
 }
@@ -234,9 +265,13 @@ const PENDING_FUTURE: readonly JobStatus[] = ["planned", "cost_estimated", "awai
 
 function sceneViews(creative: CreativePlan, campaignId: string, job: GenerationJob | undefined): SceneView[] {
   let cursor = 0;
+  // Editor V2: B-roll é overlay sobre a junção (não soma); a posição vem da prévia editorial.
+  const editorial = new Map(creative.editPlanVersion === 2 ? previewEditorialTimeline(creative).map((item) => [item.sceneId, item]) : []);
   return creative.scenes.map((scene) => {
-    const start = cursor;
-    cursor += scene.duration;
+    const planned = editorial.get(scene.id);
+    const start = planned?.startSeconds ?? cursor;
+    if (!scene.edit?.overlay) cursor += scene.duration;
+    const end = planned?.endSeconds ?? cursor;
     const attempt = activeAttempt(job?.scenes.find((state) => state.sceneId === scene.id)?.attempts ?? []);
     const version = attempt?.assetUri?.replaceAll("\\", "/").match(/\/(v\d+)\/clip\.mp4$/)?.[1];
     const latest = job?.scenes.find((state) => state.sceneId === scene.id)?.attempts.at(-1);
@@ -244,7 +279,7 @@ function sceneViews(creative: CreativePlan, campaignId: string, job: GenerationJ
       id: scene.id,
       number: scene.order + 1,
       startSeconds: start,
-      endSeconds: cursor,
+      endSeconds: end,
       visualSource: scene.visualSource,
       visualSourceLabel: VISUAL_SOURCE_NAMES[scene.visualSource],
       isGenerated: scene.requiresGeneratedVideo,
@@ -256,9 +291,10 @@ function sceneViews(creative: CreativePlan, campaignId: string, job: GenerationJ
       onScreenText: scene.onScreenText,
       visualDescription: scene.visualDescription,
       generationPrompt: scene.generationPrompt,
-      status: attempt ? "ready" : latest?.status === "failed" ? "failed" : job?.currentStage === (scene.visualSource === "presenter" ? "avatar" : "scenes") ? "generating" : "planned",
+      status: attempt ? "ready" : latest?.status === "failed" ? "failed" : job?.currentStage === (scene.visualSource === "presenter" ? "avatar" : isUgcPersonSource(scene.visualSource) ? "ugc_video" : "scenes") ? "generating" : "planned",
       videoUrl: attempt && !attempt.isMock && version ? `/api/video/${encodeURIComponent(campaignId)}/${encodeURIComponent(creative.id)}/${encodeURIComponent(scene.id)}/${encodeURIComponent(version)}` : undefined,
       simulated: attempt?.isMock ?? false,
+      ugc: ugcSceneInfo(scene, job),
     };
   });
 }
@@ -323,7 +359,16 @@ function creativeView(
     scenes: sceneViews(creative, campaign.id, job),
     presenters: presenterSceneViews(campaign, creative, job),
     workflow: jobWorkflow(campaign, creative, job, active),
+    ugc: buildUgcView({
+      campaign, creativeId: creative.id, job, active,
+      productPreviewUrl: job?.ugc ? imagePreviewUrl(campaign.request.product.id, job.ugc.product.imageId) ?? null : null,
+    }),
     offline: campaign.executionMode === "offline",
+    ...(job?.jobAuthorization ? { authorization: { status: job.jobAuthorization.status, ...(job.jobAuthorization.pausedReason ? { pausedReason: job.jobAuthorization.pausedReason } : {}), estimatedBrl: job.jobAuthorization.estimatedBrl, baselineActualBrl: job.jobAuthorization.baselineActualBrl } } : {}),
+    ...(job && interrupted && paidOperationInFlight(job) ? { uncertainPaidOperation: paidOperationInFlight(job) } : {}),
+    ...(job?.voiceLock ? { voiceLock: { strategyLabel: job.voiceLock.strategy === "locked_voice" ? "Voice Lock (voz fixa do avatar)" : "Voz do próprio vídeo", reason: job.voiceLock.reason, available: job.voiceLock.available } } : {}),
+    ...(job?.avatar ? { avatar: job.avatar } : {}),
+    ...(creative.masterScript ? { masterScript: { text: creative.masterScript.text, wordCount: creative.masterScript.wordCount, segments: creative.masterScript.segments.length, tone: creative.masterScript.persona.tone, warnings: creative.masterScript.warnings } } : {}),
     adjustment: presetAdjustment(review, campaign.settings.label, campaign.plannerId),
     warnings: review?.final.warnings.map((w) => w.message) ?? [],
     estimate: job?.estimate ? presentEstimate(job.estimate) : undefined,
@@ -353,6 +398,7 @@ function creativeView(
         }
       : undefined,
     interrupted,
+    queued: active && activity?.queued === true,
     latestRender: renders[0],
     previousRenders: renders.slice(1),
     lastRenderError: failedAfter?.error,
@@ -411,8 +457,11 @@ export function buildCampaignView({
   const pendingFutureBrl = roundBrl(pendingJobs.reduce((acc, j) => acc + (j.estimate?.estimatedAdditionalBrl ?? 0), 0));
   const actual = presentActualCosts(campaignActual);
 
+  // L8.4: rascunho que NUNCA iniciou o planejamento (aguarda a aprovação explícita) não teve
+  // tentativa nem chamada paga: não é "interrompido… pode ter sido cobrado".
+  const neverStarted = campaign.status === "draft" && campaign.planningRuns === undefined && !campaign.planningStartedAt;
   let error: CampaignView["error"];
-  if (state === "interrupted") error = { ...planningUserError("interrupted"), detail: undefined };
+  if (state === "interrupted" && !neverStarted) error = { ...planningUserError("interrupted"), detail: undefined };
   else if (state === "failed") {
     error = { ...planningUserError(campaign.errorCode ?? "unknown"), detail: campaign.error };
   }
@@ -420,6 +469,9 @@ export function buildCampaignView({
   return {
     id: campaign.id,
     projectName: request.projectName, videoConcept: request.videoConcept, offline: campaign.executionMode === "offline",
+    ...(request.uxVersion ? { uxVersion: request.uxVersion } : {}),
+    ...(request.targetDurationSeconds ? { targetDurationSeconds: request.targetDurationSeconds } : {}),
+    ...(request.avatar ? { avatarSelection: { mode: request.avatar.mode, name: request.avatar.snapshot?.name ?? null, reason: request.avatar.reason, avatarId: request.avatar.avatarId ?? null, avatarRevision: request.avatar.avatarRevision ?? null } } : {}),
     createdAt: campaign.createdAt,
     updatedAt: campaign.updatedAt,
     state,
@@ -449,7 +501,8 @@ export function buildCampaignView({
     budget: request.budget,
     planning: {
       startedAt: campaign.planningStartedAt,
-      runs: campaign.planningRuns ?? 1,
+      // Campanhas antigas (sem o contador) que já planejaram contam 1; nunca iniciado = 0.
+      runs: campaign.planningRuns ?? (neverStarted ? 0 : 1),
       simulated: campaign.plannerId === "mock",
     },
     error,
@@ -460,6 +513,7 @@ export function buildCampaignView({
       actual,
       pendingFutureBrl,
       projectedBrl: roundBrl(actual.totalBrl + pendingFutureBrl),
+      ...(campaignActual.entryCount > 0 && !campaignActual.includesSimulated ? { actualByCategoryBrl: { ...campaignActual.byCategoryBrl } } : {}),
       containsPlaceholderPrices: pendingJobs.some((j) => j.estimate?.containsPlaceholderPrices),
     },
   };

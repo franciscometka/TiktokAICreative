@@ -1,0 +1,139 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
+import { approveUgcReferenceAction, regenerateUgcReferenceAction, switchJobToRealAction, updateUgcIdentityAction } from "@/app/actions";
+import type { UgcView } from "@/application/ugc-view";
+import { buttonClasses, cx, Panel, Spinner } from "@/components/ui/primitives";
+
+/**
+ * Aprovação visual do AI UGC: preview grande da pessoa segurando o produto, ANTES de qualquer
+ * cena UGC. Aprovar retoma o job dentro do mesmo teto; gerar outra/trocar cria nova versão.
+ */
+export function UgcReferencePanel({ jobId, ugc, running }: { jobId: string | undefined; ugc: UgcView; running: boolean }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [message, setMessage] = useState<string>();
+  const [fidelityChecked, setFidelityChecked] = useState(false);
+  const [observed, setObserved] = useState("");
+  // Cada especificação exata (ex.: 2100W) é conferida individualmente; sem isso não há aprovação.
+  const [specChecks, setSpecChecks] = useState<Record<string, boolean>>({});
+  const specsChecked = (ugc.specs ?? []).every((spec) => specChecks[spec]);
+  const observedTexts = observed.split(/[,;\n]/).map((t) => t.trim()).filter(Boolean).slice(0, 20);
+  const reference = ugc.current;
+  const disabled = pending || running || !jobId;
+
+  const run = (label: string, action: () => Promise<{ ok: boolean; error?: { message: string } }>) =>
+    startTransition(async () => {
+      const result = await action();
+      setMessage(result.ok ? label : (result.error?.message ?? "Não foi possível concluir."));
+      router.refresh();
+    });
+
+  return (
+    <Panel className="overflow-hidden p-0">
+      <div className="grid md:grid-cols-[minmax(16rem,22rem)_1fr]">
+        <div className="relative aspect-[9/16] bg-zinc-100">
+          {reference?.previewUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- imagem local servida por rota com IDs
+            <img className="size-full object-cover" src={reference.previewUrl} alt="Referência: pessoa segurando o produto" />
+          ) : (
+            <div className="grid size-full place-items-center p-6 text-center text-sm text-zinc-500">
+              {ugc.historicalSimulation ? "Referência não gerada: a versão existente é uma simulação (histórico), sem imagem real da pessoa." : reference?.state === "failed" ? "A referência falhou. Gere outra." : reference?.state === "uncertain" ? "Cobrança incerta: o envio pode ter sido aceito. Nenhum reenvio automático." : "Referência ainda não gerada. Ela é criada no início da geração, antes de qualquer cena UGC."}
+            </div>
+          )}
+          {reference?.isMock && reference.previewUrl && (
+            <span className="absolute inset-x-3 top-3 rounded-lg bg-black/80 px-3 py-2 text-center text-xs font-semibold text-white">
+              MOCK · referência simulada — mostra a foto do produto, não uma pessoa gerada
+            </span>
+          )}
+          {reference && <span className="absolute right-3 bottom-3 rounded-full bg-white/90 px-2.5 py-1 text-xs font-semibold text-zinc-900">{reference.label} · {reference.review === "approved" ? "Aprovada" : reference.review === "rejected" ? "Descartada" : reference.state === "succeeded" ? "Aguardando aprovação" : reference.state}</span>}
+        </div>
+        <div className="space-y-5 p-6">
+          <div>
+            <p className="text-xs font-semibold tracking-[0.18em] text-emerald-700 uppercase">AI UGC · referência</p>
+            <h2 className="mt-1 text-2xl font-semibold tracking-tight">{ugc.progressLabel && !reference?.previewUrl ? ugc.progressLabel : ugc.headline}</h2>
+            {ugc.progressLabel && reference?.previewUrl && <p className="mt-1 text-sm text-zinc-500" aria-live="polite">{ugc.progressLabel}</p>}
+            <p className="mt-2 text-sm text-zinc-600">Nenhuma cena UGC é gerada antes da sua aprovação. Todas as cenas usam esta mesma pessoa, roupa, ambiente e produto.</p>
+          </div>
+          <dl className="grid gap-3 text-sm sm:grid-cols-2">
+            <div><dt className="text-xs text-zinc-500">Quem aparece</dt><dd className="mt-0.5 font-medium">{ugc.person.genderLabel} · {ugc.person.wardrobe}</dd><dd className="text-xs text-zinc-500">{ugc.person.appearance}</dd>
+              {ugc.identity && <dd className="mt-1 flex items-center gap-2 text-xs text-zinc-600">
+                {/* eslint-disable-next-line @next/next/no-img-element -- foto do avatar servida por rota com IDs */}
+                {ugc.identity.avatarPhotoUrl && <img src={ugc.identity.avatarPhotoUrl} alt={`Foto do avatar ${ugc.identity.avatarName ?? ""}`.trim()} className="size-8 rounded object-cover" />}
+                {ugc.identity.label}
+              </dd>}</div>
+            <div><dt className="text-xs text-zinc-500">O que segura</dt><dd className="mt-0.5 font-medium">{ugc.product.name}</dd><dd className="text-xs text-zinc-500">Preserva: {ugc.product.preserve.slice(0, 3).join(", ")}</dd></div>
+            <div><dt className="text-xs text-zinc-500">Ambiente</dt><dd className="mt-0.5 font-medium">{ugc.person.environmentLabel}</dd></div>
+            <div><dt className="text-xs text-zinc-500">Áudio</dt><dd className="mt-0.5 font-medium">{ugc.audioStrategyLabel}</dd></div>
+          </dl>
+          {ugc.fidelity && (ugc.canApprove || ugc.canConfirmFidelity || ugc.fidelity.status !== "pending") && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-4 text-sm">
+              <p className="font-medium text-zinc-900">Fidelidade do produto · <span className="text-zinc-600">{ugc.fidelity.statusLabel}</span></p>
+              <p className="mt-1 text-zinc-700">Verifique se produto, logo, textos e especificações continuam fiéis.</p>
+              <ul className="mt-2 list-disc space-y-0.5 pl-5 text-xs text-zinc-600">
+                {ugc.fidelity.checklist.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+              {ugc.fidelity.conflicts.length > 0 && <p className="mt-2 text-xs font-medium text-red-700">Divergência: {ugc.fidelity.conflicts.join("; ")}. A geração não segue automaticamente.</p>}
+              {(ugc.canApprove || ugc.canConfirmFidelity) && (
+                <div className="mt-3 space-y-2">
+                  <label className="flex items-start gap-2 text-zinc-800">
+                    <input type="checkbox" className="mt-0.5" checked={fidelityChecked} disabled={disabled} onChange={(e) => setFidelityChecked(e.target.checked)} />
+                    Conferi: o produto, o logo, os textos e os números estão iguais ao original.
+                  </label>
+                  {(ugc.specs ?? []).map((spec) => (
+                    <label key={spec} className="flex items-start gap-2 text-zinc-800">
+                      <input type="checkbox" className="mt-0.5" checked={!!specChecks[spec]} disabled={disabled} onChange={(e) => setSpecChecks((c) => ({ ...c, [spec]: e.target.checked }))} />
+                      “{spec}” está igual ao produto (ou não aparece) — nenhum número diferente.
+                    </label>
+                  ))}
+                  <label className="block text-xs text-zinc-600">Algum texto ou número diferente na imagem? (opcional, ex.: 3900)
+                    <input type="text" maxLength={200} disabled={disabled} value={observed} onChange={(e) => setObserved(e.target.value)} className="mt-1 block w-full rounded-md border border-zinc-300 p-2 text-sm" />
+                  </label>
+                  <p className="text-xs text-zinc-500">A revisão é sua: o sistema ainda não lê textos da imagem automaticamente.</p>
+                </div>
+              )}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {(ugc.canApprove || ugc.canConfirmFidelity) && reference && (
+              <button type="button" className={buttonClasses("primary", "md")} disabled={disabled || !fidelityChecked || !specsChecked} onClick={() => run("Referência aprovada com fidelidade confirmada. A geração continua dentro do mesmo teto.", () => approveUgcReferenceAction({ jobId, referenceId: reference.id, fidelityConfirmed: fidelityChecked, confirmedSpecs: (ugc.specs ?? []).filter((spec) => specChecks[spec]), ...(observedTexts.length ? { observedTexts } : {}) }))}>
+                {pending && <Spinner />}{ugc.canConfirmFidelity ? "Confirmar fidelidade" : "Aprovar esta pessoa"}
+              </button>
+            )}
+            {ugc.canGenerateReal && (
+              <button type="button" className={buttonClasses("primary", "md")} disabled={disabled} onClick={() => run("Projeto passou a usar providers REAIS. Gere o vídeo para criar a referência real.", () => switchJobToRealAction({ jobId }))}>
+                Gerar referência real
+              </button>
+            )}
+            {ugc.canRegenerate && !ugc.historicalSimulation && (
+              <button type="button" className={buttonClasses("secondary", "md")} disabled={disabled} onClick={() => run("Nova referência solicitada (nova versão, novo custo dentro do teto).", () => regenerateUgcReferenceAction({ jobId, ...(observedTexts.length ? { fidelityRejection: { observedTexts } } : {}) }))}>
+                Gerar outra referência
+              </button>
+            )}
+            <a className={buttonClasses("ghost", "md")} href="#storyboard">Editar conceito</a>
+          </div>
+          {ugc.canChangeIdentity && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-xs font-medium text-zinc-600">Trocar apresentador
+                <select aria-label="Trocar apresentador" disabled={disabled} className="mt-1 block w-full rounded-md border border-zinc-300 p-2 text-sm" value="" onChange={(e) => e.target.value && run("Apresentador trocado. Uma nova referência será necessária.", () => updateUgcIdentityAction({ jobId, presenter: e.target.value }))}>
+                  <option value="">{ugc.person.genderLabel} (atual)</option>
+                  <option value="woman">Mulher</option>
+                  <option value="man">Homem</option>
+                </select>
+              </label>
+              <label className="text-xs font-medium text-zinc-600">Trocar ambiente
+                <select aria-label="Trocar ambiente" disabled={disabled} className="mt-1 block w-full rounded-md border border-zinc-300 p-2 text-sm" value="" onChange={(e) => e.target.value && run("Ambiente trocado. Uma nova referência será necessária.", () => updateUgcIdentityAction({ jobId, environment: e.target.value }))}>
+                  <option value="">{ugc.person.environmentLabel} (atual)</option>
+                  {ugc.environments.filter((env) => env.id !== ugc.person.environment).map((env) => <option key={env.id} value={env.id}>{env.label}</option>)}
+                </select>
+              </label>
+            </div>
+          )}
+          {ugc.history.length > 1 && <p className="text-xs text-zinc-500">{ugc.history.length} referências geradas (todas ficam no histórico e no custo).</p>}
+          {message && <p className={cx("text-sm", "text-zinc-700")} aria-live="polite">{message}</p>}
+        </div>
+      </div>
+    </Panel>
+  );
+}

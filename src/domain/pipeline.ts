@@ -4,6 +4,7 @@ import { ClipDurationCheckSchema } from "./media-integrity";
 import { z } from "zod";
 import { AvatarPresetSchema, PresenterTaskSchema, PresenterAudioSchema } from "./presenter";
 import { NarrationInfoSchema } from "./audio";
+import { AvatarReferenceAssetSchema, CreativeModeSchema, UgcIdentityStrategySchema, UgcJobStateSchema, UgcRequestSchema, UgcSceneConsistencySchema, UgcVideoOperationSchema } from "./ugc";
 import { CampaignPlanSchema } from "./campaign";
 import {
   BudgetExceededDecisionSchema,
@@ -16,6 +17,9 @@ import { CreativeReviewSchema } from "./plan-evaluation";
 import { ProductInputSchema } from "./product";
 import { GenerationQualitySchema, QualitySettingsSchema } from "./quality";
 import { RenderManifestSchema, RenderRecordSchema } from "./render";
+import { AudioSilenceAnalysisSchema } from "./edit";
+import { AvatarSelectionSchema } from "./avatar";
+import { MasterAudioAssetSchema, VoiceLockDecisionSchema, VoiceLockRequestSchema } from "./video-speech";
 
 const nonEmpty = z.string().trim().min(1);
 
@@ -73,6 +77,25 @@ export const CampaignRequestSchema = z.object({
   speakerProfileId: z.string().optional(),
   presenterPresetId: AvatarPresetSchema.optional(),
   presenterChoice: z.enum(["woman", "man", "none"]).optional(),
+  /** Modo principal. Ausente = "standard" (campanhas anteriores). */
+  creativeMode: CreativeModeSchema.optional(),
+  /** Só com creativeMode = "ai_ugc": apresentador, ambiente e estilo visual. */
+  ugc: UgcRequestSchema.optional(),
+  /** Lote 6: projeto criado pela UX V2 (foto + ideia + avatar + duração). Ausente = fluxo antigo. */
+  uxVersion: z.literal(2).optional(),
+  /** Lote 6: duração escolhida (30/45/60s); define trechos e palavras do roteiro mestre. */
+  targetDurationSeconds: z.union([z.literal(30), z.literal(45), z.literal(60)]).optional(),
+  /** Lote 6: avatar usado (revisão congelada) e o motivo da escolha. */
+  avatar: AvatarSelectionSchema.optional(),
+  /** Lote 6: "Personalizar" (opcional). */
+  personalization: z.object({
+    tone: z.string().trim().max(120).optional(),
+    cta: z.string().trim().max(200).optional(),
+    style: z.string().trim().max(60).optional(),
+    environmentText: z.string().trim().max(160).optional(),
+  }).optional(),
+  /** Lote 6: Voice Lock pedido pelo usuário. */
+  voiceLock: VoiceLockRequestSchema.optional(),
 });
 export type CampaignRequest = z.infer<typeof CampaignRequestSchema>;
 
@@ -150,10 +173,14 @@ export const MediaAttemptSchema = z.object({
    * tolerância é rejeitado (tentativa "failed", nunca ativa, nunca vai ao render; custo mantido).
    */
   media: ClipDurationCheckSchema.optional(),
+  /** Pausas medidas localmente no áudio nativo; usadas pelo Editor V2 para cortes seguros. */
+  audioSilence: AudioSilenceAnalysisSchema.optional(),
   /** Arquivo de um clipe REJEITADO (guardado só para auditoria; nunca usado no render). */
   rejectedAssetUri: z.string().optional(),
   /** Só em tentativas de áudio (Lote 4+): voz, request id, versão, timing e AudioFit. */
   narration: NarrationInfoSchema.optional(),
+  /** Cena AI UGC: referência, identidade, roupa, ambiente, produto e estratégia de áudio usados. */
+  ugc: UgcSceneConsistencySchema.optional(),
   createdAt: nonEmpty,
 });
 export type MediaAttempt = z.infer<typeof MediaAttemptSchema>;
@@ -175,6 +202,28 @@ export const ApprovalSchema = z.object({
 });
 export type Approval = z.infer<typeof ApprovalSchema>;
 
+/** Autorização durável de UMA nova tentativa de cena, persistida antes do enqueue. */
+export const SceneRetryIntentSchema = z.object({
+  id: nonEmpty,
+  sceneId: nonEmpty,
+  stage: z.enum(["scenes", "avatar", "ugc_video"]),
+  quoteToken: z.string().length(64),
+  failedAttemptId: nonEmpty,
+  nextAttemptNumber: z.int().positive(),
+  estimateId: nonEmpty,
+  storyboardRevision: z.int().nonnegative(),
+  stageRevision: z.int().nonnegative(),
+  mode: z.enum(["mock", "real"]),
+  provider: nonEmpty,
+  model: nonEmpty,
+  estimatedBrl: z.number().nonnegative(),
+  state: z.enum(["authorized", "queued", "running", "settled"]),
+  outcome: z.enum(["succeeded", "failed", "blocked"]).optional(),
+  createdAt: nonEmpty,
+  updatedAt: nonEmpty,
+});
+export type SceneRetryIntent = z.infer<typeof SceneRetryIntentSchema>;
+
 export const GenerationJobSchema = z.object({
   /** Autorização única do fluxo simples. O teto cobre apenas novas chamadas deste job. */
   jobAuthorization: z.object({
@@ -193,7 +242,24 @@ export const GenerationJobSchema = z.object({
   stageRevision: z.number().int().nonnegative().optional(),
   waitingForStage: ExecutionStageSchema.optional(),
   stageApprovals: z.array(z.object({ mode: z.enum(["mock", "real"]).optional(), provider: z.string().optional(), model: z.string().optional(), stage: ExecutionStageSchema, unit: z.string(), quoteToken: z.string(), estimatedBrl: z.number().nonnegative(), approvedAt: z.string() })).optional(),
-  currentStage: z.enum(["narration", "scenes", "avatar", "render"]).optional(),
+  sceneRetryIntents: z.array(SceneRetryIntentSchema).optional(),
+  currentStage: z.enum(["narration", "scenes", "avatar", "ugc_reference", "ugc_video", "render"]).optional(),
+  /** AI UGC: identidade do personagem, produto-âncora e referências versionadas (pessoa + produto). */
+  ugc: UgcJobStateSchema.optional(),
+  /** Lote 6: avatar e revisão usados por este job (alterar o avatar depois não muda o job). */
+  avatar: z.object({
+    avatarId: z.string(),
+    avatarRevision: z.int().positive(),
+    /** Correção Lote 6: foto do avatar enviada ao provider e como a identidade foi obtida. */
+    avatarReferenceAsset: AvatarReferenceAssetSchema.optional(),
+    identityStrategy: UgcIdentityStrategySchema.optional(),
+  }).optional(),
+  /** Lote 6: estratégia de voz decidida (LOCKED_VOICE ou nativa) com o motivo. */
+  voiceLock: VoiceLockDecisionSchema.optional(),
+  /** Lote 6: áudio mestre (narração contínua) e os intervalos de cada trecho, quando LOCKED_VOICE. */
+  masterAudio: MasterAudioAssetSchema.optional(),
+  /** Intenções/operações Veo persistidas para retomada sem POST duplicado. */
+  ugcVideoOperations: z.array(UgcVideoOperationSchema).optional(),
   presenterTasks: z.array(PresenterTaskSchema).optional(),
   videoTasks: z.array(z.object({ attemptId: z.string().optional(), state: z.enum(["submitting", "pending", "settled"]).optional(), sceneId: z.string(), providerJobId: z.string(), provider: z.string(), model: z.string(), createdAt: z.string() })).optional(),
   id: nonEmpty,

@@ -1,16 +1,13 @@
-import { createHybridPipelineService, hybridCapabilities } from "@/pipeline/hybrid-service";
-import type { StageCapabilities } from "@/domain/execution";
+import { createHybridPipelineService } from "@/pipeline/hybrid-service";
 import type { AppDeps } from "@/application/campaign-actions";
 import { loadAppConfigSafe, type AppConfig, type ConfigIssue } from "@/config/env";
-import { runtimeReadiness } from "@/config/readiness";
-import type { RuntimeReadiness } from "@/domain/readiness";
-import { RUNWAY_VIDEO } from "@/config/video-models";
-import { PRICING_TABLE } from "@/config/pricing";
-import { summarizePresets, type PresetSummary } from "@/costs/preset-summary";
-import { StaticPricingCatalog } from "@/costs/pricing-catalog";
-import type { CostBudget } from "@/domain/cost";
+import { mocksAllowed } from "@/config/execution-policy";
+import type { PresetSummary } from "@/costs/preset-summary";
 import { LocalUploadStore } from "@/storage/upload-store";
-import { SIMPLE_QUALITY_PRESETS } from "@/config/simple-presets";
+import { FileAvatarLibraryStore } from "@/storage/avatar-store";
+import type { V2EstimateView } from "@/application/create-v2";
+import { presetSummariesFor, publicConfigFor, v2EstimatesFor, type PublicAppConfig } from "@/application/public-config";
+import { DeployMisconfiguredError, deployMisconfiguration } from "@/lib/runtime-mode";
 
 /**
  * Runtime do processo Next.js (SERVIDOR). Um único PipelineService por processo: ele guarda os
@@ -30,6 +27,10 @@ const KEY = Symbol.for("tiktok-ai-creative-factory.runtime");
 type GlobalWithRuntime = typeof globalThis & { [KEY]?: Runtime };
 
 export function getRuntime(): Runtime {
+  // Vercel + modo local = build sem as variáveis do modo cloud: nunca tentar gravar no disco nem
+  // rodar o pipeline na Vercel (falha clara em vez de "erro inesperado").
+  const misconfigured = deployMisconfiguration();
+  if (misconfigured) throw new DeployMisconfiguredError(misconfigured);
   const g = globalThis as GlobalWithRuntime;
   if (!g[KEY]) {
     const { config, issues: configIssues } = loadAppConfigSafe();
@@ -37,55 +38,38 @@ export function getRuntime(): Runtime {
       config,
       configIssues,
       deps: {
-        service: createHybridPipelineService(config),
+        service: createHybridPipelineService(config, {}, process.env, configIssues),
         uploads: new LocalUploadStore(config.uploadsDir),
         rendersDir: config.rendersDir,
         audioDir: config.audioDir,
+        ugcDir: config.ugcDir,
         videosDir: config.videosDir,
         audioProvider: config.audioProvider,
         offlineOnly: false,
+        allowMocks: mocksAllowed(config),
+        avatars: new FileAvatarLibraryStore(config.dataDir),
       },
     };
   }
+  // Runtime criado por uma versão anterior (hot reload): acrescenta a biblioteca de avatares sem
+  // recriar o PipelineService (que guarda locks e execuções em andamento).
+  g[KEY].deps.avatars ??= new FileAvatarLibraryStore(g[KEY].config.dataDir);
   return g[KEY];
 }
 
-/** Configuração SEGURA para a interface: sem API key, sem caminhos, sem variáveis privadas. */
-export interface PublicAppConfig {
-  stageCapabilities: StageCapabilities;
-  readiness: RuntimeReadiness;
-  planner: "mock" | "anthropic";
-  planningAvailable: boolean;
-  /** true enquanto vídeo e áudio usam providers mock (nada real é gerado ou cobrado). */
-  mediaIsMock: boolean;
-  /** Provider de narração: "mock" (simulado) ou "elevenlabs" (real, cobrado). */
-  audioProvider: "mock" | "elevenlabs";
-  videoIsMock: boolean;
-  /** "remotion" = o render gera MP4 real; "mock" = nenhum arquivo é gerado. */
-  renderer: "mock" | "remotion";
-  defaultBudget: CostBudget;
-  exchangeRate: { rate: number; source: string };
-}
+export type { PublicAppConfig } from "@/application/public-config";
 
+/** Configuração SEGURA para a interface (mesma função pura usada pela API cloud). */
 export function getPublicConfig(): PublicAppConfig {
   const { config, configIssues } = getRuntime();
-  const capabilities = hybridCapabilities(config);
-  return {
-    stageCapabilities: capabilities,
-    readiness: runtimeReadiness(config, configIssues),
-    planner: config.llmProvider,
-    planningAvailable: config.llmProvider === "mock" || capabilities.planning.available,
-    mediaIsMock: config.audioProvider === "mock" && config.videoProvider === "mock",
-    audioProvider: config.audioProvider,
-    videoIsMock: config.videoProvider === "mock",
-    renderer: config.renderer.id,
-    defaultBudget: config.defaultBudget,
-    exchangeRate: { rate: config.exchangeRate.rate, source: config.exchangeRate.source },
-  };
+  return publicConfigFor(config, configIssues, process.env);
+}
+
+/** Lote 6: estimativas da UX V2 (duração × qualidade), calculadas no servidor pela tabela de preços. */
+export function getV2Estimates(): V2EstimateView[] {
+  return v2EstimatesFor(getRuntime().config);
 }
 
 export function getPresetSummaries(): PresetSummary[] {
-  const config = getRuntime().config;
-  return summarizePresets(new StaticPricingCatalog(PRICING_TABLE), config.exchangeRate, config.videoProvider === "runway" ? RUNWAY_VIDEO : undefined, SIMPLE_QUALITY_PRESETS);
+  return presetSummariesFor(getRuntime().config);
 }
-

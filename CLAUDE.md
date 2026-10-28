@@ -8,14 +8,25 @@ produto → análise/hooks/conceitos/roteiro/cenas (Claude) → validação + aj
 Custo é preocupação central; nada pago de mídia acontece sem aprovação explícita.
 
 ## Estado atual
+- Lote 7 (D101–D108): Cloud Runtime. Vercel = só interface (`NEXT_PUBLIC_RUNTIME_MODE=cloud`); Render Web = API (`npm run start:api`); Render Worker = pipeline (`npm run worker`); Supabase = Postgres + Storage. Fila durável no Postgres (`job_queue`, claim `FOR UPDATE SKIP LOCKED`, lease/heartbeat, dedupe). Ponto único `src/pipeline/dispatch.ts`: sem dispatcher = execução no processo (local, igual a antes). Retomada nunca reenvia pago (`blocked`). Upload direto ao Storage; URL assinada sob demanda. `PERSISTENCE_DRIVER=local` continua o padrão. Ver `docs/CLOUD-RUNTIME.md` e `docs/DEPLOYMENT.md`. Nada foi publicado nem chamado de verdade.
+- Lote 6 (D95–D98): UX V2 — a UX principal esconde a complexidade do pipeline (Início, Criar vídeo, Projetos, Avatares | Configurações; técnico em Configurações → Avançado e `?view=advanced`). Avatares reutilizáveis com identidade e voz próprias (`domain/avatar.ts`, `DATA_DIR/avatars`, revisões congeladas no job). Roteiro mestre único dividido por A-roll (`ai/master-script.ts`, prompt ativo `campaign-plan@1.8.0`, 30/45/60s). Voice Lock só com provider que aceita áudio externo + lip-sync de verdade (`domain/video-speech.ts`); Krea/Veo = fala nativa registrada como "Voice Lock indisponível com este provider.". Projetos V2: `request.uxVersion = 2`. Nenhuma chamada real feita.
+- Lote 5.5 (D90): fluxo normal REAL-only. `ALLOW_MOCKS=false` (padrão) bloqueia qualquer etapa MOCK com motivo claro; provider inválido/indisponível nunca cai em MOCK. Testes ligam mocks explicitamente (`forceMocksForTests` no setup). Jobs MOCK antigos ficam como histórico; referência MOCK não é aprovável.
+- Lote 5.3 AI UGC (D79–D85): modo `creativeMode: "ai_ugc"` com providers separados do Presenter; referência pessoa+produto versionada e APROVADA antes das cenas; identidade persistida; áudio nativo ou lip-sync, nunca duplicado. Lote 5.4 (D86–D87): transporte REAL Google (`gemini-3.1-flash-image` + Veo 3.1) implementado, DESLIGADO por padrão: exige `GOOGLE_AI_API_KEY` + `UGC_PROVIDER=google` + `UGC_REAL_ALLOWED=true`. Intenção com hash/teto antes do POST, `uncertain` sem reenvio, retomada por operation ID. Nenhuma chamada real feita. Ver `docs/AI-UGC.md`.
+- AI UGC via Krea (D88): `UGC_PROVIDER=krea` + `KREA_API_KEY` + `UGC_REAL_ALLOWED=true` (Nano Banana 2 + Veo 3.1 Fast com áudio, 4/6/8s). Arquivos `krea-*` separados; Google intacto. Sem validação paga.
+- Lote 5.7 Presenter Only (D94): padrão AI UGC = só a apresentadora (5–6 A-rolls, 32–40s), `editPlanVersion: 3`, Edit Plan em frames (`render/presenter-edit-plan.ts`), cauda final 0,8–1,2s, Caption V3 (`remotion/components/CaptionV3.tsx`), render AAC 48 kHz validado por ffprobe. Prompt ativo `campaign-plan@1.7.0`. B-roll V2 só com `ugc.brollEnabled`.
+- Lote 5.6 Creative Editor V2 (D91): UGC é editado como narrativa contínua, não concatenação de cenas. A-roll (fala nativa) = espinha de áudio; B-roll overlay mudo (`reference_detail` = frame aprovado, custo zero) nas junções; Edit Plan puro (`render/edit-plan.ts`) com handles, cutReason obrigatório e áudio sem sobreposição; Remotion `EditedCreative`. Product Fidelity Gate: referência nasce `pending`; aprovar exige confirmação humana; divergência bloqueia o vídeo. `requiresGeneratedVideo` é derivado de `visualSource` antes da validação (D93).
+- Lote 6.2 (D100): Natural Transition Engine (`render/natural-transitions.ts`): match cut > cut on action > micro punch > motion blur > micro dissolve, ≤ 6 frames (dissolve ≤ 4), só em fronteira válida, áudio intocado; continuidade `entryAction`/`exitAction`; Script V2 `campaign-plan@1.9.0` (ativo) com `checkScriptV2`; 30s = 32–38s; composição `tiktok-creative@1.5.0`.
+- Correção do Lote 6 (D99): avatar salvo com foto = foto enviada ao provider (Krea `image_urls` produto + avatar); provider sem `supportsIdentityReference` bloqueia antes de pagar ("Este provider ainda não consegue preservar este avatar."), nunca fallback sintético; `identityStrategy`/`avatarReferenceAsset` no job. Cada especificação exata (2100W) exige conferência (`confirmedSpecs`). Prompt ativo `campaign-plan@1.8.1` (re-divisão determinística do roteiro mestre antes de validar).
+- Auditoria Editor V2 (D92): mídia real recebe `silencedetect` local; handles só mudam em pausa segura. Sem pausa/análise, preserva A-roll inteiro e omite B-roll/fade naquela junção. B-roll estático ≤1,6s; legendas continuam explicitamente estimadas; fidelidade também exige revisão atual aprovada. Sem chamada real.
+- Auditoria Krea D89: upload de asset durável antes do POST pago, retomada/reuso via `GET /assets/{id}`, marcador de envio pago antes da geração, CLI de referência seleciona Krea e download aceita somente HTTPS público revalidado. Nenhuma chamada real feita.
 - Redesign D78: fluxo principal simplificado (produto → preset/apresentador → storyboard → teto único → pipeline automático → resultado). Novos projetos usam Econômico 15–20s, Equilibrado 20–30s e Premium 30–45s. Configuração técnica fica recolhida; campanhas antigas preservam settings. Nenhuma validação paga deste fluxo.
 - Lote 5.1: diagnóstico público sem segredos, configuração inválida com fallback seguro para MOCK, preflight local por ação, navegador Remotion detectado sem download e "Próxima etapa recomendada" no job. Protocolo completo validado só com mocks/transportes falsos; nenhuma chamada paga.
-- Prompt ativo: `campaign-plan@1.4.0` (inclui brief e valida preservação do roteiro manual; ainda sem validação paga).
+- Prompt anterior (substituído pela 1.5.0): `campaign-plan@1.4.0` (inclui brief e valida preservação do roteiro manual; ainda sem validação paga).
 - Interface híbrida por etapa (D76): MOCK default; REAL apenas com provider configurado, cotação e confirmação por unidade. Nenhuma cascata paga. Planejamento real aguarda draft/aprovação. Guia: `docs/HYBRID-WORKFLOW.md`. CLI `--confirm` isolado continua bloqueada.
 - Lotes 0 a 5 implementados (Runway ainda sem validação paga). Lote 4 = narração real pt-BR com ElevenLabs (opcional), legendas com timing real, AudioFit/revisão, áudio versionado e MP4 com AAC. Lote 2 = experiência `/create` → `/campaigns/[id]` (planejar, revisar, custo, aprovar). Lote 3 = render real do MP4 com Remotion (local, R$0).
 - Planejamento: `LLM_PROVIDER=mock` (padrão, sem custo) ou `anthropic` (Claude real, pago).
 - Renderer: `RENDERER=mock` (padrão, sem arquivo) ou `remotion` (MP4 real). Narração: `AUDIO_PROVIDER=mock` (padrão, "MODO DE TESTE", sem som) ou `elevenlabs` (real, paga). Vídeo IA: `VIDEO_PROVIDER=mock|runway` (default mock); Runway Gen-4 Turbo real, ver `docs/RUNWAY.md`.
-- Prompt ativo: `campaign-plan@1.0.1` (1.0.0 + regras da D42). A 1.0.0 foi validada com o Claude real em 2026-10-14; a 1.0.1 ainda não. ElevenLabs validada com UMA chamada real em 2026-10-14 (D68).
+- Histórico de prompt: `campaign-plan@1.0.1` (1.0.0 + regras da D42). A 1.0.0 foi validada com o Claude real em 2026-10-14; a 1.0.1 ainda não. ElevenLabs validada com UMA chamada real em 2026-10-14 (D68).
 - **Não avance de lote sem instrução do usuário.** Ver `docs/TASKS.md`.
 
 ## Comandos
@@ -29,9 +40,15 @@ npm run build             # build de produção
 npm run plan:real         # validação manual com Claude real: sem --confirm só mostra o pior caso
 npm run test:integration  # testes PAGOS; só rodam com RUN_PAID_TESTS=1 e ANTHROPIC_API_KEY
 npm run tts:real          # validação manual ElevenLabs: sem --confirm só mostra custo; com --confirm UMA chamada curta
+npm run ugc:reference:real # Teste A AI UGC: sem --confirm só dry-run; com --confirm UMA referência Gemini; --approve <id>
+npm run ugc:video:real     # Teste B AI UGC: exige referência aprovada; --confirm UMA cena Veo; --resume <id> sem POST
 npm run render:setup      # baixa o Chrome Headless Shell do Remotion (1× por máquina)
 npm run render:check      # somente verifica localmente; nunca baixa navegador
 npm run test:render       # teste PESADO: MP4 real de 3s (fora do npm test e do check)
+npm run test:cloud        # repositórios/fila/API/worker com Postgres REAL em WASM (PGlite); faz parte do check
+npm run db:migrate        # aplica supabase/migrations no DATABASE_URL (ou: supabase db push)
+npm run start:api         # Render Web Service (cloud); dev: npm run dev:api
+npm run worker            # Render Background Worker (cloud); dev: npm run dev:worker; diagnóstico: npm run worker:check
 ```
 Para ver a tela de processamento com o mock: `MOCK_PLANNER_DELAY_MS=20000` em `.env.local`.
 
@@ -54,6 +71,7 @@ Para ver a tela de processamento com o mock: `MOCK_PLANNER_DELAY_MS=20000` em `.
 - `remotion/` — composição `TikTokCreative`, componentes, tema (safe areas, tokens), fontes locais. Imports relativos (sem `@/`). Contrato em `remotion/types/props.ts`.
 - `src/app/api/renders/[campaignId]/[creativeId]/[renderId]` — player/download por IDs.
 - `scripts/plan-real.ts` — validação manual com o Claude real.
+- `src/cloud/` (Lote 7) — config por serviço, logger com redação, `db/` (pg + migrations), `repos/` (Postgres POR USUÁRIO), `assets/` (AssetStore Local/Supabase, CloudUploadStore), `auth/jwt.ts`, `queue/`, `api/` (Render Web), `worker/` (Render Worker), `runtime.ts` (AppDeps por usuário). `src/server/backend.ts`/`session.ts`: telas V2 local × cloud.
 
 ## Modelos Claude
 | Preset | Modelo | Esforço |
@@ -117,6 +135,13 @@ Para ver a tela de processamento com o mock: `MOCK_PLANNER_DELAY_MS=20000` em `.
 - Comentários e textos de UI em português; identificadores em inglês.
 
 ## O que NÃO fazer
+- Não escrever mini-roteiros independentes por trecho no AI UGC com duração: o roteiro mestre é a fonte; não presumir áudio externo/lip-sync de provider (capability declarada); não cair de Voice Lock para fala nativa sem registrar o motivo; não enviar `providerVoiceId` ao browser; não apagar revisões de avatar.
+- Não colocar termos técnicos (provider, modelo, readiness, IDs, erro cru) na tela principal V2: vão para Configurações → Avançado ou "Detalhes técnicos".
+- Não usar transição chamativa (flash, spin, slide, wipe, 3D, crossfade longo) nem passar de 6 frames; nunca transição fora de fronteira válida nem mexer no áudio na junção; não aceitar roteiro com cara de ficha técnica.
+- Não substituir avatar salvo por pessoa sintética, nem afirmar "Apresentado por X" sem a foto de X ter sido usada; não aprovar referência sem conferir cada especificação exata.
+- Não editar UGC como concatenação linear: B-roll nunca toca áudio, todo corte tem motivo, catálogo proibido sem `commercialStyle`; não liberar vídeo sem fidelidade aprovada; não alterar billing pela janela usada (ledger = gerado).
+- Não gerar cena UGC sem referência aprovada; não chamar Presenter em AI UGC; não combinar fala nativa do clipe com narração real; não escrever fala UGC com experiência inventada.
+- Não automatizar a interface web do Google Flow; UGC real só por API oficial, com preço com fonte.
 - Não chamar API paga fora do pipeline/planner, nem em testes normais.
 - Não escrever IDs de modelo fora de `config/llm-models.ts`, nem preços/cotação fora de `src/config/`.
 - Não importar `@anthropic-ai/sdk` fora de `src/ai/anthropic/`.
@@ -124,8 +149,13 @@ Para ver a tela de processamento com o mock: `MOCK_PLANNER_DELAY_MS=20000` em `.
 - Não registrar custo real como simulado; não estimar custo do Claude quando há `usage` real.
 - Não criar re-tentativas automáticas pagas nem loops sem limite (inclui fallbacks server-side).
 - Não apagar/editar custos (ledger append-only).
-- Não logar, serializar ou enviar ao browser a `ANTHROPIC_API_KEY`; não commitar `.env*` nem `data/`.
-- Não adicionar banco externo, integração TikTok, providers de mídia reais, TTS ou render em nuvem sem instrução do lote.
+- Não logar, serializar ou enviar ao browser a `ANTHROPIC_API_KEY` nem a `GOOGLE_AI_API_KEY`; não commitar `.env*` nem `data/`.
+- Não chamar a Krea API fora de `providers/ugc/krea-http.ts`; não enviar/logar `KREA_API_KEY`.
+- Não chamar a Gemini API fora de `providers/ugc/google-http.ts`; não habilitar AI UGC REAL só porque a chave existe.
+- Não adicionar integração TikTok, providers de mídia reais ou TTS sem instrução do lote. Banco/storage/render em nuvem existem desde o Lote 7: só via `src/cloud/`, nunca espalhados pelo domínio.
+- Não executar pipeline/provider/Remotion no Next em modo cloud (Vercel): tudo vai para a Render API → fila → worker. Não colocar segredo com `NEXT_PUBLIC_`; service role e chaves de provider só no Render.
+- Não confiar em userId do request: só o `sub` do JWT validado; repositório cloud é sempre construído por usuário. Não persistir URL assinada (guardar bucket + path).
+- Não reexecutar tarefa paga na retomada do worker: operação em voo = `blocked`. Não usar fila em memória no cloud. Não editar migration já aplicada (crie outra).
 - Não chamar a ElevenLabs fora de `ElevenLabsAudioProvider`; não espalhar IDs de modelo TTS/voz fora de `config/tts-models.ts`/`config/voices.ts`; não deixar estruturas da ElevenLabs saírem do provider.
 - Não logar, serializar ou enviar ao browser a `ELEVENLABS_API_KEY` nem voiceIds; não usar Web Speech/TTS improvisado.
 - Não importar `@remotion/*` fora de `src/render/remotion/` (e `scripts/render-setup.ts`); não usar `@/` dentro de `remotion/`.

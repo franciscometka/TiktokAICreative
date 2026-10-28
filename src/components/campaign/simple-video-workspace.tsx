@@ -8,6 +8,8 @@ import type { VisualSource } from "@/domain/creative";
 import { formatBrl } from "@/lib/money";
 import { buttonClasses, cx, Notice, Panel, Spinner } from "@/components/ui/primitives";
 import { inputClasses } from "@/components/ui/field";
+import { UgcReferencePanel } from "./ugc-reference-panel";
+import type { UgcView } from "@/application/ugc-view";
 
 const SIMPLE_SOURCES: { value: VisualSource; label: string }[] = [
   { value: "presenter", label: "Apresentador" },
@@ -17,6 +19,50 @@ const SIMPLE_SOURCES: { value: VisualSource; label: string }[] = [
   { value: "product_image", label: "Imagem do produto" },
   { value: "text_card", label: "Texto" },
 ];
+
+/** AI UGC: só cenas com a pessoa, B-roll, imagem e texto. */
+const UGC_SOURCES: { value: VisualSource; label: string }[] = [
+  { value: "ugc_hook", label: "UGC · Gancho" },
+  { value: "ugc_demo", label: "UGC · Demonstração" },
+  { value: "ugc_benefit", label: "UGC · Benefício" },
+  { value: "ugc_cta", label: "UGC · Chamada final" },
+  { value: "reference_detail", label: "B-roll · detalhe da referência" },
+  { value: "product_broll", label: "B-roll gerado (contexto)" },
+];
+
+/**
+ * Storyboard V2 (AI UGC): o vídeo como UMA narrativa. A-roll = apresentadora falando; B-roll entra
+ * por cima do áudio dela, com o motivo do corte. Sem detalhe técnico (provider, frames, handles).
+ */
+function EditorialTimeline({ ugc }: { ugc: UgcView }) {
+  const summary = ugc.durationSummary;
+  return (
+    <>
+    {summary && (
+      <p className="mt-5 text-sm text-zinc-600 tabular" aria-label="Resumo Presenter Only">
+        Presenter Only · {summary.clips} trechos da apresentadora · {summary.generatedSeconds}s gerados (cobrados) · ~{summary.estimatedUsedSeconds}s usados no vídeo{summary.costLabel ? ` · cenas ${summary.costLabel}` : ""}
+      </p>
+    )}
+    <ol className="mt-5 space-y-2" aria-label="Storyboard editorial">
+      {ugc.editorial.map((item) => (
+        <li key={item.sceneId} className={cx("grid gap-1 rounded-lg border p-3 text-sm sm:grid-cols-[7rem_9rem_1fr]", item.roleLabel !== "B-ROLL" ? "border-emerald-200 bg-emerald-50/50" : "ml-6 border-amber-200 bg-amber-50/50")}>
+          <span className="font-medium text-zinc-900 tabular">{item.range}</span>
+          <span className={cx("text-xs font-semibold tracking-wide", item.roleLabel !== "B-ROLL" ? "text-emerald-800" : "text-amber-800")}>{item.roleLabel}</span>
+          <div className="space-y-0.5">
+            {item.speech ? <p className="text-zinc-900">“{item.speech}”</p> : <p className="text-zinc-700">{item.visual}</p>}
+            {item.speech && <p className="text-xs text-zinc-500">{item.visual}</p>}
+            {item.audioNote && <p className="text-xs text-zinc-500">{item.audioNote}</p>}
+            <p className="text-xs text-zinc-500">Corte: {item.cutReasonLabel} · {item.durationLabel} · {item.status}</p>
+            {item.transition && <p className="text-xs text-zinc-400" data-testid="transition">→ {item.transition}</p>}
+            {item.continuity && <p className="text-xs text-zinc-400">Continuidade: {item.continuity}</p>}
+            {ugc.usage.find((u) => u.sceneId === item.sceneId) && <p className="text-xs text-zinc-500 tabular">{ugc.usage.find((u) => u.sceneId === item.sceneId)!.label}</p>}
+          </div>
+        </li>
+      ))}
+    </ol>
+    </>
+  );
+}
 
 export function SimpleVideoWorkspace({ campaignId, creative, productImages }: { campaignId: string; creative: CreativeView; productImages: ImageView[] }) {
   const router = useRouter();
@@ -37,7 +83,8 @@ export function SimpleVideoWorkspace({ campaignId, creative, productImages }: { 
 
   return (
     <div className="space-y-6">
-      <section>
+      {creative.ugc && <UgcReferencePanel jobId={creative.jobId} ugc={creative.ugc} running={running} />}
+      <section id="storyboard" className="scroll-mt-20">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="text-xs font-semibold tracking-[0.18em] text-emerald-700 uppercase">Prévia do vídeo</p>
@@ -47,17 +94,19 @@ export function SimpleVideoWorkspace({ campaignId, creative, productImages }: { 
           <p className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white tabular">{creative.durationSeconds.toFixed(0)} segundos</p>
         </div>
 
-        <div className="mt-5 flex overflow-hidden rounded-full bg-zinc-200" aria-label="Timeline do storyboard">
+        {creative.ugc && creative.ugc.editorial.length > 0 && <EditorialTimeline ugc={creative.ugc} />}
+
+        {!(creative.ugc && creative.ugc.editorial.length > 0) && <div className="mt-5 flex overflow-hidden rounded-full bg-zinc-200" aria-label="Timeline do storyboard">
           {creative.scenes.map((scene, index) => (
-            <div key={scene.id} className={cx("min-w-14 border-r border-white/70 px-2 py-2 text-center text-[11px] font-semibold", scene.visualSource === "presenter" ? "bg-emerald-300 text-emerald-950" : index % 2 ? "bg-amber-200 text-amber-950" : "bg-sky-200 text-sky-950")} style={{ flexGrow: scene.endSeconds - scene.startSeconds }}>
+            <div key={scene.id} className={cx("min-w-14 border-r border-white/70 px-2 py-2 text-center text-[11px] font-semibold", scene.visualSource === "presenter" || scene.ugc && scene.visualSource.startsWith("ugc_") ? "bg-emerald-300 text-emerald-950" : index % 2 ? "bg-amber-200 text-amber-950" : "bg-sky-200 text-sky-950")} style={{ flexGrow: scene.endSeconds - scene.startSeconds }}>
               {scene.number} · {(scene.endSeconds - scene.startSeconds).toFixed(0)}s
             </div>
           ))}
-        </div>
+        </div>}
 
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           {creative.scenes.map((scene, index) => (
-            <SceneCard key={scene.id} scene={scene} jobId={creative.jobId} reference={productImages[index % Math.max(1, productImages.length)]} editable={!running && ["planned", "cost_estimated", "awaiting_approval"].includes(creative.jobStatus ?? "")} onChanged={() => router.refresh()} />
+            <SceneCard key={scene.id} sources={creative.ugc ? UGC_SOURCES : SIMPLE_SOURCES} scene={scene} jobId={creative.jobId} reference={productImages[index % Math.max(1, productImages.length)]} editable={!running && ["planned", "cost_estimated", "awaiting_approval"].includes(creative.jobStatus ?? "")} onChanged={() => router.refresh()} />
           ))}
         </div>
       </section>
@@ -67,12 +116,12 @@ export function SimpleVideoWorkspace({ campaignId, creative, productImages }: { 
           <div>
             <p className="text-xs font-semibold tracking-[0.18em] text-emerald-300 uppercase">Autorização única</p>
             <h3 className="mt-2 text-xl font-semibold">{quote ? `Gerar o vídeo por até ${formatBrl(quote.maximumAuthorizedBrl)}` : "Preparando custo máximo"}</h3>
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-300">O teto cobre narração, apresentador, cenas e render deste job. Qualquer falha, cobrança incerta ou aumento pausa o fluxo sem retry pago.</p>
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-300">{creative.ugc ? "O teto cobre a referência pessoa + produto, as cenas UGC, B-roll, voz e render. O fluxo pausa para você aprovar a pessoa antes de qualquer cena UGC." : "O teto cobre narração, apresentador, cenas e render deste job."} Qualquer falha, cobrança incerta ou aumento pausa o fluxo sem retry pago.</p>
             {quote?.blocked && <p className="mt-3 text-sm font-medium text-amber-300">{quote.blocked}</p>}
           </div>
-          <button type="button" className={buttonClasses("primary", "lg")} disabled={pending || running || !quote?.ready} onClick={generate}>
+          <button type="button" className={buttonClasses("primary", "lg")} disabled={pending || running || !quote?.ready || !!creative.ugc?.awaitingApproval} onClick={generate}>
             {pending && <Spinner />}
-            {running ? "Gerando vídeo…" : creative.interrupted ? "Continuar job com o mesmo teto" : quote ? `Gerar vídeo por até ${formatBrl(quote.maximumAuthorizedBrl)}` : "Calculando…"}
+            {running ? "Gerando vídeo…" : creative.ugc?.awaitingApproval ? "Aprove a referência acima para continuar" : creative.interrupted ? "Continuar job com o mesmo teto" : quote ? `Gerar vídeo por até ${formatBrl(quote.maximumAuthorizedBrl)}` : "Calculando…"}
           </button>
         </div>
         {message && <p className="mt-4 text-sm text-zinc-200" aria-live="polite">{message}</p>}
@@ -104,7 +153,7 @@ export function SimpleVideoWorkspace({ campaignId, creative, productImages }: { 
   );
 }
 
-function SceneCard({ scene, jobId, reference, editable, onChanged }: { scene: SceneView; jobId?: string; reference?: ImageView; editable: boolean; onChanged: () => void }) {
+function SceneCard({ scene, sources, jobId, reference, editable, onChanged }: { scene: SceneView; sources: { value: VisualSource; label: string }[]; jobId?: string; reference?: ImageView; editable: boolean; onChanged: () => void }) {
   const [editing, setEditing] = useState(false);
   const [narration, setNarration] = useState(scene.narration);
   const [visualDescription, setVisualDescription] = useState(scene.visualDescription);
@@ -131,8 +180,7 @@ function SceneCard({ scene, jobId, reference, editable, onChanged }: { scene: Sc
   function redo() {
     if (!jobId || !scene.regenerationQuote) return;
     startTransition(async () => {
-      const stage = scene.visualSource === "presenter" ? "avatar" : "scenes";
-      const result = await regenerateStoryboardSceneAction({ jobId, stage, token: scene.regenerationQuote!.token, sceneId: scene.id });
+      const result = await regenerateStoryboardSceneAction({ jobId, token: scene.regenerationQuote!.token, sceneId: scene.id });
       setError(result.ok ? "Nova versão iniciada. A anterior continua preservada." : result.error.message);
       setConfirmRedo(false);
       onChanged();
@@ -150,13 +198,18 @@ function SceneCard({ scene, jobId, reference, editable, onChanged }: { scene: Sc
     </div>
     <div className="space-y-3 p-4">
       {editing ? <>
-        <select className={inputClasses()} value={visualSource} onChange={(event) => setVisualSource(event.target.value as VisualSource)}>{SIMPLE_SOURCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+        <select className={inputClasses()} value={visualSource} onChange={(event) => setVisualSource(event.target.value as VisualSource)}>{sources.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
         <textarea aria-label={`Fala da cena ${scene.number}`} className={inputClasses()} rows={3} value={narration} onChange={(event) => setNarration(event.target.value)} />
         <textarea aria-label={`Visual da cena ${scene.number}`} className={inputClasses()} rows={3} value={visualDescription} onChange={(event) => setVisualDescription(event.target.value)} />
         <div className="flex gap-2"><button className={buttonClasses("primary", "sm")} type="button" disabled={pending} onClick={save}>{pending ? "Salvando…" : "Salvar cena"}</button><button className={buttonClasses("ghost", "sm")} type="button" onClick={() => setEditing(false)}>Cancelar</button></div>
       </> : <>
         <div><p className="text-xs font-semibold text-zinc-500 uppercase">{scene.visualSourceLabel}</p><p className="mt-1 text-sm leading-relaxed text-zinc-700">{scene.visualDescription}</p></div>
-        {scene.narration && <div className="rounded-lg bg-zinc-50 p-3"><p className="text-[11px] font-semibold text-zinc-500 uppercase">Fala</p><p className="mt-1 text-sm text-zinc-800">“{scene.narration}”</p></div>}
+        {scene.ugc ? <dl className="grid gap-2 rounded-lg bg-zinc-50 p-3 text-sm">
+          <div><dt className="text-[11px] font-semibold text-zinc-500 uppercase">Quem aparece</dt><dd className="text-zinc-800">{scene.ugc.who}</dd></div>
+          <div><dt className="text-[11px] font-semibold text-zinc-500 uppercase">O que segura</dt><dd className="text-zinc-800">{scene.ugc.holding}</dd></div>
+          <div><dt className="text-[11px] font-semibold text-zinc-500 uppercase">O que fala</dt><dd className="text-zinc-800">{scene.narration ? `“${scene.narration}”` : scene.ugc.speech}</dd></div>
+          <div><dt className="text-[11px] font-semibold text-zinc-500 uppercase">O que faz</dt><dd className="text-zinc-800">{scene.ugc.action}</dd></div>
+        </dl> : scene.narration && <div className="rounded-lg bg-zinc-50 p-3"><p className="text-[11px] font-semibold text-zinc-500 uppercase">Fala</p><p className="mt-1 text-sm text-zinc-800">“{scene.narration}”</p></div>}
         <div className="flex flex-wrap items-center gap-2">{editable && <button type="button" className={buttonClasses("secondary", "sm")} onClick={() => setEditing(true)}>Editar cena</button>}{editable && <button type="button" className={buttonClasses("ghost", "sm")} onClick={newIdea}>Nova ideia em MOCK</button>}{scene.status === "ready" && scene.regenerationQuote?.ready && (confirmRedo ? <><span className="text-xs text-zinc-600">Nova versão por até {formatBrl(scene.regenerationQuote.estimatedBrl)}?</span><button type="button" className={buttonClasses("primary", "sm")} disabled={pending} onClick={redo}>{pending ? "Iniciando…" : "Confirmar"}</button><button type="button" className={buttonClasses("ghost", "sm")} onClick={() => setConfirmRedo(false)}>Cancelar</button></> : <button type="button" className={buttonClasses("ghost", "sm")} disabled={pending} onClick={() => setConfirmRedo(true)}>Refazer esta cena · até {formatBrl(scene.regenerationQuote.estimatedBrl)}</button>)}</div>
       </>}
       {error && <p className="text-xs text-red-700" role="alert">{error}</p>}

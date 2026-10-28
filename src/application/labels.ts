@@ -25,7 +25,9 @@ export const STYLE_HINTS: Record<CreativeStyle, string> = {
 export const VISUAL_SOURCE_NAMES: Record<VisualSource, string> = {
   generated_video: "Vídeo IA",
   product_hero: "Produto em destaque", product_demo: "Produto em uso", lifestyle: "Contexto de uso", presenter: "Apresentador", product_ugc: "Pessoa com produto",
+  ugc_hook: "UGC · Gancho", ugc_demo: "UGC · Demonstração", ugc_benefit: "UGC · Benefício", ugc_cta: "UGC · Chamada final", product_broll: "B-roll do produto",
   product_image: "Imagem do produto",
+  reference_detail: "B-roll · detalhe da referência",
   text_card: "Texto na tela",
   screenshot: "Captura de tela",
   simple_background: "Fundo simples",
@@ -63,6 +65,9 @@ export const COST_CATEGORY_NAMES: Record<CostCategory, string> = {
   video: "Vídeo",
   audio: "Áudio",
   rendering: "Renderização",
+  ugc_reference: "Referência UGC",
+  ugc_scene: "Cena UGC",
+  broll: "B-roll",
 };
 
 export const CAMPAIGN_STATUS_NAMES: Record<CampaignStatus | "interrupted", string> = {

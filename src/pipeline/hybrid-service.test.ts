@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadAppConfig } from "@/config/env";
 import { MOCK_STAGE_MODES, type ExecutionStage, type StageModes } from "@/domain/execution";
-import { withRealStageAuthorization, assertRealCallsEnabled } from "@/config/execution-policy";
+import { ExecutionLeaseLostError, withExecutionFence, withRealStageAuthorization, assertRealCallsEnabled } from "@/config/execution-policy";
 import { createHybridPipelineService, hybridCapabilities } from "./hybrid-service";
 import { MockCreativePlanner, buildMockDraft } from "@/ai/mock-planner";
 import { LlmCreativePlanner } from "@/ai/llm-planner";
@@ -17,6 +17,7 @@ import { fakePresenter, wav } from "@/test/presenter-fake";
 import { runwayFixture } from "@/test/runway-fake";
 import { ElevenLabsAudioProvider } from "@/providers/audio/elevenlabs-audio-provider";
 import { RunwayPresenterProvider } from "@/providers/presenter/runway-presenter-provider";
+import { RUNWAY_PRESENTER } from "@/config/presenters";
 import { RunwayVideoProvider } from "@/providers/video/runway-video-provider";
 import { MockPresenterProvider } from "@/providers/presenter/mock-presenter-provider";
 import { MockAudioProvider } from "@/providers/audio/mock-audio-provider";
@@ -25,9 +26,12 @@ import { ELEVENLABS_VOICES } from "@/config/voices";
 import { VersionedMockRenderer } from "./offline-service";
 import { FileCostLedger } from "@/storage/file-cost-ledger";
 import { FilePipelineStore } from "@/storage/file-pipeline-store";
+import type { PipelineStore } from "@/storage/pipeline-store";
+import type { GenerationJob } from "@/domain/pipeline";
 import type { PipelineDeps } from "./pipeline-service";
 import { getCampaignView } from "@/application/campaign-actions";
 import { LocalUploadStore } from "@/storage/upload-store";
+import type { JobRun } from "./dispatch";
 
 async function setup(modes: Partial<StageModes> = {}, avatar = true, options: { pending?: boolean; short?: boolean; timeout?: boolean; videoPending?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "hybrid-stage-"));
@@ -39,15 +43,16 @@ async function setup(modes: Partial<StageModes> = {}, avatar = true, options: { 
   const audio = fakeElevenLabs({ secondsPerChar: 0.045, timeout: options.timeout });
   const presenter = fakePresenter(options);
   const mockRenderer = new VersionedMockRenderer(); let realRenders = 0;
+  const renderControl = { fail: false };
   const hybrid: NonNullable<PipelineDeps["hybrid"]> = {
     capabilities: Object.fromEntries(["planning", "narration", "scenes", "avatar", "render"].map(s => [s, { available: true, provider: "fake" }])) as NonNullable<PipelineDeps["hybrid"]>["capabilities"],
     planner: mode => mode === "real" ? new LlmCreativePlanner(llm, randomId, { maxValidationAttempts: 1 }) : new MockCreativePlanner(randomId),
     audio: (pricing, mode) => mode === "real" ? new ElevenLabsAudioProvider({ pricing, apiKey: "fake-secret", voices: ELEVENLABS_VOICES, timeoutMs: 5000, transport: audio.transport }) : new MockAudioProvider({ pricing }),
     video: (pricing, mode) => mode === "real" ? new RunwayVideoProvider({ pricing, apiKey: "fake-video", uploadsDir: config.uploadsDir, transport: video.transport }) : new MockVideoProvider({ pricing }),
     presenter: (pricing, mode) => mode === "real" ? new RunwayPresenterProvider({ pricing, apiKey: "fake-avatar", transport: presenter.transport }) : new MockPresenterProvider(pricing),
-    renderer: mode => mode === "mock" ? mockRenderer : { id: "remotion", isMock: false, render: async manifest => { realRenders++; return { outputUri: `fake-render-v${realRenders}`, renderId: `v${realRenders}`, usage: { generations: 1 }, isMock: false, durationSeconds: manifest.duration, warnings: [] }; } },
+    renderer: mode => renderControl.fail ? { id: "remotion", isMock: false, render: async () => { throw new Error("Render falhou (simulado)."); } } : mode === "mock" ? mockRenderer : { id: "remotion", isMock: false, render: async manifest => { realRenders++; return { outputUri: `fake-render-v${realRenders}`, renderId: `v${realRenders}`, usage: { generations: 1 }, isMock: false, durationSeconds: manifest.duration, warnings: [] }; } },
   };
-  const build = () => createHybridPipelineService(config, { hybrid, stageDelayMs: 0, presenterAudioSlicer: async (_path, window) => wav(window.endSeconds-window.startSeconds), pollOptions: { maxPolls: 2, intervalMs: 0, sleep: async () => {} } });
+  const build = (overrides: Partial<PipelineDeps> = {}) => createHybridPipelineService(config, { hybrid, stageDelayMs: 0, presenterAudioSlicer: async (_path, window) => wav(window.endSeconds-window.startSeconds), pollOptions: { maxPolls: 2, intervalMs: 0, sleep: async () => {} }, ...overrides });
   const service = build(); const campaign = await service.planCampaign(input);
   const ledger = () => new FileCostLedger(config.dataDir).list({ campaignId: campaign.id });
   const execute = async (stage: ExecutionStage, target = service) => {
@@ -55,7 +60,7 @@ async function setup(modes: Partial<StageModes> = {}, avatar = true, options: { 
     const q = await target.quoteStage(id, stage); expect(q.ready, q.blocked).toBe(true);
     return (await target.executeStage(id, stage, q.token)).completion;
   };
-  return { root, config, service, campaign, input, llm, audio, presenter, video, videoOptions, build, ledger, execute, get realRenders() { return realRenders; } };
+  return { root, config, service, campaign, input, llm, audio, presenter, video, videoOptions, renderControl, build, ledger, execute, get realRenders() { return realRenders; } };
 }
 
 describe("execução híbrida por etapa — somente transportes falsos", () => {
@@ -299,6 +304,609 @@ describe("execução híbrida por etapa — somente transportes falsos", () => {
     expect(after.scenes.find(scene => scene.sceneId === target.id)!.attempts).toHaveLength(2);
     expect(after.scenes.find(scene => scene.sceneId === untouched.id)!.attempts).toHaveLength(before.scenes.find(scene => scene.sceneId === untouched.id)!.attempts.length);
     expect(after.scenes.find(scene => scene.sceneId === target.id)!.attempts.filter(attempt => attempt.active)).toHaveLength(1);
+  });
+  it("cotação de retry da cena falha existe só para a tentativa terminal correta", async () => {
+    const f = await setup();
+    const id = f.campaign.jobIds[0]!;
+    const jobQuote = await f.service.quoteJob(id);
+    expect((await (await f.service.authorizeAndRunJob(id, jobQuote.token)).completion).kind).toBe("COMPLETED");
+    const campaign = await f.service.getCampaign(f.campaign.id);
+    const target = campaign.plan!.creatives[0]!.scenes.find(scene => scene.requiresGeneratedVideo)!;
+    const store = new FilePipelineStore(f.config.dataDir);
+    const completed = await store.getJob(id);
+    const failedAttemptId = completed.scenes.find(scene => scene.sceneId === target.id)!.attempts.at(-1)!.id;
+    await store.saveJob({
+      ...completed,
+      status: "failed",
+      error: "Falha terminal controlada",
+      scenes: completed.scenes.map(scene => scene.sceneId === target.id
+        ? { ...scene, attempts: scene.attempts.map(attempt => attempt.id === failedAttemptId ? { ...attempt, status: "failed" as const, active: false, error: "Falha terminal controlada" } : attempt) }
+        : scene),
+    });
+
+    const quote = await f.service.quoteFailedSceneRetry(id, target.id);
+    expect(quote).toMatchObject({ ready: true, unit: target.id, regenerate: true });
+
+    const readyScene = campaign.plan!.creatives[0]!.scenes.find(scene => scene.requiresGeneratedVideo && scene.id !== target.id)!;
+    const readyQuote = await f.service.quoteFailedSceneRetry(id, readyScene.id);
+    expect(readyQuote.ready).toBe(false);
+    expect(readyQuote.blocked).toMatch(/não está com falha terminal/i);
+
+    await expect(f.service.quoteFailedSceneRetry(id, "scene_from_other_campaign")).rejects.toThrow(/não pertence/i);
+  });
+  it("retry seguro de cena falha consome uma aprovação uma vez e preserva tentativas e ledger", async () => {
+    const f = await setup({ scenes: "real" }, false);
+    const id = f.campaign.jobIds[0]!;
+    (f.videoOptions as { failure?: boolean }).failure = true;
+    const first = await f.service.quoteStage(id, "scenes");
+    expect((await (await f.service.executeStage(id, "scenes", first.token)).completion).kind).toBe("FAILED");
+    const failedJob = await f.service.getJob(id);
+    const failedScene = failedJob.scenes.find(scene => scene.attempts.at(-1)?.status === "failed")!;
+    const callsAfterFailure = f.video.calls.filter(call => call.url.endsWith("/image_to_video")).length;
+    const ledgerAfterFailure = (await f.ledger()).filter(entry => !entry.simulated).length;
+    const quote = await f.service.quoteFailedSceneRetry(id, failedScene.sceneId);
+
+    await expect(f.service.retryFailedScene(id, failedScene.sceneId, "0".repeat(64))).rejects.toThrow();
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(callsAfterFailure);
+
+    (f.videoOptions as { failure?: boolean }).failure = false;
+    const approved = await f.service.retryFailedScene(id, failedScene.sceneId, quote.token);
+    expect((await approved.completion).kind).toBe("WAITING_STAGE");
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(callsAfterFailure + 1);
+
+    const after = await f.service.getJob(id);
+    expect(after.scenes.find(scene => scene.sceneId === failedScene.sceneId)!.attempts).toHaveLength(2);
+    expect((await f.ledger()).filter(entry => !entry.simulated)).toHaveLength(ledgerAfterFailure + 1);
+
+    const replay = await f.service.retryFailedScene(id, failedScene.sceneId, quote.token);
+    await replay.completion;
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(callsAfterFailure + 1);
+  });
+  it("fence perdido antes do submit impede provider, tentativa e ledger", async () => {
+    const f = await setup({ scenes: "real" }, false);
+    const id = f.campaign.jobIds[0]!;
+    (f.videoOptions as { failure?: boolean }).failure = true;
+    const first = await f.service.quoteStage(id, "scenes");
+    await (await f.service.executeStage(id, "scenes", first.token)).completion;
+    const failed = await f.service.getJob(id);
+    const sceneId = failed.scenes.find(scene => scene.attempts.at(-1)?.status === "failed")!.sceneId;
+    const quote = await f.service.quoteFailedSceneRetry(id, sceneId);
+    const submits = f.video.calls.filter(call => call.url.endsWith("/image_to_video")).length;
+    const ledger = (await f.ledger()).filter(entry => !entry.simulated).length;
+    (f.videoOptions as { failure?: boolean }).failure = false;
+
+    await expect(withExecutionFence(
+      { checkpoint: async () => { throw new ExecutionLeaseLostError("claim perdido"); } },
+      async () => (await f.service.retryFailedScene(id, sceneId, quote.token)).completion,
+    )).rejects.toThrow(/claim perdido/);
+
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(submits);
+    expect((await f.service.getJob(id)).scenes.find(scene => scene.sceneId === sceneId)!.attempts).toHaveLength(1);
+    expect((await f.ledger()).filter(entry => !entry.simulated)).toHaveLength(ledger);
+  });
+  const lostFence = { checkpoint: async () => { throw new ExecutionLeaseLostError("claim perdido"); } };
+  it("fence que falha só no checkpoint colado ao POST: 0 POST, marcador incerto preservado", async () => {
+    const f = await setup({ scenes: "real" }, false);
+    const id = f.campaign.jobIds[0]!;
+    const quote = await f.service.quoteStage(id, "scenes");
+    let passed = 0;
+    // Passa em todos os checkpoints anteriores; perde a posse no primeiro depois do marcador "submitting" gravado.
+    const fence = { checkpoint: async () => {
+      if ((await f.service.getJob(id)).videoTasks?.some(task => task.state === "submitting")) throw new ExecutionLeaseLostError("claim perdido antes do POST");
+      passed++;
+    } };
+
+    await expect(withExecutionFence(fence, async () => (await f.service.executeStage(id, "scenes", quote.token)).completion)).rejects.toThrow(/antes do POST/);
+
+    expect(passed).toBeGreaterThanOrEqual(2);
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(0);
+    const job = await f.service.getJob(id);
+    expect(job.videoTasks?.filter(task => task.state === "submitting")).toHaveLength(1);
+    expect(job.scenes.flatMap(scene => scene.attempts).filter(attempt => !attempt.isMock)).toHaveLength(0);
+    expect((await f.ledger()).filter(entry => !entry.simulated)).toHaveLength(0);
+  });
+  it("erro de banco no checkpoint não vira falha do provider nem descarta mídia paga", async () => {
+    const f = await setup({ scenes: "real" }, false);
+    const id = f.campaign.jobIds[0]!;
+    const quote = await f.service.quoteStage(id, "scenes");
+    let failedOnce = false;
+    // Um blip de conexão no checkpoint depois do custo registrado (antes de salvar a mídia).
+    const fence = { checkpoint: async () => {
+      if (!failedOnce && (await f.ledger()).some(entry => !entry.simulated)) { failedOnce = true; throw new Error("conexão com o banco perdida"); }
+    } };
+
+    await expect(withExecutionFence(fence, async () => (await f.service.executeStage(id, "scenes", quote.token)).completion)).rejects.toThrow(ExecutionLeaseLostError);
+
+    expect(failedOnce).toBe(true);
+    const job = await f.service.getJob(id);
+    expect(job.scenes.flatMap(scene => scene.attempts).filter(attempt => !attempt.isMock)).toHaveLength(0);
+    expect(job.videoTasks?.filter(task => task.state === "pending" && task.providerJobId)).toHaveLength(1);
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(1);
+    expect((await f.ledger()).filter(entry => !entry.simulated)).toHaveLength(1);
+  });
+  it("posse perdida durante o render: não conclui, não registra ledger de render", async () => {
+    const f = await setup({}, false);
+    const id = f.campaign.jobIds[0]!;
+    await f.execute("narration"); await f.execute("scenes");
+    const ledgerBefore = (await f.ledger()).length;
+    const quote = await f.service.quoteStage(id, "render");
+    const fence = { checkpoint: async () => {
+      if ((await f.service.getJob(id)).renders.some(render => render.status === "rendering")) throw new ExecutionLeaseLostError("claim perdido durante o render");
+    } };
+
+    await expect(withExecutionFence(fence, async () => (await f.service.executeStage(id, "render", quote.token)).completion)).rejects.toThrow(/durante o render/);
+
+    const job = await f.service.getJob(id);
+    expect(job.status).not.toBe("completed");
+    expect(job.renders.some(render => render.status === "completed")).toBe(false);
+    expect((await f.ledger()).filter(entry => entry.operation === "render")).toHaveLength(0);
+    expect((await f.ledger()).length).toBe(ledgerBefore);
+  });
+  it("worker sem lease não altera etapa já concluída por outro worker", async () => {
+    const f = await setup({}, false);
+    const id = f.campaign.jobIds[0]!;
+    await f.execute("narration"); await f.execute("scenes");
+    const before = await f.service.getJob(id);
+    expect((await f.service.quoteStage(id, "scenes", true)).done).toBe(true);
+
+    await expect(withExecutionFence(lostFence, () => f.build().runJobTask(id, { kind: "hybrid_stage", stage: "scenes" }))).rejects.toThrow(/claim perdido/);
+
+    expect(await f.service.getJob(id)).toEqual(before);
+  });
+  it("worker sem lease não grava stageIntent nem currentStage em job com cenas pendentes", async () => {
+    const f = await setup({ scenes: "real" }, false);
+    const id = f.campaign.jobIds[0]!;
+    const first = await f.service.quoteStage(id, "scenes");
+    await (await f.service.executeStage(id, "scenes", first.token)).completion;
+    const before = await f.service.getJob(id);
+    expect(before.scenes.filter(scene => scene.requiresGeneratedVideo && scene.attempts.some(a => a.active)).length).toBeGreaterThan(0);
+    expect(before.scenes.some(scene => scene.requiresGeneratedVideo && !scene.attempts.some(a => a.active))).toBe(true);
+    const submits = f.video.calls.filter(call => call.url.endsWith("/image_to_video")).length;
+
+    await expect(withExecutionFence(lostFence, () => f.build().runJobTask(id, { kind: "hybrid_stage", stage: "scenes" }))).rejects.toThrow(/claim perdido/);
+
+    const after = await f.service.getJob(id);
+    expect(after.stageIntents?.some(intent => intent.state === "running")).toBe(false);
+    expect(after).toEqual(before);
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(submits);
+  });
+  /** Job "authorized" pronto para o worker: autorização ativa persistida, tarefa capturada (não executada). */
+  async function authorizedJob(f: Awaited<ReturnType<typeof setup>>) {
+    const id = f.campaign.jobIds[0]!;
+    const quote = await f.service.quoteJob(id);
+    const runs: JobRun[] = [];
+    await f.build({ dispatcher: { enqueuePlanning: async () => {}, enqueueJob: async (_job, run) => { runs.push(run); } } }).authorizeAndRunJob(id, quote.token);
+    expect(runs).toEqual([{ kind: "authorized" }]);
+    expect((await f.service.getJob(id)).jobAuthorization?.status).toBe("active");
+    return id;
+  }
+  it("tarefa authorized com fence perdido não grava nada", async () => {
+    const f = await setup({}, false);
+    const id = await authorizedJob(f);
+    const before = await f.service.getJob(id);
+
+    await expect(withExecutionFence(lostFence, () => f.build().runJobTask(id, { kind: "authorized" }))).rejects.toThrow(ExecutionLeaseLostError);
+
+    const after = await f.service.getJob(id);
+    expect(after.stageApprovals).toEqual(before.stageApprovals);
+    expect(after.jobAuthorization).toEqual(before.jobAuthorization);
+    expect(after.error).toEqual(before.error);
+    expect(after).toEqual(before);
+  });
+  it("authorized A→B→A: A conclui a etapa K, perde a posse, B avança K+1, A volta e não grava nada", async () => {
+    const f = await setup({}, false);
+    const id = await authorizedJob(f);
+    let owner: "A" | "B" | "ninguém" = "A";
+    const fenceOf = (who: "A" | "B") => ({ checkpoint: async () => { if (owner !== who) throw new ExecutionLeaseLostError(`claim de ${who} perdido`); } });
+    const generatedDone = async () => (await f.service.getJob(id)).scenes.filter(s => s.requiresGeneratedVideo).every(s => s.attempts.some(a => a.active));
+    // A "trava" numa leitura (sem fence) logo depois de concluir a narração (etapa K).
+    const durable = new FileCostLedger(f.config.dataDir);
+    let stalledOnce = false; let stalled!: () => void; let releaseA!: () => void;
+    const aStalled = new Promise<void>(resolve => { stalled = resolve; });
+    const aReleased = new Promise<void>(resolve => { releaseA = resolve; });
+    const ledgerA = { record: durable.record.bind(durable), list: async (filter?: Parameters<typeof durable.list>[0]) => {
+      if (!stalledOnce && (await f.service.getJob(id)).audioAttempts.some(a => a.active)) { stalledOnce = true; stalled(); await aReleased; }
+      return durable.list(filter);
+    } };
+    const runA = withExecutionFence(fenceOf("A"), () => f.build({ ledger: ledgerA }).runJobTask(id, { kind: "authorized" }));
+    await aStalled;
+
+    // B assume e avança a etapa K+1 (cenas); perde a posse logo depois (para em um estado intermediário válido).
+    owner = "B";
+    const fenceB = { checkpoint: async () => { if (await generatedDone()) owner = "ninguém"; await fenceOf("B").checkpoint(); } };
+    await expect(withExecutionFence(fenceB, () => f.build().runJobTask(id, { kind: "authorized" }))).rejects.toThrow(ExecutionLeaseLostError);
+    expect(await generatedDone()).toBe(true);
+    const afterB = await f.service.getJob(id);
+
+    releaseA();
+    await expect(runA).rejects.toThrow(/claim de A perdido/);
+    expect(await f.service.getJob(id)).toEqual(afterB);
+  });
+  it("Presenter incerto depois da perda do lease: o catch não grava diagnóstico", async () => {
+    const f = await setup({ narration: "real", avatar: "real" });
+    const id = f.campaign.jobIds[0]!;
+    await f.execute("narration");
+    (f.presenter.options as { timeout?: boolean }).timeout = true;
+    const quote = await f.service.quoteStage(id, "avatar");
+    let lastOwned: GenerationJob | undefined;
+    // Posse confirmada até o POST; perdida logo depois (o POST deu timeout: resultado incerto).
+    const fence = { checkpoint: async () => {
+      if (f.presenter.posts > 0) throw new ExecutionLeaseLostError("claim perdido após o POST");
+      lastOwned = await f.service.getJob(id);
+    } };
+
+    await expect(withExecutionFence(fence, async () => (await f.service.executeStage(id, "avatar", quote.token)).completion)).rejects.toThrow(ExecutionLeaseLostError);
+
+    expect(f.presenter.posts).toBe(1);
+    const job = await f.service.getJob(id);
+    expect(job.presenterTasks?.at(-1)).toMatchObject({ state: "submitting" });
+    expect(job.presenterTasks?.at(-1)?.diagnostic).toBeUndefined();
+    expect(job).toEqual(lastOwned);
+  });
+  it("preparação do render com fence perdido: sem currentStage, manifest nem registro rendering", async () => {
+    const f = await setup({}, false);
+    const id = f.campaign.jobIds[0]!;
+    await f.execute("narration"); await f.execute("scenes");
+    const ready = await f.service.getJob(id);
+    await new FilePipelineStore(f.config.dataDir).saveJob({ ...ready, status: "rendering" });
+    const before = await f.service.getJob(id);
+
+    await expect(withExecutionFence(lostFence, () => f.build().runJobTask(id, { kind: "render" }))).rejects.toThrow(ExecutionLeaseLostError);
+
+    expect(await f.service.getJob(id)).toEqual(before);
+  });
+  it("thenFreeRender depois da perda do lease não cria aprovação de render", async () => {
+    const f = await setup({}, false);
+    const id = f.campaign.jobIds[0]!;
+    await f.execute("narration"); await f.execute("scenes"); await f.execute("render");
+    const sceneId = (await f.service.getJob(id)).scenes.find(scene => scene.requiresGeneratedVideo)!.sceneId;
+    const quote = await f.service.quoteStage(id, "scenes", false, true, sceneId);
+    const renderApprovals = async () => ((await f.service.getJob(id)).stageApprovals ?? []).filter(a => a.stage === "render").length;
+    const before = await renderApprovals();
+    // Posse perdida assim que a etapa de cena termina (antes do encadeamento grátis do render).
+    const fence = { checkpoint: async () => {
+      const job = await f.service.getJob(id);
+      if (job.waitingForStage === "scenes" && job.scenes.find(s => s.sceneId === sceneId)!.attempts.length === 2) throw new ExecutionLeaseLostError("claim perdido após a cena");
+    } };
+
+    await expect(withExecutionFence(fence, async () => (await f.build().regenerateReadyScene(id, sceneId, quote.token)).completion)).rejects.toThrow(/após a cena/);
+
+    expect(await renderApprovals()).toBe(before);
+    expect((await f.service.getJob(id)).renders.filter(r => r.status === "rendering")).toHaveLength(0);
+  });
+  /** Job MOCK completo (narração, cenas, render): ponto de partida para "Refazer esta cena" e retry. */
+  async function renderedJob(f: Awaited<ReturnType<typeof setup>>) {
+    const id = f.campaign.jobIds[0]!;
+    await f.execute("narration"); await f.execute("scenes"); await f.execute("render");
+    const job = await f.service.getJob(id);
+    expect(job.status).toBe("completed");
+    return { id, job, sceneId: job.scenes.find(scene => scene.requiresGeneratedVideo)!.sceneId };
+  }
+  const completedRenders = (job: GenerationJob) => job.renders.filter(render => render.status === "completed").length;
+  const finalAssetOf = (job: GenerationJob, sceneId: string) => job.manifest?.assets.find(asset => asset.sceneId === sceneId)?.uri;
+  it("refazer cena pronta encadeia o render grátis na mesma tarefa e atualiza o vídeo final", async () => {
+    const f = await setup({}, false);
+    const { id, job: before, sceneId } = await renderedJob(f);
+    const quote = await f.service.quoteStage(id, "scenes", false, true, sceneId);
+    expect(quote.ready, quote.blocked).toBe(true);
+
+    const outcome = await (await f.build().regenerateReadyScene(id, sceneId, quote.token)).completion;
+
+    expect(outcome.kind, JSON.stringify((outcome as { error?: string }).error)).toBe("COMPLETED");
+    const after = await f.service.getJob(id);
+    const attempts = after.scenes.find(scene => scene.sceneId === sceneId)!.attempts;
+    expect(attempts).toHaveLength(2);
+    expect(completedRenders(after)).toBe(completedRenders(before) + 1);
+    // A nova versão é a ativa e foi ela que entrou no render novo (o mock reinicia a numeração das URIs por instância).
+    expect(attempts.find(attempt => attempt.active)!.id).toBe(attempts[1]!.id);
+    expect(finalAssetOf(after, sceneId)).toBe(attempts[1]!.assetUri);
+    expect(after.renders.at(-1)!.id).not.toBe(before.renders.at(-1)!.id);
+    expect((await f.ledger()).filter(entry => !entry.simulated)).toHaveLength(0);
+  });
+  it("retry de cena falha aprovado encadeia o render grátis e liquida a intent", async () => {
+    const f = await setup({}, false);
+    const { id, job, sceneId } = await renderedJob(f);
+    // Cena com falha terminal (a última tentativa falhou), como depois de uma geração que deu erro.
+    await new FilePipelineStore(f.config.dataDir).saveJob({ ...job, status: "failed", error: "Falha simulada.",
+      scenes: job.scenes.map(scene => scene.sceneId === sceneId ? { ...scene, attempts: scene.attempts.map(attempt => ({ ...attempt, status: "failed" as const, active: false, error: "Falha simulada." })) } : scene) });
+    const before = await f.service.getJob(id);
+    const quote = await f.service.quoteFailedSceneRetry(id, sceneId);
+    expect(quote.ready, quote.blocked).toBe(true);
+
+    const outcome = await (await f.build().retryFailedScene(id, sceneId, quote.token)).completion;
+
+    expect(outcome.kind, JSON.stringify((outcome as { error?: string }).error)).toBe("COMPLETED");
+    const after = await f.service.getJob(id);
+    expect(after.sceneRetryIntents?.find(intent => intent.quoteToken === quote.token)).toMatchObject({ state: "settled", outcome: "succeeded" });
+    expect(completedRenders(after)).toBe(completedRenders(before) + 1);
+    expect(finalAssetOf(after, sceneId)).toBe(after.scenes.find(scene => scene.sceneId === sceneId)!.attempts.find(attempt => attempt.active)!.assetUri);
+    expect((await f.ledger()).filter(entry => !entry.simulated)).toHaveLength(0);
+  });
+  it("retry pago recuperado + render grátis encadeado falha: intent settled/succeeded e o job mostra a falha do render", async () => {
+    const f = await setup({ scenes: "real" }, false);
+    const id = f.campaign.jobIds[0]!;
+    const imageToVideo = () => f.video.calls.filter(call => call.url.endsWith("/image_to_video")).length;
+    await f.execute("narration");
+    // Cena REAL é aprovada por unidade: uma execução por cena.
+    while ((await f.service.getJob(id)).scenes.some(scene => scene.requiresGeneratedVideo && scene.attempts.length === 0)) await f.execute("scenes");
+    const job = await f.service.getJob(id);
+    const sceneId = job.scenes.find(scene => scene.requiresGeneratedVideo)!.sceneId;
+    // 1. Cena com falha terminal (a última tentativa REAL falhou).
+    await new FilePipelineStore(f.config.dataDir).saveJob({ ...job, status: "failed", error: "Falha simulada.",
+      scenes: job.scenes.map(scene => scene.sceneId === sceneId ? { ...scene, attempts: scene.attempts.map(attempt => ({ ...attempt, status: "failed" as const, active: false, error: "Falha simulada." })) } : scene) });
+    // 2. Cotação válida do retry.
+    const quote = await f.service.quoteFailedSceneRetry(id, sceneId);
+    expect(quote.ready, quote.blocked).toBe(true);
+    f.renderControl.fail = true;
+    const callsBefore = imageToVideo();
+    const paidBefore = (await f.ledger()).filter(entry => !entry.simulated);
+
+    const outcome = await (await f.build().retryFailedScene(id, sceneId, quote.token)).completion;
+
+    const after = await f.service.getJob(id);
+    const attempts = after.scenes.find(scene => scene.sceneId === sceneId)!.attempts;
+    expect(attempts.at(-1)).toMatchObject({ status: "succeeded" });
+    expect(after.sceneRetryIntents?.find(intent => intent.quoteToken === quote.token)).toMatchObject({ state: "settled", outcome: "succeeded" });
+    // A falha do render continua visível no job e permite rerender grátis.
+    expect(outcome.kind).toBe("FAILED");
+    expect(after.status).toBe("failed");
+    expect(after.error).toMatch(/Render falhou/);
+    f.renderControl.fail = false;
+    const rerender = await f.service.quoteStage(id, "render");
+    expect(rerender.ready, rerender.blocked).toBe(true);
+    expect(rerender.estimatedBrl).toBe(0);
+    // Exatamente uma chamada paga nova (a do retry) e um lançamento novo no ledger.
+    expect(imageToVideo()).toBe(callsBefore + 1);
+    const paidAfter = (await f.ledger()).filter(entry => !entry.simulated);
+    expect(paidAfter).toHaveLength(paidBefore.length + 1);
+    expect(new Set(paidAfter.map(entry => entry.id)).size).toBe(paidAfter.length);
+  });
+  it("projeto com avatar REAL abre (cotação/visão) mesmo sem RUNWAYML_API_SECRET; nada é enviado", async () => {
+    const f = await setup({ narration: "real", avatar: "real" });
+    const id = f.campaign.jobIds[0]!;
+    // Servidor sem a chave (removida/rotacionada): ver o projeto não pode quebrar a página.
+    const keyless = createHybridPipelineService(f.config, { stageDelayMs: 0 }, {});
+    const quote = await keyless.quoteJob(id);
+    expect(quote.ready).toBe(false);
+    const view = await getCampaignView({ service: keyless, uploads: new LocalUploadStore(f.config.uploadsDir), rendersDir: f.config.rendersDir, audioDir: f.config.audioDir }, f.campaign.id);
+    expect(view.ok).toBe(true);
+    expect(f.presenter.posts).toBe(0);
+    // A chave continua obrigatória para enviar: falha antes de qualquer requisição.
+    let calls = 0;
+    const pricing = { provider: "runway", model: RUNWAY_PRESENTER.model, unit: "per_second" as const, priceUsd: 0.1, updatedAt: "2026-01-01", isPlaceholder: true };
+    const provider = new RunwayPresenterProvider({ pricing, apiKey: "", transport: async () => { calls++; return new Response("{}"); } });
+    await expect(provider.submit({ avatarPresetId: "influencer", audio: wav(5), durationSeconds: 5 })).rejects.toThrow(/RUNWAYML_API_SECRET/);
+    expect(calls).toBe(0);
+  });
+  it("token de uma cena/job não autoriza outra cena nem outro job (nenhuma tentativa nova)", async () => {
+    const f = await setup({}, false);
+    const { id, job } = await renderedJob(f);
+    const [sceneA, sceneB] = job.scenes.filter(scene => scene.requiresGeneratedVideo).map(scene => scene.sceneId);
+    const tokenA = (await f.service.quoteStage(id, "scenes", false, true, sceneA)).token;
+    const other = await setup({}, false);
+    const { id: otherId, sceneId: otherScene } = await renderedJob(other);
+    const attempts = async (svc: typeof f.service, jobId: string) => (await svc.getJob(jobId)).scenes.reduce((n, scene) => n + scene.attempts.length, 0);
+    const before = [await attempts(f.service, id), await attempts(other.service, otherId)];
+
+    await expect(f.service.regenerateReadyScene(id, sceneB!, tokenA)).rejects.toThrow();
+    await expect(other.service.regenerateReadyScene(otherId, otherScene, tokenA)).rejects.toThrow();
+
+    expect([await attempts(f.service, id), await attempts(other.service, otherId)]).toEqual(before);
+    expect((await f.ledger()).filter(entry => !entry.simulated)).toHaveLength(0);
+  });
+  it("render externo/manual com job ativo continua bloqueado", async () => {
+    const f = await setup({}, false);
+    const { id } = await renderedJob(f);
+    const busy = f.build({ activity: { isActive: () => true } });
+    const quote = await busy.quoteStage(id, "render");
+    expect(quote.blocked).toBe("Etapa em andamento");
+    await expect(busy.executeStage(id, "render", quote.token)).rejects.toThrow(/sendo gerado|andamento/);
+  });
+  it("premissa do encadeamento: render (mock e real) custa zero; só assim segue sem nova aprovação", async () => {
+    for (const render of ["mock", "real"] as const) {
+      const f = await setup({ render }, false);
+      const id = f.campaign.jobIds[0]!;
+      await f.execute("narration"); await f.execute("scenes");
+      // Se um dia o render passar a custar, o encadeamento interno deixa de rodar (render.estimatedBrl !== 0) e exige aprovação.
+      expect((await f.service.quoteStage(id, "render", true)).estimatedBrl).toBe(0);
+    }
+  });
+  it("retoma intent autorizada após queda antes do enqueue e submete exatamente uma vez", async () => {
+    const f = await setup({ scenes: "real" }, false);
+    const id = f.campaign.jobIds[0]!;
+    (f.videoOptions as { failure?: boolean }).failure = true;
+    const first = await f.service.quoteStage(id, "scenes");
+    await (await f.service.executeStage(id, "scenes", first.token)).completion;
+    const failed = await f.service.getJob(id);
+    const sceneId = failed.scenes.find(scene => scene.attempts.at(-1)?.status === "failed")!.sceneId;
+    const quote = await f.service.quoteFailedSceneRetry(id, sceneId);
+    const persistedRuns: JobRun[] = [];
+    let crashBeforeEnqueue = true;
+    const dispatcher: NonNullable<PipelineDeps["dispatcher"]> = {
+      enqueuePlanning: async () => {},
+      enqueueJob: async (_job, run) => {
+        if (crashBeforeEnqueue) throw new Error("queda simulada antes do enqueue");
+        persistedRuns.push(run);
+      },
+    };
+    const api = f.build({ dispatcher });
+    await expect(api.retryFailedScene(id, sceneId, quote.token)).rejects.toThrow(/queda simulada/);
+    expect((await api.getJob(id)).sceneRetryIntents).toMatchObject([{ sceneId, quoteToken: quote.token, state: "authorized" }]);
+    expect(persistedRuns).toHaveLength(0);
+
+    crashBeforeEnqueue = false;
+    const resumed = await api.retryFailedScene(id, sceneId, quote.token);
+    expect((await resumed.completion).kind).toBe("QUEUED");
+    expect(persistedRuns).toHaveLength(1);
+    (f.videoOptions as { failure?: boolean }).failure = false;
+    await f.build().runJobTask(id, persistedRuns[0]!);
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(2);
+
+    await api.retryFailedScene(id, sceneId, quote.token);
+    expect(persistedRuns).toHaveLength(1);
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(2);
+  });
+  it.each([
+    { retryFails: false, expectedOutcome: "succeeded" as const },
+    { retryFails: true, expectedOutcome: "failed" as const },
+  ])("reconcilia intent running após tentativa e ledger persistidos ($expectedOutcome) sem novo submit", async ({ retryFails, expectedOutcome }) => {
+    const f = await setup({ scenes: "real" }, false);
+    const id = f.campaign.jobIds[0]!;
+    (f.videoOptions as { failure?: boolean }).failure = true;
+    const first = await f.service.quoteStage(id, "scenes");
+    await (await f.service.executeStage(id, "scenes", first.token)).completion;
+    const failed = await f.service.getJob(id);
+    const sceneId = failed.scenes.find(scene => scene.attempts.at(-1)?.status === "failed")!.sceneId;
+    const quote = await f.service.quoteFailedSceneRetry(id, sceneId);
+    const runs: JobRun[] = [];
+    const api = f.build({ dispatcher: { enqueuePlanning: async () => {}, enqueueJob: async (_job, run) => { runs.push(run); } } });
+    await api.retryFailedScene(id, sceneId, quote.token);
+    (f.videoOptions as { failure?: boolean }).failure = retryFails;
+
+    const durable = new FilePipelineStore(f.config.dataDir);
+    let crashOnce = true;
+    const crashingStore: PipelineStore = {
+      saveCampaign: campaign => durable.saveCampaign(campaign),
+      getCampaign: campaignId => durable.getCampaign(campaignId),
+      getJob: jobId => durable.getJob(jobId),
+      listJobs: campaignId => durable.listJobs(campaignId),
+      listCampaignIds: () => durable.listCampaignIds(),
+      saveJob: async (job: GenerationJob) => {
+        const intent = job.sceneRetryIntents?.find(item => item.quoteToken === quote.token);
+        const attemptPersisted = job.scenes.find(scene => scene.sceneId === sceneId)?.attempts.some(attempt => attempt.attemptNumber === 2);
+        if (crashOnce && intent?.state === "settled" && attemptPersisted) {
+          crashOnce = false;
+          throw new Error("queda simulada antes de encerrar a intent");
+        }
+        await durable.saveJob(job);
+      },
+    };
+    const submitsBefore = f.video.calls.filter(call => call.url.endsWith("/image_to_video")).length;
+    const ledgerBefore = (await f.ledger()).filter(entry => !entry.simulated).length;
+    await expect(f.build({ store: crashingStore }).runJobTask(id, runs[0]!)).rejects.toThrow(/queda simulada/);
+
+    const interrupted = await durable.getJob(id);
+    expect(interrupted.sceneRetryIntents?.find(item => item.quoteToken === quote.token)?.state).toBe("running");
+    expect(interrupted.scenes.find(scene => scene.sceneId === sceneId)?.attempts.some(attempt => attempt.attemptNumber === 2)).toBe(true);
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(submitsBefore + 1);
+    expect((await f.ledger()).filter(entry => !entry.simulated)).toHaveLength(ledgerBefore + 1);
+
+    const resumed = await f.build().runJobTask(id, runs[0]!);
+    const reconciled = await durable.getJob(id);
+    expect(reconciled.sceneRetryIntents?.find(item => item.quoteToken === quote.token)).toMatchObject({ state: "settled", outcome: expectedOutcome });
+    expect(resumed.kind).toBe(retryFails ? "FAILED" : "WAITING_STAGE");
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(submitsBefore + 1);
+    expect((await f.ledger()).filter(entry => !entry.simulated)).toHaveLength(ledgerBefore + 1);
+    if (retryFails) {
+      // A autorização antiga não vale para uma nova tentativa: replay do token não submete; nova cotação é outra decisão.
+      await (await f.build().retryFailedScene(id, sceneId, quote.token)).completion;
+      expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(submitsBefore + 1);
+      const next = await f.service.quoteFailedSceneRetry(id, sceneId);
+      expect(next.token).not.toBe(quote.token);
+    }
+  });
+  it("cotação stale é bloqueada antes do provider e libera uma nova decisão", async () => {
+    const f = await setup({ scenes: "real" }, false);
+    const id = f.campaign.jobIds[0]!;
+    (f.videoOptions as { failure?: boolean }).failure = true;
+    const first = await f.service.quoteStage(id, "scenes");
+    await (await f.service.executeStage(id, "scenes", first.token)).completion;
+    const failed = await f.service.getJob(id);
+    const sceneId = failed.scenes.find(scene => scene.attempts.at(-1)?.status === "failed")!.sceneId;
+    const quote = await f.service.quoteFailedSceneRetry(id, sceneId);
+    const runs: JobRun[] = [];
+    const api = f.build({ dispatcher: { enqueuePlanning: async () => {}, enqueueJob: async (_job, run) => { runs.push(run); } } });
+    await api.retryFailedScene(id, sceneId, quote.token);
+    const store = new FilePipelineStore(f.config.dataDir);
+    const authorized = await store.getJob(id);
+    await store.saveJob({ ...authorized, stageRevision: (authorized.stageRevision ?? 0) + 1 });
+    const calls = f.video.calls.filter(call => call.url.endsWith("/image_to_video")).length;
+
+    const stale = await f.build().runJobTask(id, runs[0]!);
+    expect(stale.kind).toBe("FAILED");
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(calls);
+    expect((await f.service.getJob(id))).toMatchObject({ status: "failed", sceneRetryIntents: [{ state: "settled", outcome: "blocked" }] });
+
+    const fresh = await api.quoteFailedSceneRetry(id, sceneId);
+    expect(fresh.token).not.toBe(quote.token);
+    (f.videoOptions as { failure?: boolean }).failure = false;
+    await api.retryFailedScene(id, sceneId, fresh.token);
+    await f.build().runJobTask(id, runs[1]!);
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(calls + 1);
+  });
+  it("operação paga incerta bloqueia retry de cena em todos os recipes duráveis", async () => {
+    const f = await setup({ scenes: "real" }, false);
+    const id = f.campaign.jobIds[0]!;
+    (f.videoOptions as { failure?: boolean }).failure = true;
+    const first = await f.service.quoteStage(id, "scenes");
+    await (await f.service.executeStage(id, "scenes", first.token)).completion;
+    const store = new FilePipelineStore(f.config.dataDir);
+    const failed = await store.getJob(id);
+    const sceneId = failed.scenes.find(scene => scene.attempts.at(-1)?.status === "failed")!.sceneId;
+    const latest = failed.scenes.find(scene => scene.sceneId === sceneId)!.attempts.at(-1)!;
+    const now = failed.updatedAt;
+    const markers = [
+      { stageIntents: [{ stage: "scenes" as const, unit: sceneId, state: "running" as const, createdAt: now }] },
+      { presenterTasks: [{ attemptId: "presenter_uncertain", sceneId, avatarPresetId: "influencer" as const, state: "submitting" as const, requestedDurationSeconds: 4, audio: { narrationAttemptId: "audio_1", narrationVersion: "v1", startSeconds: 0, endSeconds: 4 }, estimatedCostUsd: 0.1, createdAt: now }] },
+      { videoTasks: [{ attemptId: latest.id, sceneId, state: "pending" as const, providerJobId: "video_op_1", provider: "runway", model: "gen4_turbo", createdAt: now }] },
+      { ugcVideoOperations: [{ attemptId: latest.id, sceneId, state: "uncertain" as const, provider: "veo", model: "veo-3.1-fast-generate-preview", referenceId: "ref_1", referenceVersion: "v1", requestedDurationSeconds: 8, estimatedCostUsd: 0.8, createdAt: now }] },
+    ];
+    const calls = f.video.calls.length;
+    for (const marker of markers) {
+      await store.saveJob({ ...failed, stageIntents: undefined, presenterTasks: undefined, videoTasks: undefined, ugcVideoOperations: undefined, ...marker });
+      const quote = await f.service.quoteFailedSceneRetry(id, sceneId);
+      expect(quote.ready).toBe(false);
+      expect(quote.blocked).toMatch(/segurança|sem confirmação/i);
+      await expect(f.service.retryFailedScene(id, sceneId, quote.token)).rejects.toThrow(/segurança|sem confirmação/i);
+      expect(f.video.calls).toHaveLength(calls);
+    }
+  });
+  it("duas aprovações concorrentes usam uma intent e uma nova falha exige outra quote", async () => {
+    const f = await setup({ scenes: "real" }, false);
+    const id = f.campaign.jobIds[0]!;
+    (f.videoOptions as { failure?: boolean }).failure = true;
+    const first = await f.service.quoteStage(id, "scenes");
+    await (await f.service.executeStage(id, "scenes", first.token)).completion;
+    let job = await f.service.getJob(id);
+    const sceneId = job.scenes.find(scene => scene.attempts.at(-1)?.status === "failed")!.sceneId;
+    const quoteA = await f.service.quoteFailedSceneRetry(id, sceneId);
+    const [a, b] = await Promise.all([
+      f.service.retryFailedScene(id, sceneId, quoteA.token),
+      f.service.retryFailedScene(id, sceneId, quoteA.token),
+    ]);
+    await Promise.all([a.completion, b.completion]);
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(2);
+    job = await f.service.getJob(id);
+    expect(job.sceneRetryIntents).toHaveLength(1);
+    expect(job.scenes.find(scene => scene.sceneId === sceneId)!.attempts).toHaveLength(2);
+
+    await f.service.retryFailedScene(id, sceneId, quoteA.token);
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(2);
+    const quoteB = await f.service.quoteFailedSceneRetry(id, sceneId);
+    expect(quoteB.token).not.toBe(quoteA.token);
+    (f.videoOptions as { failure?: boolean }).failure = false;
+    await (await f.service.retryFailedScene(id, sceneId, quoteB.token)).completion;
+    expect(f.video.calls.filter(call => call.url.endsWith("/image_to_video"))).toHaveLength(3);
+  });
+  it("retry de Presenter deriva avatar no servidor, preserva áudio e lança só o novo custo", async () => {
+    const f = await setup({ narration: "real", avatar: "real" }, true, { short: true });
+    const id = f.campaign.jobIds[0]!;
+    await f.execute("narration");
+    const avatar = await f.service.quoteStage(id, "avatar");
+    expect((await (await f.service.executeStage(id, "avatar", avatar.token)).completion).kind).toBe("FAILED");
+    const failed = await f.service.getJob(id);
+    const sceneId = failed.scenes.find(scene => scene.attempts.at(-1)?.presenter)!.sceneId;
+    const before = (await f.ledger()).filter(entry => entry.sceneId === sceneId && !entry.simulated);
+    const quote = await f.service.quoteFailedSceneRetry(id, sceneId);
+    expect(quote.stage).toBe("avatar");
+    f.presenter.options.short = false;
+    await (await f.service.retryFailedScene(id, sceneId, quote.token)).completion;
+
+    const after = await f.service.getJob(id);
+    expect(after.scenes.find(scene => scene.sceneId === sceneId)!.attempts).toHaveLength(2);
+    expect(f.presenter.posts).toBe(2);
+    expect(f.audio.calls).toHaveLength(1);
+    expect((await f.ledger()).filter(entry => entry.sceneId === sceneId && !entry.simulated)).toHaveLength(before.length + 1);
   });
   it("autoriza exceder só até o valor mostrado e somente com permissão da política", async () => {
     const f = await setup({ narration: "real" }, false); const id = f.campaign.jobIds[0]!;

@@ -23,7 +23,7 @@ it("dry-run com foto real local não exige chave, não faz chamadas nem cria cam
 describe("argumentos rejeitados antes de autorização", () => {
   it("flag desconhecida nunca é interpretada como confirmação", () => {
     expect(() => execFileSync(process.execPath, ["--import", "tsx", "scripts/video-real.ts", "--confirmed"], { stdio: "pipe", timeout: 30_000 })).toThrow();
-  });
+  }, 35_000);
 });
 
 it.each(["video", "tts", "plan", "presenter"])("%s: --confirm permanece bloqueado mesmo com chaves e ambiente", async script => {

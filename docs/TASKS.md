@@ -210,3 +210,138 @@ Guia: [HYBRID-WORKFLOW.md](HYBRID-WORKFLOW.md).
 - [x] Providers, modelos, ledger, tentativas, versões, diagnóstico e durações em detalhes recolhidos
 - [x] Testes offline do fluxo automático com mocks e transportes falsos; nenhuma chamada paga
 - [ ] AI UGC/Veo real — próximo lote; domínio continua preparado
+
+
+## Lote 5.3 — AI UGC (MOCK completo) ✅
+- [x] Modo criativo "AI UGC" no fluxo simples: produto, imagens, preset, apresentador (auto/mulher/homem), ambiente (auto/escolhido)
+- [x] Etapa "Referência UGC" persistida e versionada (pessoa + produto 9:16, produto-âncora preservado)
+- [x] Aprovação visual com Aprovar / Gerar outra / Trocar apresentador / Trocar ambiente / Editar conceito
+- [x] Nenhuma cena UGC sem referência aprovada; pausa e retomada sob a mesma autorização do job
+- [x] `UgcReferenceProvider` e `UgcVideoProvider` separados do Presenter; mocks completos
+- [x] Cenas ugc_hook/ugc_demo/ugc_benefit/ugc_cta + product_broll; presets com mix diferente
+- [x] Identidade persistida por job + consistência por tentativa; schema de biblioteca futura
+- [x] Estratégias de áudio native_speech / external_lipsync, sem áudio duplicado
+- [x] Fala UGC natural validada (sem experiência inventada, cabe na duração); prompt 1.5.0
+- [x] Storyboard: quem aparece / o que segura / o que fala / o que faz
+- [x] Categorias de custo referência UGC, cena UGC, B-roll; preços placeholder
+- [x] Contratos atualizados: Nano Banana `gemini-3.1-flash-image` + Veo 3.1 Lite/Fast/Standard, sem transporte nem rede
+- [x] Pricing oficial Veo isolado por modelo/resolução; presets Econômico Lite 720p, Equilibrado Fast 720p e Premium Fast 1080p (Standard configurável)
+- [x] Intenção/operação UGC durável antes/depois do submit; retomada por operation ID, timeout sem reenvio e custo deduplicado
+- [x] Áudio nativo Veo preservado no Remotion sem ElevenLabs/narração duplicada
+- [x] Testes offline: referência, aprovação, bloqueio, consistência, cenas, storyboard, presets, orçamento, retomada, regeneração, pipeline MOCK, separação Presenter × UGC, nenhuma chamada fora da autorização
+
+### Falta para a primeira geração UGC real
+- [x] Escolher modelos oficiais candidatos (Gemini image generation/Nano Banana + Veo 3.1; nunca Flow web)
+- [x] Preços oficiais Veo e referência 1K com fonte/data em `config/pricing.ts`
+- [x] Implementar transportes HTTP reais de referência e vídeo sobre os contratos já preparados (Lote 5.4)
+- [x] Política de pessoas nesta fase: só pessoa sintética adulta, sem celebridade/pessoa real; biblioteca e consentimento seguem desligados
+- [x] Resolver de asset para enviar a foto do produto e a referência aprovada ao provider (`localImageLoader`)
+- [x] Capabilities REAL de `ugc_reference`/`ugc_video` atrás do preflight Google (chave + provider + modelos + opt-in)
+- [x] Scripts de validação manual com `--confirm` (`ugc:reference:real`, `ugc:video:real`)
+- [ ] Executar o Teste A real (1 referência) e revisar visualmente — aguardando instrução
+- [ ] Executar o Teste B real (1 cena Veo Fast 8s 720p 9:16 com áudio nativo) só após aprovar o Teste A
+- [ ] Confirmar no 1º uso real: formato REST de `durationSeconds`/`inlineData` do Veo, redirect do download e usage/cobrança efetivos
+
+## Lote 5.5 — REAL-only no fluxo normal ✅ (sem chamada paga)
+- [x] `ALLOW_MOCKS` (padrão false); mocks só em dev/teste explícito e na suíte (override no setup)
+- [x] Etapa MOCK bloqueada na cotação/execução; provider REAL indisponível nunca cai em MOCK
+- [x] Configuração inválida bloqueia todas as etapas e o readiness
+- [x] Readiness geral do fluxo por grupo + `blockingStage` do job
+- [x] Referência MOCK sem imagem simulada, sem aprovação; "Gerar referência real" para jobs antigos
+- [x] Wizard sem opção MOCK quando ALLOW_MOCKS=false
+
+## Lote 5.4 — Transporte REAL Google para AI UGC ✅ (sem chamada paga)
+- [x] Config server-side `GOOGLE_AI_API_KEY`, `UGC_PROVIDER`, `UGC_REAL_ALLOWED`, `UGC_REFERENCE_MODEL`, `UGC_VIDEO_MODEL`; readiness/preflight sem segredo
+- [x] `GoogleAiHttpClient` (chave privada, sem retry, timeout, redação) + `GoogleUgcError` tipado A/B/C
+- [x] Gemini `generateContent` (texto + foto inline → imagem 9:16 1K) com request id, usage e custo
+- [x] Veo `predictLongRunning` → operation ID → polling GET → download HTTPS allowlist (redirect sem chave)
+- [x] Intenção durável com hash dos inputs e teto aprovado; estado `uncertain` sem reenvio; custo recalculado antes do submit
+- [x] Duração real (requested/provider/actual), trilha de áudio nativo obrigatória, custo preservado em asset inválido
+- [x] Testes offline: transportes, pipeline e scripts (exatamente um POST por `--confirm`)
+
+## AI UGC via Krea (provider alternativo) ✅ (sem chamada paga)
+- [x] `UGC_PROVIDER=krea` + `KREA_API_KEY` server-side; readiness opt-in com `UGC_REAL_ALLOWED=true`
+- [x] `KreaHttpClient` (Bearer privado, sem retry, timeout, redação, download HTTPS público devolvido pelo job, redirects revalidados sem chave) + `KreaUgcError` A/B/C
+- [x] `UgcReferenceProviderKrea` (asset upload → Nano Banana 2 1K 9:16) e `UgcVideoProviderKrea` (Veo 3.1 Fast, start_image aprovado, áudio nativo, 4/6/8s)
+- [x] Preços oficiais (OpenAPI 2026-10-16); estimativa pela duração comprada; job ID persistido carrega a duração
+- [x] Google intacto; testes offline (`test/krea-fake.ts`, unidade + pipeline)
+- [ ] Validar UMA referência real na Krea — aguardando instrução; não gerar vídeo nessa primeira validação
+- [x] Auditoria pré-REAL: CLI escolhe Krea, dry-run zero rede/escrita, asset durável/reutilizável, UUID/result.urls atuais, download HTTPS com redirects seguros, readiness de modelo/preço e janelas de crash cobertas offline
+- [ ] Executar somente UMA referência Krea real e revisar visualmente; vídeo continua bloqueado até essa aprovação
+
+## Lote 6 — UX V2 + Avatar Library + Master Script + Voice Lock ✅ (sem chamada paga)
+- [x] Navegação V2 (Início, Criar vídeo, Projetos, Avatares | Configurações); técnico em Configurações → Avançado / Diagnóstico
+- [x] Home V2 e Create V2 (foto + nome, ideia, avatar, duração 30/45/60; Personalizar e Avançado recolhidos; estimativa antes de gerar)
+- [x] Biblioteca de avatares (CRUD, tags livres, padrão por tag, revisões, voz), seleção automática com motivo
+- [x] Roteiro mestre (campaign-plan@1.8.0) + style guide BR + divisão determinística por A-roll; CTA no roteiro
+- [x] VoiceProfile + Voice Lock (capability matrix, LOCKED_VOICE × PROVIDER_NATIVE explícito, master audio dividido)
+- [x] Projeto V2: progresso em 4 passos, aprovação simples, erro curto, Result Page V2, ChangeRequest com estimativa
+- [x] Projetos em cards com filtros; jobs antigos continuam na tela completa
+- [ ] Executar ChangeRequests (CTA/tom/duração/ambiente/avatar) com cotação e aprovação próprias
+- [ ] Provider real de lip-sync com áudio externo (adapter já preparado) e referência de identidade por imagem
+- [ ] Usar tags da análise do Claude na seleção automática (hoje: texto do produto × tags do usuário)
+
+## Lote 6.2 — Natural UGC Editing + Script V2 ✅ (sem chamada paga, D100)
+- [x] Natural Transition Engine: match cut > cut on action > micro punch > motion blur direcional > micro dissolve (≤ 6 frames; dissolve ≤ 4; nada chamativo)
+- [x] Transição só em fronteira válida; áudio intocado (uma faixa por vez, microfade só em pausa medida)
+- [x] Continuidade: entryAction/exitAction/handPosition/gazeDirection encadeados; prompts com cut on action e cauda final natural
+- [x] Script V2 (`campaign-plan@1.9.0`): FEATURE → CONTEXTO → AÇÃO; bloqueio de ficha técnica/muletas; estrutura por tempo
+- [x] Segmentação por pensamento/frase/ação; segmentos com visualAction/entry/exit/transitionIntent
+- [x] 30s = 32–38s final; diagnóstico "Trecho N → transição" só no avançado
+- [ ] Validação REAL: 1 vídeo de 30s e revisão visual das junções (sobretudo 3→4 e 4→5)
+
+## Correção do Lote 6 — avatar real, fidelidade e roteiro ✅ (sem chamada paga, D99)
+- [x] Avatar salvo com foto: foto enviada à Krea (Nano Banana 2, `image_urls` = produto + avatar); `identityStrategy`/`avatarReferenceAsset` persistidos no job e na referência
+- [x] Provider sem referência de identidade: bloqueio antes de qualquer chamada paga ("Este provider ainda não consegue preservar este avatar."); nunca fallback sintético
+- [x] UX: foto do avatar no Criar vídeo e na conferência; "Apresentado por X" só com a foto realmente usada
+- [x] Fidelidade: prompt com foto como fonte de verdade; cada especificação exata (ex.: 2100W) conferida individualmente
+- [x] Roteiro: causa reproduzida (limite por trecho × nome longo); `campaign-plan@1.8.1` re-divide antes de validar; "Ver detalhes" com causa sanitizada
+- [ ] Validação REAL: 1 referência Krea com avatar com foto (conferir se o rosto é preservado) e revisão de fidelidade
+
+## Lote 5.7 — Presenter Only UGC ✅ (sem chamada paga)
+- [x] Presenter Only como padrão AI UGC (só A-rolls; B-roll V2 só com `brollEnabled`)
+- [x] Presets ~32/~36/~40s (5/5/6 trechos), nunca < 30s
+- [x] Roteiro campaign-plan@1.7.0 (75–95 palavras, estrutura A–F, CTA natural, proibições)
+- [x] Edit Plan V3 em frames, handles adaptativos, cauda final 0,8–1,2s, cutReason/continuidade por trecho
+- [x] Caption V3 (âncora fixa simétrica, sem transform, ≤ 2 linhas) + timing mapeado às pausas
+- [x] Validação pós-render (AAC 48 kHz estéreo, duração) + auditoria da timeline
+- [x] Storyboard "Trecho N · Apresentadora", resumo gerado × usado × custo
+- [ ] Validar com UMA geração REAL (5 trechos) a percepção de travada e a cauda final
+
+## Lote 5.6 — Creative Editor V2 ✅ (sem chamada paga)
+- [x] Modelo editorial A-roll (espinha de áudio) + B-roll overlay com motivo de corte, transição discreta e continuidade encadeada (D91)
+- [x] Edit Plan puro: handles (sourceIn/sourceOut), visual × áudio separados, áudio contínuo sem duplicação, L/J cut nas junções, punch-in sutil
+- [x] Remotion `tiktok-creative@1.3.0` (`EditedCreative`): vídeo mudo com trim, áudio do A-roll com micro fades/ganho, legenda V2, CTA pequeno sobre a apresentadora
+- [x] Catálogo proibido por padrão; B-roll `reference_detail` (frame aprovado, custo zero); `commercialStyle` explícito
+- [x] Product Fidelity Gate (pending/approved/rejected/needs_review), UI de confirmação e bloqueio do vídeo
+- [x] Prompts de realismo/continuidade (Krea e Google); `campaign-plan@1.6.1` normaliza `requiresGeneratedVideo` a partir de `visualSource` antes da validação (D93)
+- [x] Presets revisados (2/3/4 A-rolls; 1/2/3 B-rolls); cotação pelos A-rolls; "gerados · usados" no storyboard
+- [x] Compatibilidade: planos/manifests/referências antigos continuam válidos; `external_lipsync` segue linear
+- [x] Testes offline (edit plan, fidelidade, continuidade, pipeline Krea falso, compatibilidade); caso de render V2 no `npm run test:render`
+- [x] Auditoria pré-REAL D92: silêncio/energia real via FFmpeg local, corte só em pausa segura, fallback no A-roll, B-roll estático ≤1,6s, origem A/V idêntica em frames e CTA sem card
+- [ ] Rodar `npm run test:render` numa máquina com o navegador do Remotion (não instalado neste PC)
+- [ ] Validação REAL: 1 referência Krea + revisão de fidelidade; depois 1 vídeo Equilibrado completo e revisão visual (handles, L/J cut, legibilidade, CTA)
+- [ ] Futuro: verificador visual/OCR preenchendo `observedTexts`; ASR local para legendas word-level reais (cortes em silêncio já usam medição local); B-roll gerado contextual via provider UGC a partir do frame aprovado
+
+## Lote 7 — Cloud Runtime ✅ (sem chamada paga; nada publicado)
+- [x] 7A Foundations: config validada por serviço, logger com redação, AssetStore Local/Supabase, workspace temporário, SqlClient + migrations versionadas (D101)
+- [x] 7B Supabase: PostgresPipelineStore (documento Zod + progresso + projeções + eventos), ledger append-only, avatares/revisões, índice de arquivos, upload direto seguro, JWT Supabase (D102, D105, D106)
+- [x] 7C Render API + fila durável no Postgres: claim exclusivo, dedupe, lease/heartbeat, CORS, rate limit, Idempotency-Key, /health e /ready (D103, D107)
+- [x] 7D Render Worker: hidratação/publicação no Storage, retomada sem reenvio pago, `worker:check` (D104)
+- [x] 7E Vercel: Backend local/remoto, login mínimo, upload direto, redirect para URL assinada, "Serviço temporariamente indisponível." (D108)
+- [x] 7F Dockerfile, render.yaml, DEPLOYMENT.md, CLOUD-RUNTIME.md, testes de navegador fechado, restart, ownership e segredos
+- [ ] Manual: criar projeto Supabase, aplicar migration, criar usuário; criar Render Web + Worker; criar projeto Vercel (ver docs/DEPLOYMENT.md)
+- [ ] Manual: primeiro teste na nuvem com mocks (ALLOW_MOCKS=true só nesse teste) e depois UMA validação REAL aprovada na tela
+- [ ] Futuro: migração dos jobs locais (script dry-run), tela técnica antiga no cloud, mais de uma tarefa por processo no worker
+
+## L8.8.2 — Safe Scene Retry ✅ (sem chamada paga; D110)
+- [x] Quote específica para cena terminalmente falha, separada de regeneração de cena pronta
+- [x] Recipe derivado no servidor para Presenter, Product UGC e produto/B-roll
+- [x] Aprovação single-use com `SceneRetryIntent` persistida antes do enqueue
+- [x] Retomada da janela approval → enqueue e replay após resposta perdida, com um submit
+- [x] Dedupe da fila valida payload: mesma intent deduplica; operação diferente não é engolida
+- [x] Stale quote bloqueia antes do provider, liquida a intent e permite nova decisão
+- [x] Operação paga incerta bloqueia Presenter, UGC e vídeo comum
+- [x] Ownership, cena/job/token cruzados e recipe falso cobertos na API cloud
+- [x] UI mostra “Tentar novamente” com estimativa; sem quote segura, sem botão
+- [x] Ledger append-only por novo attempt; retomada não duplica; MOCK sem custo real

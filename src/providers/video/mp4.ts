@@ -10,6 +10,8 @@ export interface Mp4Inspection {
   /** Duração da trilha de VÍDEO (mdhd); sem trilha de vídeo, a do filme (mvhd). undefined = ilegível. */
   durationSeconds: number | undefined;
   hasVideoTrack: boolean;
+  /** Existe trilha de áudio (hdlr "soun")? Áudio nativo do Veo precisa dela. */
+  hasAudioTrack: boolean;
 }
 
 function u32(b: Uint8Array, o: number): number {
@@ -65,20 +67,24 @@ function headerDuration(b: Uint8Array, box: Box): number | undefined {
  * que foi pedido nem no que o provider informa: é a fonte da verdade do clipe salvo.
  */
 export function inspectMp4(bytes: Uint8Array): Mp4Inspection {
-  if (!isMp4(bytes)) return { complete: false, durationSeconds: undefined, hasVideoTrack: false };
+  if (!isMp4(bytes)) return { complete: false, durationSeconds: undefined, hasVideoTrack: false, hasAudioTrack: false };
   const top = boxes(bytes, 0, bytes.length);
   const complete = top.length > 0 && top.every((x) => !x.truncated);
   const moov = top.find((x) => x.type === "moov" && !x.truncated);
-  if (!moov) return { complete, durationSeconds: undefined, hasVideoTrack: false };
+  if (!moov) return { complete, durationSeconds: undefined, hasVideoTrack: false, hasAudioTrack: false };
+  let video: number | undefined;
+  let hasVideoTrack = false;
+  let hasAudioTrack = false;
   for (const trak of boxes(bytes, moov.start, moov.end).filter((x) => x.type === "trak")) {
     const mdia = child(bytes, trak, "mdia");
     const hdlr = mdia && child(bytes, mdia, "hdlr");
     const mdhd = mdia && child(bytes, mdia, "mdhd");
     // hdlr: versão/flags (4) + pre_defined (4) + handler_type (4).
-    if (hdlr && mdhd && type(bytes, hdlr.start + 8) === "vide") {
-      return { complete, durationSeconds: headerDuration(bytes, mdhd), hasVideoTrack: true };
-    }
+    const handler = hdlr ? type(bytes, hdlr.start + 8) : "";
+    if (handler === "soun") hasAudioTrack = true;
+    if (handler === "vide" && mdhd && !hasVideoTrack) { hasVideoTrack = true; video = headerDuration(bytes, mdhd); }
   }
+  if (hasVideoTrack) return { complete, durationSeconds: video, hasVideoTrack, hasAudioTrack };
   const mvhd = child(bytes, moov, "mvhd");
-  return { complete, durationSeconds: mvhd ? headerDuration(bytes, mvhd) : undefined, hasVideoTrack: false };
+  return { complete, durationSeconds: mvhd ? headerDuration(bytes, mvhd) : undefined, hasVideoTrack: false, hasAudioTrack };
 }

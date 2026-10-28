@@ -341,3 +341,301 @@ Novos projetos da interface usam `simpleFlow`, com Produto → preset → storyb
 O storyboard é persistido no plano antes da mídia. Editar uma cena recalcula a revisão e a estimativa, invalida a cotação anterior e é recusado depois que existem assets. Product UGC continua fora da lista selecionável, embora `VisualSource` permaneça preparado para ele.
 
 `JobAuthorization` persiste cotação, custo real de base, teto, status e motivo de pausa. Um clique autoriza a sequência narração → avatar → cenas → render. Cada unidade ainda recebe autorização efêmera, guard de orçamento, ledger e limite de tentativas nas camadas existentes. A sequência para no primeiro erro, custo incerto, revisão de áudio ou aumento; não há retry pago. Reinício nunca retoma sozinho: a UI oferece continuação explícita com nova cotação, preservando o teto e o histórico. Regeneração de cena permanece explícita, versionada e separada.
+
+
+## D79 — AI UGC como modo criativo próprio, separado do Presenter
+
+`creativeMode: "ai_ugc"` é um modo do fluxo simples, não um tipo de apresentador. Presenter (D74/D75) anima um avatar falando a narração; não segura produto nem tem identidade persistida por job. AI UGC gera uma PESSOA SEGURANDO/APRESENTANDO O PRODUTO REAL a partir da foto. Por isso há dois contratos novos, `UgcReferenceProvider` (imagem pessoa + produto) e `UgcVideoProvider` (clipes a partir da referência aprovada), em `src/providers/ugc/`, e duas etapas novas no job: `ugc_reference` e `ugc_video`. Em AI UGC o Presenter nunca é chamado; campos de apresentador do request são limpos.
+
+Cenas: `ugc_hook`, `ugc_demo`, `ugc_benefit`, `ugc_cta` (pessoa, via UgcVideoProvider) e `product_broll` (produto sem pessoa, via VideoProvider genérico, categoria de custo `broll`). `product_image`/`text_card` continuam no Remotion. Presets: Econômico = hook + imagem + CTA; Equilibrado = hook + benefício + B-roll + imagem + CTA; Premium = hook + demo + B-roll + benefício + B-roll + CTA (`config/ugc.ts`). Nichos não são fixos: o ambiente é sugerido por palavras do produto, com fallback "sala".
+
+## D80 — Referência UGC aprovada antes de qualquer cena UGC
+
+Ordem do job: `ugc_reference → narration → ugc_video → avatar → scenes → render`. A referência é persistida (`job.ugc.references[]`, versão vN, intenção durável `submitting → pending → succeeded|failed`) e, quando real, salva em `UGC_DIR/<campanha>/<criativo>/vN/` com escrita atômica; o browser só recebe IDs (`/api/ugc/...`). Após gerar, a cotação devolve `awaitingReview` e o job pausa com `waitingForStage: "ugc_reference"` SEM erro. A tela mostra "Esta será a pessoa apresentando seu produto" com Aprovar / Gerar outra referência / Trocar apresentador / Trocar ambiente / Editar conceito.
+
+`ugc_video` é bloqueado na cotação e no fluxo (`UgcReferenceRequiredError`) sem referência aprovada da identidade ATUAL. Aprovar, regenerar ou trocar identidade reativa a MESMA `JobAuthorization` pausada e relança a sequência sob o mesmo teto e baseline; uma nova referência é só mais uma unidade dentro do teto (limite `MAX_ATTEMPTS_PER_SCENE`), nunca retry automático. Trocar apresentador/ambiente incrementa `identity.revision` e invalida a aprovação; ambos são recusados depois que existe cena UGC (consistência). Envio real sem resposta fica `submitting` incerto: bloqueia repetição até decisão humana.
+
+## D81 — Consistência de identidade por job; biblioteca futura só em estrutura
+
+`UgcCharacterIdentity` (gênero, faixa etária, aparência, figurino, ambiente, estilo, revisão) é resolvida de forma determinística (hash FNV, sem `node:crypto` porque o wizard importa) e persistida no job. Toda cena UGC recebe a mesma referência aprovada, identidade e produto-âncora (`UgcProductAnchor`: imagem, nome, descrição e `preserve` = forma, cores, logo, embalagem, proporções), e cada tentativa grava `attempt.ugc` (referência, versão, identidade, figurino, ambiente, imagem do produto, estratégia de áudio, fala e ação) para auditoria. `UgcCharacterProfile` (biblioteca futura, `imageConsent` default false, tags livres) existe só como schema; nada a usa ainda.
+
+## D82 — Estratégia de áudio declarada pelo UgcVideoProvider
+
+Cada `UgcVideoProvider` declara `audioStrategy`:
+- `native_speech`: o modelo de vídeo gera a fala. A etapa de narração é pulada (sem linha de TTS na estimativa); `mediaComplete` não exige narração; cenas não-UGC ficam sem fala; o manifest marca `clipAudio: true` só nas cenas UGC e o Remotion desmuta apenas elas.
+- `external_lipsync`: narração ElevenLabs primeiro; cada cena UGC recebe sua janela do MP3 (`presenterPreview`) para lip-sync; clipes ficam mudos.
+
+Áudio duplicado é impossível por construção: o manifest lança "Áudio duplicado…" se uma cena com áudio próprio coexistir com narração real; o fluxo recusa clipe cujo `hasAudio` contradiz a estratégia. O mock usa `UGC_MOCK_AUDIO_STRATEGY` (default `native_speech`).
+
+## D83 — Fala UGC natural, sem experiência inventada
+
+Prompt `campaign-plan@1.5.0` (ativo) instrui linguagem de criador ("Olha isso aqui…", "Se você procura…", "Esse modelo chama atenção por…") e proíbe experiência/depoimento inventados ("uso há meses", "testei", "funcionou comigo", "comprei", depoimentos) e jargão de anúncio. `ai/ugc-script.ts` valida isso de forma determinística e checa que a fala cabe na cena (≤ 2,8 palavras/s); a validação do prompt recusa saída que viole, e o modo `standard` recusa fontes UGC. Editar cena no storyboard aplica as mesmas regras.
+
+## D84 — Google Image Generation + Veo 3.1 preparados, transportes REAL desligados
+
+Referência futura: `gemini-3.1-flash-image` (Nano Banana 2), edição text+image→image 1K/9:16 com a imagem original do produto como entrada e preservação explícita de formato, cores, logo, embalagem e proporções. Não usar Imagen como provider principal. Vídeo futuro: `veo-3.1-lite-generate-preview`, `veo-3.1-fast-generate-preview` e `veo-3.1-generate-preview`, todos com áudio nativo e image-to-video 9:16. Estratégia: Econômico Lite 720p; Equilibrado Fast 720p; Premium Fast 1080p ou Standard 1080p pela configuração pura. Veo usa 4/6/8s; 1080p e `referenceImages` forçam 8s. Fast/Standard podem receber o produto original e referências adicionais (máximo três); Lite usa somente a referência UGC já composta como imagem inicial. Seed é auditável, nunca promessa de determinismo.
+
+Pricing oficial consultado em https://ai.google.dev/gemini-api/docs/pricing em 2026-10-16 e isolado em `config/pricing.ts`: Lite 720p US$0,05/s; Lite 1080p US$0,08/s; Fast 720p US$0,10/s; Fast 1080p US$0,12/s; Standard 720p/1080p US$0,40/s. A referência 1K reserva US$0,067 de output; o transporte futuro deverá registrar também tokens reais de entrada/texto. A cotação usa duração faturável do provider, separada da duração editorial.
+
+`UgcReferenceProviderGoogle` e `UgcVideoProviderVeo` são adapters sobre contratos de transporte injetados; builders são puros. Não há implementação HTTP, chave ou factory REAL. A interface REAL permanece indisponível e nenhuma chamada é possível neste lote. Automação do Flow continua proibida.
+
+## D85 — Operação UGC durável e áudio nativo preservado
+
+Cada cena UGC REAL persistirá `ugcVideoOperations`: intenção `submitting` antes do POST, `pending` com operation ID antes do polling e `settled` no desfecho. Reinício/timeout retoma status/download pelo ID sem novo submit. Intenção sem ID ou cobrança incerta pausa e bloqueia reenvio; custo é deduplicado pelo attempt ID. A operação registra referência aprovada, versão, modelo, duração solicitada ao provider e custo estimado. Duração real continua pela inspeção de mídia da D73; versões nunca são sobrescritas.
+
+Veo sempre usa `native_speech`: a etapa ElevenLabs é pulada, o manifest recusa qualquer narração junto a clip audio, o `OffthreadVideo` é desmutado somente nessas cenas e o encoder Remotion considera áudio embutido ao decidir gerar AAC. `external_lipsync` permanece estratégia separada para providers futuros e não pode ser combinada com Veo. Falha ou timeout não cria retry pago automático.
+
+## D86 — Transporte Google real para AI UGC, desligado por padrão (Lote 5.4)
+
+`GoogleAiHttpClient` concentra o HTTP da Gemini API (`https://generativelanguage.googleapis.com/v1beta`, header `x-goog-api-key`): chave em campo privado, sem SDK, sem retry, timeout por request, redação de chave/base64/URLs antes de truncar. Referência: `models/gemini-3.1-flash-image:generateContent` com texto + foto ORIGINAL inline e `imageConfig` 9:16/1K; o responseId vira o ID da operação, request id e usage (tokens) ficam na referência. Vídeo: `models/<veo>:predictLongRunning` com a referência aprovada como `image`, produto original em `referenceImages` (Fast/Standard, máx. 3), 9:16, 720p/1080p, 4/6/8s, `personGeneration: allow_adult`; seed só quando informado e nunca tratado como determinístico. Polling GET pelo operation name; download só HTTPS em hosts Google, redirect manual seguido SEM a chave, limite 100 MB e inspeção MP4 (duração e trilha `soun`).
+
+Erros são `GoogleUgcError` sanitizados com HTTP, código, request id, operation id e `diagnostic.operation`: A) `none` — 4xx na criação, sem operação, sem cobrança; B) `created` — operação/resposta existiu e falhou (filtro, erro terminal): desfecho final, "pode haver cobrança", nenhum retry; C) `unknown` — timeout/rede/5xx após envio: incerto. Em C sem ID, referência/operação vão para `uncertain` e bloqueiam reenvio até decisão humana; com ID, ficam `pending` e só retomam polling/download. Imagem Gemini recebida mas não persistida antes de reinício vira falha COBRADA (custo registrado), nunca novo envio.
+
+Antes do POST: cotação refeita sob lock, orçamento/teto, autorização efêmera de UMA criação, tentativas, referência aprovada da identidade atual e custo recalculado ≤ aprovado (`UgcCostChangedError` pausa sem rede). A intenção grava job, etapa, versão, modelo, teto aprovado (`maxApprovedCostUsd`), hash dos inputs e timestamps. Veo cobra por segundo gerado: o ledger usa a duração faturável persistida na intenção também na retomada. MP4 Veo sem trilha de áudio ou com duração fora da tolerância (D73) é salvo para auditoria, rejeitado e mantém o custo.
+
+## D87 — Readiness opt-in e protocolo de validação manual Google
+
+REAL só fica disponível com `GOOGLE_AI_API_KEY` + `UGC_PROVIDER=google` + modelos conhecidos + `UGC_REAL_ALLOWED=true` (`config/ugc-readiness.ts`); a chave sozinha não habilita, e o modo offline força `realAllowed=false`. O diagnóstico mostra só presença booleana.
+
+Protocolo: Teste A `npm run ugc:reference:real -- --image <foto>` (dry-run sem rede/gravação; `--confirm` = exatamente um POST, intenção em `DATA_DIR/ugc-validation/`, PNG em `UGC_DIR/validation/`, custo no ledger). Aprovação visual explícita `--approve <id>`. Só então Teste B `npm run ugc:video:real -- --reference <id> --confirm`: Veo Fast, 720p, 9:16, 8s, áudio nativo, um POST; `--resume <id>` retoma pelo operation ID sem POST. Intenção sem desfecho bloqueia novo envio. Nenhuma execução real foi feita neste lote; anúncio completo continua fora do escopo.
+
+## D88 — Krea API como provider AI UGC alternativo (`UGC_PROVIDER=krea`), desligado por padrão
+
+Krea entra em arquivos PRÓPRIOS, sem alterar Gemini/Veo diretos: `config/krea-ugc-models.ts` (modelos, endpoints, duração 4/6/8s, refs por preset), `config/krea-ugc-readiness.ts`, `providers/ugc/krea-http.ts` (único lugar que fala com `api.krea.ai`), `providers/ugc/krea-ugc-providers.ts` (`UgcReferenceProviderKrea`, `UgcVideoProviderKrea`) e `krea-runtime.ts`. Toque no código compartilhado limitado a: ramo `pricing.provider === "krea"` nas factories, `ugcChoice` (refs Krea em projetos NOVOS quando `UGC_PROVIDER=krea`), capabilities/diagnóstico, `ugcVideoUsage` (duração comprada) e o rótulo do provider na aprovação por etapa (antes fixo em "google").
+
+Fonte: OpenAPI oficial `https://api.krea.ai/openapi.json` (consultada em 2026-10-16). Bearer token; imagens de entrada via `POST /assets` (multipart; campos de imagem aceitam no máx. 1024 caracteres, então nada de base64 inline); geração `POST /generate/image/google/nano-banana-2` (1K, 9:16, US$0,08) e `POST /generate/video/google/veo-3.1-fast` (`start_image` = referência APROVADA, `generate_audio: true`, 9:16, 720p; Premium 1080p). Veo 3.1 Lite da Krea não tem áudio nativo e fica fora. Preço Fast com áudio: US$0,40/0,60/0,80 (720p) e 0,48/0,72/0,96 (1080p) para 4/6/8s → por segundo, estimado e cobrado pela duração COMPRADA. Polling `GET /jobs/{id}`; o `providerJobId` persistido é `krea:<job_id>[:<s>s]`, então retomada após reinício e custo real não dependem de memória.
+
+Mesmas garantias do Google: chave só no servidor (`KREA_API_KEY`, campo privado do cliente, nunca em AppConfig/log/erro/UI); REAL exige `KREA_API_KEY` + `UGC_PROVIDER=krea` + `UGC_REAL_ALLOWED=true`; criação paga consome a autorização efêmera da etapa, upload/polling/download não; sem retry. Erros `KreaUgcError` sanitizados A/B/C (`rejected_before_job` / `failed_after_job` / `uncertain`). As regras finais de persistência do upload e download seguro foram revistas em D89. Testes 100% offline com `test/krea-fake.ts`. Nenhuma chamada real feita.
+
+## D89 — Auditoria pré-REAL do Krea: preparação durável e contrato oficial atual
+
+Revisão em 2026-10-16 contra a documentação oficial atual (`/assets`, `/assets/{id}`, `/jobs/{id}`, Nano Banana 2 e Veo 3.1 Fast). O upload passa a ser preparação explícita e não paga: o pipeline grava SHA-256, asset UUID/URL, provider, timestamp, job e versão antes de marcar `paidSubmissionStarted`. Um restart antes desse marcador confirma o asset com `GET /assets/{id}` e o reutiliza; depois do marcador, ausência de job ID é incerta e bloqueia novo POST. O mesmo protocolo foi aplicado à referência inicial e à preparação futura do vídeo.
+
+IDs de asset/job seguem UUID oficial. `result.urls` canônico é lista de strings. A documentação não promete domínio fixo para resultados; portanto o download aceita somente HTTPS público devolvido pelo job, revalida até três redirects, nunca envia Authorization ao host de mídia, limita o stream a 100 MB e confere MIME e assinatura. Jobs `failed`/`cancelled` não entram no ledger, conforme a Krea; resultado inválido depois de `completed` preserva o custo. Readiness também valida modelos e preços oficiais completos. O CLI `ugc:reference:real` seleciona Krea quando `UGC_PROVIDER=krea`; sem `--confirm` continua zero rede e zero escrita. Nenhuma chamada real foi feita nesta auditoria.
+
+## D90 — Fluxo normal REAL-only; MOCK só com ALLOW_MOCKS=true (Lote 5.5)
+
+Antes, o fluxo normal caía em MOCK sem avisar em vários pontos: `stageModes` padrão MOCK em projetos novos (wizard e servidor), factories AI UGC/áudio/vídeo/presenter/renderer devolvendo mock quando o modo não era REAL, `LLM_PROVIDER=mock` aceito como planejamento, `RENDERER=mock` "concluindo" sem MP4, `loadAppConfigSafe` trocando provider inválido por MOCK, e a referência AI UGC MOCK exibindo a foto do produto como se fosse a pessoa, com botão "Aprovar esta pessoa".
+
+Agora `ALLOW_MOCKS` (padrão `false`) governa o fluxo normal. Com false: projetos novos usam REAL em toda etapa com provider configurado; etapa necessária sem provider fica bloqueada na cotação ("MOCK desabilitado…" + motivo do provider), `quoteJob` expõe `blockingStage` e `performHybridStage` recusa modo MOCK (defesa em profundidade). Planejamento sem Claude é recusado antes de criar o projeto. Configuração inválida bloqueia TODAS as etapas e o readiness ("Configuração inválida: VAR"). Readiness geral (`flow` + `blocking`) por grupo: Configuração, Planejamento, AI UGC (Krea/Google), Narração (dispensada com áudio nativo) e Render. Com true: comportamento MOCK anterior, só para dev/teste deliberado. A suíte liga MOCK explicitamente no setup (`forceMocksForTests(true)`); testes da política desligam.
+
+Dados antigos MOCK continuam legíveis, marcados como simulação/histórico. Referência MOCK não aparece como imagem, não pode ser aprovada (servidor e UI) e não alimenta cena REAL (cotação e fluxo recusam). "Gerar referência real" (`switchJobToReal`) muda o job para REAL nas etapas configuradas; a próxima geração cria uma referência REAL nova, preservando a MOCK no histórico. Nada é apagado. Nenhuma chamada paga.
+
+Numeração exibida: `ugcReferenceLabels` deriva o rótulo da ordem persistida em `job.ugc.references`. REAIS são v1, v2… pela ordem de criação (inclui tentativas falhas/incertas); MOCK aparece como "Simulação", fora dessa numeração. A `version` técnica (pasta em disco/rota) e o ID não mudam, nada é renomeado, e o rótulo sobrevive a reinício.
+
+## D91 — Creative Editor V2: UGC é editado como narrativa contínua (Lote 5.6)
+
+**UGC é editado como narrativa contínua, não concatenação de cenas independentes.** O primeiro vídeo REAL saiu tecnicamente correto e criativamente ruim porque a montagem linear (Lote 3) colocava cada cena em sequência, cortava "porque a cena acabou", fazia o B-roll de catálogo (foto em fundo desfocado) aparecer do nada e deixava silêncio no B-roll com fala nativa. Além disso, a referência gerada podia alterar o produto (2100W virou "3900") sem nenhum gate.
+
+Modelo editorial (`domain/edit.ts`, `ai/ugc-editorial.ts`): cenas ugc_* viram **A-ROLL** (apresentadora falando; espinha de áudio). O resto vira **B-ROLL** overlay (`edit.overlay=true`, não soma na duração), posicionado numa junção entre A-rolls (60% sobre o fim do A-roll anterior = L-cut; o resto já sobre o áudio do próximo = J-cut), nunca antes do gancho nem na janela do CTA. Todo trecho tem `cutReason` (opening, sentence_boundary, action_match, product_reveal, detail_emphasis, hand_occlusion, camera_motion, hook_emphasis, cta_return) e transição discreta (straight_cut, match_cut, cut_on_action, object_wipe, punch_in; crossfade só quando pedido explicitamente). Continuidade aproximada por A-roll (posição, mão, câmera, distância, olhar, pose de entrada = pose de saída do anterior, revisões de identidade/roupa/ambiente) entra no prompt da cena seguinte. A normalização é determinística, idempotente e aplicada no planejamento de projetos AI UGC novos com fala nativa (`editPlanVersion: 2`); `external_lipsync` continua linear.
+
+Catálogo proibido por padrão: `product_image`/`text_card` no UGC viram `reference_detail` (recorte do FRAME de referência aprovado com push-in lento: mesma pessoa, ambiente e produto, custo zero). Foto de catálogo só com `ugc.commercialStyle=true` explícito. Presets: Econômico 2 A + 1 B (15s), Equilibrado 3 A + 2 B (22,5s), Premium 4 A + 3 B (30s); A-roll ≤ 8s; a cotação reflete os A-rolls (B-roll de referência não custa). B-roll gerado (`product_broll`) continua possível, com direção contextual (mão, mesmo ambiente) e sempre mudo; o provider genérico ainda lê só UPLOADS_DIR, então ele parte da foto do produto.
+
+Edição final (`render/edit-plan.ts`, puro): a timeline é a soma das janelas usadas dos A-rolls. Handles conservadores (`config/edit-policy.ts`: A-roll 0,3s início / 0,4s fim; B-roll 0,4 / 0,4; clipe curto demais usa o clipe inteiro) definem `sourceIn/sourceOut`. Visual e áudio são separados: TODO visual é mudo; o áudio vem só de uma faixa por A-roll, em sequência, sem sobreposição (invariante validada: nunca duas vozes; B-roll nunca é fonte de áudio), com micro fades de 0,06s e ganho por clipe (1 por padrão; normalização só com medida). Junção direta entre dois A-rolls usa punch-in sutil (1,06) alternado. Legendas V2: uma zona, até 2 linhas, tempo proporcional dentro da janela de fala, até 1 termo numérico destacado; hook textual só quando não repete a fala; CTA pequeno ("Veja no carrinho") sobre a apresentadora nos últimos 1,8s, sem card final. O manifest carrega `edit`; a composição Remotion `tiktok-creative@1.3.0` usa `EditedCreative` (OffthreadVideo mudo com `trimBefore`, `<Audio>` do A-roll com fades). Planos/manifests antigos continuam pela montagem linear.
+
+Custo: `usage` registra por clipe segundos **gerados** (cobrados) × **usados** no corte (ex.: 8s gerados · 7,3s usados). O ledger continua pelo gerado; a edição nunca altera billing.
+
+Product Fidelity Gate (`domain/fidelity.ts`): constraints derivadas SÓ dos dados do produto (números com unidade como "2100W", modelo, nome, logo, cores, forma, botões, embalagem) entram no prompt da referência e do vídeo ("nunca alterar/inventar números"). Cada referência nasce `fidelity.status = pending`. Aprovar exige confirmação humana explícita ("Verifique se produto, logo, textos e especificações continuam fiéis"); textos observados divergentes (ex.: "3900") viram `needs_review`, ficam gravados e nada segue automaticamente; reprovar registra `rejected`. Cena UGC (cotação e fluxo) só com fidelidade `approved`; MOCK nunca libera REAL; referência antiga aprovada sem revisão fica bloqueada até confirmar. Não há OCR/visão: a regra automática só reprova ou pede revisão, nunca aprova — sem falsa garantia. Um verificador visual futuro pode preencher `observedTexts`.
+
+Prompts: `campaign-plan@1.6.0` (A-roll/B-roll; estrutura hook → observação → produto → detalhe → benefício → CTA; frases curtas com folga de 82%; catálogo proibido); referência como frame real de UGC sem texto/slogan/números/layout de anúncio; vídeo com realismo de smartphone, micro movimentos, olhar ao produto, imperfeição natural, continuidade e lista explícita do que evitar (a Krea não expõe `negative_prompt`; as restrições vão no texto). Nenhuma chamada paga neste lote.
+
+## D92 — Editor V2 corta somente em pausas medidas (auditoria pré-REAL)
+
+O plano editorial continua sendo intenção, não evidência do timing da mídia. Depois de salvar um MP4 real com áudio, `video-asset-store` executa o `silencedetect` do FFmpeg local do Remotion (`-38 dB`, silêncio mínimo de 0,12s) e persiste `audio-silence.json`; não há ASR, rede ou timestamps de palavra inventados. O editor procura uma pausa até 0,75s de cada handle planejado. Com pausa segura, `sourceIn/sourceOut` são deslocados até ela. Sem pausa — ou sem análise local — mantém o A-roll inteiro, não insere B-roll naquela junção e não aplica fade sobre fala. O custo continua pela duração gerada.
+
+B-roll estático só usa o frame UGC aprovado, por no máximo 1,6s, com recorte contextual e movimento mínimo; permanece mudo e pode declarar os dois A-rolls cuja fala atravessa o overlay. Visual e áudio do mesmo A-roll derivam da mesma origem em frames. O domínio valida áudio contínuo até o fim, sem lacuna/overlap, uma faixa por A-roll, ganho máximo 1 e `sourceOut` dentro da mídia. Fades de 0,06s só existem quando o limite medido está em silêncio.
+
+Legendas V2 continuam proporcionais ao roteiro e são marcadas `estimated_from_script`; o detector de silêncio não as transforma em word-level. CTA fica por 1,8s sobre o A-roll, na zona superior e sem card final. Continuidade enviada ao provider inclui pose, produto/mão, posição e movimento da câmera, olhar, identidade, roupa e ambiente; continua sendo orientação, não promessa. Uma referência só libera vídeo quando fidelidade **e** revisão humana estão `approved`; regenerar/rejeitar a versão invalida sua liberação.
+
+## D93 — `requiresGeneratedVideo` é derivado antes da validação do planner
+
+`visualSource` é a decisão criativa; `requiresGeneratedVideo` é redundante e 100% derivável. `requiresGeneratedVideoForVisualSource` é a regra canônica para todas as 17 fontes visuais. No `campaign-plan@1.6.1`, o fluxo é resposta Claude → `JSON.parse` → `normalizeCampaignPlanDerivedFields` → validação dependente do pedido → hydrate. Para uma fonte conhecida, o booleano é preenchido ou substituído pelo valor canônico. Fonte desconhecida, estrutura inválida e qualquer campo criativo continuam falhando e podem usar repair. O campo permanece no schema de saída por compatibilidade com o structured output, mas não é tratado como decisão do modelo.
+
+Incidente local de 2026-10-20: a campanha `campaign_cc7d03ed-1b93-43e2-8283-7cac49c00036` fez duas execuções manuais, ambas `attempt=1`, rejeitadas pela mesma contradição nas cenas 1 e 3. Não houve repair automático dentro de uma execução: o fluxo híbrido limita deliberadamente o planner REAL a uma tentativa. A primeira chamada custou US$0,07939 (incluiu criação do cache) e a segunda US$0,06218 (leitura do cache): total US$0,14157 = R$0,778635 à taxa 5,5 (R$0,78 somando as linhas arredondadas). Uma estimativa de aproximadamente R$0,35 representava uma chamada e não a repetição manual; a criação inicial do cache também elevou a primeira para R$0,436645. Com a normalização, a primeira resposta seria válida e a segunda chamada seria evitada. Nenhuma chamada real foi feita para implementar ou testar a correção.
+
+## D94 — Presenter Only é o padrão do AI UGC (Lote 5.7)
+
+Por enquanto, o modo AI UGC prioriza Presenter Only. B-roll gerado/estático permanece disponível arquiteturalmente, mas não participa dos presets padrão.
+
+Contexto: o último vídeo REAL mostrou B-roll de imagem parada/zoom artificial, produto surgindo de repente, CTA abrupto, legendas desalinhadas, roteiro genérico, vídeo curto e pequenas travadas de áudio.
+
+Decisão:
+- **Plano** (`ai/ugc-presenter-only.ts`, `editPlanVersion: 3`): só cenas ugc_* da apresentadora; B-roll/foto/card/imagem são removidos com ajuste registrado. Presets: Econômico ~32s (5 trechos), Equilibrado ~36s (5), Premium ~40s (6), cada trecho ≤ 8s (Veo gera 8s). Nunca < 30s planejados. Continuidade encadeada (pose de entrada = saída anterior; mesma mão, distância, olhar, identidade/roupa/ambiente). O B-roll V2 só volta com `ugc.brollEnabled=true`.
+- **Roteiro** (`campaign-plan@1.7.0`): TikTok brasileiro real, 75–95 palavras, estrutura hook → produto → 2–3 detalhes reais → demonstração → fechamento → CTA natural no último trecho; proibidos exagero, "você precisa disso", "CORRA", "últimas unidades", depoimento falso. Validação exige 5–6 trechos ugc_* e ~75–95 palavras (±10).
+- **Edit Plan V3** (`render/presenter-edit-plan.ts`): A-roll 1 → … → A-roll N, nenhum visual estático. Todo tempo é inteiro em frames (30 fps) e o cursor anda em frames — sem erro acumulado nem 1 frame de lacuna/sobreposição nas junções (causa provável das travadas). Visual e áudio de cada trecho usam a mesma janela; uma faixa por vez, contígua. Handles adaptativos: só corta dentro de pausa medida (silencedetect), deixando respiro; fala encostada na borda não é cortada; sem medição, clipe inteiro. Fades de 2 frames só em corte dentro de pausa. `cutReason` natural_pause/sentence_boundary. Cada trecho registra sourceIn/out, fala, pausas, continuidade; o último, `finalTailSeconds` (0,8–1,2s de vídeo depois da última palavra; aviso quando não há mídia suficiente). `generatedSeconds` × `usedSeconds` por trecho.
+- **Legendas V3**: frases do roteiro distribuídas sobre os intervalos de FALA medidos (relógio de fala que pula as pausas; troca tende a cair na pausa), sem ASR; `timingSource: mapped_to_audio_pauses`. Componente único `remotion/components/CaptionV3.tsx`: caixa fixa e simétrica centralizada no canvas (antes: margens esquerda 72/direita 180 descentralizavam), sem rotation/skew/transform, 2 linhas no máximo (quebra decidida no plano), line-height fixo, mesma âncora em todo frame. V2 também passa a usar a Caption V3.
+- **Texto na tela**: sem hook textual, banner ou card; só legenda; CTA textual pequeno e opcional no fim, sobre a apresentadora, sem deslocamento.
+- **Áudio**: render final AAC 48 kHz estéreo (Remotion re-amostra as fontes). Validação pós-render (`render/remotion/media-probe.ts`, ffprobe local): codec, sample rate, canais, duração do arquivo e da trilha; mais `auditEditTimeline` (lacuna/sobreposição/duração). Problemas viram aviso no registro do render (`mediaCheck`). Nenhum crossfade grande.
+- **Custos**: cotação/estimativa contam todos os trechos gerados (8s Veo cada); a UI mostra trechos, segundos gerados, usados estimados e custo das cenas.
+- **Compatibilidade**: jobs/planos V2 continuam abrindo e renderizando; novos AI UGC usam V3. Product Fidelity Gate inalterado (só referência approved + confirmação humana libera vídeo).
+
+## D95 — UX V2: a UX principal esconde a complexidade do pipeline (Lote 6)
+
+A UX principal esconde a complexidade do pipeline.
+
+Contexto: o motor funcionava, mas a tela mostrava providers, etapas, readiness, storyboard técnico, custos por etapa e aprovações demais.
+
+Decisão:
+- Navegação: Início · Criar vídeo · Projetos · Avatares | Configurações (`components/v2/app-shell.tsx`). Jobs, providers, modelos, readiness, ledger/IDs e a criação completa ficam em Configurações → Avançado / Diagnóstico e em "Detalhes técnicos" do projeto (`/campaigns/[id]?view=advanced`). Nada técnico foi removido.
+- Create V2 (`application/create-v2.ts`, `components/v2/create-video-form.tsx`): obrigatórios = foto + nome, ideia, avatar (Automático por padrão) e duração (30/45/60s). "Personalizar" (gênero, ambiente, tom, CTA) e "Configurações avançadas" (preset interno, Voice Lock) ficam recolhidos. "Estimativa: R$ XX,XX" antes do botão, com "Ver detalhes" (`costs/calculate.ts#estimateDurationCost`).
+- Projeto V2 (`application/project-v2-view.ts` + `components/v2/project-v2-panel.tsx`): uma ação por vez — progresso em 4 passos (Preparando roteiro → Preparando apresentadora → Criando vídeo → Finalizando), aprovação simples, erro curto ("Não conseguimos gerar o trecho 3." + Tentar novamente / Ver detalhes) e resultado ("Seu vídeo está pronto", player 9:16, duração, custo, Baixar, Gerar outra versão, "Quer mudar alguma coisa?").
+- Aprovação: avatar salvo → só "Confira o produto" (checklist cor/formato, logo/textos, especificações); avatar novo → "Esta será sua apresentadora" (Usar esta pessoa / Gerar outra). O Product Fidelity Gate continua igual por dentro (o botão só habilita com o checklist completo e envia fidelityConfirmed=true).
+- Edição por texto: `domain/change-request.ts` interpreta o pedido (tipo, escopo, instruções, ativos afetados, custo estimado) sem custo e sem executar; regenerações complexas ficam para lotes seguintes.
+- Compatibilidade: projetos V2 têm `request.uxVersion = 2`; projetos antigos abrem na tela completa de sempre. Teto do job, aprovação por cotação, ledger e histórico financeiro inalterados.
+
+## D96 — Avatares são entidades reutilizáveis com identidade e voz próprias (Lote 6)
+
+Avatares são entidades reutilizáveis com identidade e voz próprias.
+
+- Modelo (`domain/avatar.ts`): id, name, active, referenceImage, gender, appearanceDescriptors, visualAgeRange, hair, appearancePrompt, defaultOutfit, defaultEnvironment (+ cenário genérico opcional), speakingStyle, personality, tags[], preferredProductCategories[], defaultForTags[] ("Usar como padrão para"), voiceProfileId/voiceProvider/voiceName/voiceSettings. Tags são LIVRES (normalizadas, sem nichos no código).
+- Identidade visual separada da voz: mudar foto/aparência/roupa/ambiente cria nova `revision`; nome/tags/voz atualizam a revisão atual. Todas as revisões ficam em `DATA_DIR/avatars/<id>.json`; "Excluir" arquiva. Jobs guardam `avatar { avatarId, avatarRevision }` e o pedido guarda o snapshot congelado: alterar o avatar depois não muda jobs antigos.
+- VoiceProfile (`provider, providerVoiceId, name, language, locale, style, stability, speed, similarity, enabled`): perfis embutidos = SpeakerProfiles pt-BR; `providerVoiceId` nunca sai do servidor (views omitem o campo).
+- Seleção automática (`domain/avatar-selection.ts`): tags do produto (texto do produto + tags opcionais da análise) × avatares ativos; `defaultForTags` pesa mais que categorias preferidas, que pesam mais que tags; motivo registrado em `request.avatar.reason`. Sem avatar compatível: geração sintética existente. O usuário sempre pode escolher outro.
+- Consistência: com avatar salvo, a identidade UGC vem da revisão congelada (`source: "library"`, `libraryCharacterId`, `avatarRevision`) — mesma aparência, roupa, ambiente e faixa de idade em todos os A-rolls, a partir da mesma referência aprovada. A foto do avatar fica registrada (`identityImageUri`), mas só entra como referência de imagem quando o provider declarar `supportsIdentityReference` (nenhum provider instalado declara hoje).
+
+## D97 — O roteiro é criado como master script antes de ser dividido em A-rolls (Lote 6)
+
+O roteiro é criado como master script antes de ser dividido em A-rolls.
+
+- `campaign-plan@1.8.0` (ativo): com duração escolhida, o Claude escreve UM roteiro contínuo no `script` (hook → corpo → demonstração → fechamento → CTA como última frase), com a persona do avatar e a personalização do usuário como dados; as falas das cenas são partes consecutivas do mesmo texto. Style guide de UGC brasileiro (`ai/ugc-style-guide.ts`): frases curtas, ritmo de conversa, detalhes reais; proibidos linguagem corporativa, comercial de TV, "revolucionário", "você precisa disso", "imperdível", "garantido", depoimento falso e urgência falsa.
+- Faixas: 30s ≈ 70–90 palavras (5 trechos), 45s ≈ 100–125 (7), 60s ≈ 130–160 (9) — guidance com tolerância de 15% (`config/duration-targets.ts`) para não refazer chamada paga por diferença pequena.
+- `ai/master-script.ts` (puro): normaliza só espaços/pontuação, valida, divide em segmentos CONTÍGUOS nas fronteiras de frase (DP equilibrando palavras; vírgula só se faltarem frases) e aplica um segmento por A-roll. Todos os segmentos têm o mesmo `personaId`; o último contém o CTA; `plan.callToAction` = última frase do roteiro. Persistido em `CreativePlan.masterScript`. Depois vem o Presenter Only V3 (D94) com a cauda final de 0,8–1,2s.
+- Divisão impossível (frases de menos) → planejamento falha com motivo claro; nada é aceito pela metade.
+
+## D98 — Voice Lock é usado apenas quando o provider suporta áudio externo/lip-sync de forma real (Lote 6)
+
+Voice Lock é usado apenas quando o provider suporta áudio externo/lip-sync de forma real.
+
+- Capability matrix DECLARADA por provider (`domain/video-speech.ts`, `speechCapabilities`): supportsNativeAudio, supportsExternalAudio, supportsLipSync, supportsIdentityReference, supportsProductReference. Krea (Veo 3.1 Fast) e Google (Veo 3.1) declaram só áudio nativo; nenhum provider instalado aceita áudio externo + lip-sync hoje. Diagnóstico mostra a matriz em Configurações → Avançado.
+- `VideoSpeechStrategy = native | external_lipsync`; `resolveVoiceLock`: LOCKED_VOICE (preferido) só com suporte real; "auto" sem suporte → PROVIDER_NATIVE com motivo "Voice Lock indisponível com este provider." registrado no job (`job.voiceLock`) e exibido; "Exigir Voice Lock" sem suporte → erro antes de criar o projeto. Nunca fallback silencioso.
+- LOCKED_VOICE: UMA narração contínua ElevenLabs do roteiro mestre com a voz do avatar (`speakerProfileId` do VoiceProfile) → `job.masterAudio` (uri, duração, provider, modelo, voiceProfileId, segmentos) → divisão lógica por segmento (`masterAudioSegments`, no meio da pausa quando há alignment; proporcional às palavras sem ele) → o provider de lip-sync recebe a fatia de cada trecho (rota `external_lipsync` existente). Validado só com o mock de lip-sync; nenhuma chamada real.
+- Fala nativa: a voz pode variar entre trechos (limite do provider); mitigação = mesma descrição de voz do avatar em todos os prompts de vídeo.
+
+## D99 — Avatar salvo nunca vira outra pessoa; especificações exigem conferência; roteiro re-dividido antes de validar (correção do Lote 6)
+
+Avatar salvo nunca é substituído silenciosamente por uma identidade sintética.
+
+- Causa do avatar diferente: no Lote 6 a identidade do avatar guardava a foto (`identityImageUri`), mas nenhum provider a recebia. A referência Krea mandava só a foto do produto em `image_urls` e o prompt dizia "fictional synthetic adult person", então o Nano Banana 2 criava uma pessoa nova. A tela V2 ainda tratava o avatar salvo como "pessoa conhecida" e mostrava só "Confira o produto" com "Apresentado por <nome>".
+- `identityStrategy` (`avatar_reference_image` | `avatar_description` | `synthetic`) e `avatarReferenceAsset` ficam gravados na identidade, em cada referência e em `job.avatar`, junto com `avatarId` e `avatarRevision`. Jobs antigos derivam a estratégia de `source` e `identityImageUri`.
+- Capacidade declarada `UgcReferenceProvider.supportsIdentityReference`:
+  - Krea = true. O OpenAPI oficial do Nano Banana 2 tem `image_urls` como array, preço fixo por requisição. A foto do avatar vira asset durável (hash + reuso, mesmo protocolo D89) e o corpo envia `[produto, avatar]` com a instrução "Image 2 is the presenter: keep exactly the same person".
+  - Google = false, porque o transporte atual envia só o produto.
+  - Mock = configurável.
+- Sem suporte, o pedido é bloqueado antes de criar o projeto (nem o roteiro é pago), na cotação da etapa e no próprio `generateUgcReference` (`UgcIdentityUnsupportedError`). A mensagem é "Este provider ainda não consegue preservar este avatar." Não existe fallback sintético.
+- Vídeo: o Veo usa a referência APROVADA (que já contém o avatar) como `start_image`. O `reference_images` do Veo/Krea não é usado, porque a combinação com `start_image` não foi validada.
+- Avatar SEM foto = `avatar_description`, declarado na UI: "Inspirado em X (avatar sem foto: aparência pela descrição)". "Apresentado por X" só aparece com a foto realmente usada.
+- UX:
+  - Criar vídeo mostra a foto do avatar escolhido.
+  - A conferência mostra a foto real do avatar ao lado da referência, com o item "É X: mesmo rosto da foto do avatar".
+- Fidelidade:
+  - O prompt da referência trata a foto original como única fonte de verdade: textos e números são copiados, nunca reescritos; potência e tensão nunca mudam; o nome do produto é só contexto, não texto a imprimir.
+  - Cada especificação exata conhecida (ex.: 2100W, 220V) precisa ser conferida individualmente (`confirmedSpecs`). Sem isso `decideFidelity` mantém `pending` e a aprovação é recusada. A revisão humana continua obrigatória e nada é aprovado automaticamente.
+- "Não conseguimos preparar o roteiro":
+  - Causa: com duração escolhida (30s = 5 trechos de 6,6s), a validação herdada da 1.5.0 limita cada trecho a 18 palavras. O nome "Secador de Cabelos Profissional Color Wind Santa Clara 2100W 220V" (10 palavras) estoura um trecho, e a tentativa extra falha igual, mesmo com o roteiro total no alvo.
+  - Correção em `campaign-plan@1.8.1`: re-divisão determinística do roteiro mestre antes da validação (`normalizeMasterScriptDraft`), com duração por trecho na medida da fala (até 8s), e instrução de nome curto do produto na fala. `applyMasterScript` usa a mesma regra.
+  - Sem reparo por LLM para erro determinístico.
+  - "Ver detalhes" mostra a causa real sanitizada (`planningErrorDetails`: trecho e motivo, sem chaves, caminhos ou URLs).
+
+## D100 — Natural UGC Editing + Script V2 (Lote 6.2)
+
+Os 5–6 A-rolls do Presenter Only são editados como UM vídeo de TikTok: junções escondidas por continuidade e ação, nunca por efeitos chamativos.
+
+- Natural Transition Engine (`render/natural-transitions.ts`, puro). Escolhe a transição de ENTRADA de cada trecho, em ordem de prioridade:
+  1. `direct_match_cut`: similaridade de continuidade ≥ 0,9, com corte direto, ou blend de 2 frames só se quase idêntico e houver vídeo sobrando.
+  2. `cut_on_action`: a ação de saída do trecho N é a de entrada do N+1, é um movimento, e o enquadramento é igual.
+  3. `micro_punch`: enquadramento igual com pose diferente. Vai de 100% para 103,5% em 4 frames e volta para 100% no trecho seguinte.
+  4. `directional_motion_blur`: mesma direção de movimento nos dois lados. Blur só no eixo do movimento (SVG `feGaussianBlur`), 3 frames.
+  5. `micro_dissolve`: último recurso, só com câmera, mão e posição do produto alinhadas e vídeo sobrando. Dura 3 frames.
+  - Sem metadados ou alinhamento, o padrão é o micro punch, nunca um blend às cegas.
+- Limites no schema (`TransitionSpecSchema`, `TRANSITION_LIMITS`): ≤ 6 frames, dissolve/blend ≤ 4, punch ≤ 1,04. Os tipos flash, spin, slide, 3D, wipe gráfico e crossfade longo não existem.
+- A transição só acontece em fronteira válida (`sentence_boundary`, `natural_pause` ou `action_match`) e nunca na abertura (`assertValidEditPlan`).
+- O efeito é só visual. O áudio continua com uma faixa por vez, contígua e alinhada aos frames, e só recebe um microfade de 2 frames dentro de pausa medida. Saída em AAC 48 kHz estéreo, como antes.
+- Continuidade (cut on action): `SceneContinuity` ganha `entryAction`, `exitAction`, `handPosition` e `gazeDirection`.
+  - A entrada de cada trecho é a ação de saída do anterior.
+  - O prompt de vídeo pede que o trecho abra já em movimento, continuando a ação anterior, e termine no meio da próxima ação.
+  - O último trecho termina com 0,8–1,2s de comportamento natural (sorriso, olhar para o produto, baixar o produto), sem congelar.
+- Script V2 (`campaign-plan@1.9.0` + `checkScriptV2`):
+  - Cada característica segue FEATURE → CONTEXTO → AÇÃO VISUAL, sem benefício técnico inventado.
+  - A validação bloqueia: linguagem de catálogo ("é vendido como", "este produto possui/oferece"); 3 ou mais frases curtas seguidas de especificação solta; muleta repetida mais de 2× ou mais de 4 no total; mais de 3 frases começando com "Ele".
+  - Estrutura por tempo: hook, característica principal, segunda característica com demonstração, informação importante e CTA.
+- Segmentação: a divisão dinâmica (DP) penaliza cortar no meio de um pensamento (próxima frase começando com "E/Então/Porque…"), cortar em vírgula, e trecho acima de 22 palavras (8s em ritmo natural).
+  - Cada segmento guarda `beat`, `visualAction` (vira a ação do vídeo), `entryAction`, `exitAction`, `transitionIntent` e `splitReason`.
+- Duração: o alvo de 30s passa a ser 80–95 palavras, 5 trechos de ~7s e vídeo final de 32–38s. Nunca abaixo de 30s, e a fala não é acelerada.
+- Diagnóstico: "Trecho N → tipo" aparece só em `?view=advanced` (prevista pela continuidade antes do render, real depois). A tela V2 não mostra.
+- Compatibilidade:
+  - Manifests V2/V3 sem `transitionSpec` continuam válidos e viram corte seco no Remotion (`transitionFx: null`).
+  - Planos antigos sem ações de continuidade usam o engine com fallback seguro.
+  - A composição passa para `tiktok-creative@1.5.0`.
+
+## D101 — Cloud Runtime: Vercel (UI) + Render API + Render Worker + Supabase (Lote 7)
+- O computador do usuário não precisa ficar ligado. A Vercel só renderiza a interface. A Render API valida, autentica, orça, persiste e enfileira. O Render Worker executa o pipeline. O Supabase guarda estado (Postgres) e arquivos (Storage).
+- Nada é reescrito: o `PipelineService` e a camada `application/` são os mesmos nos dois modos. Só trocam as implementações injetadas (stores Postgres, `CloudUploadStore`, dispatcher, locks e activity), em `src/cloud/runtime.ts`.
+- `PERSISTENCE_DRIVER=local` (padrão) mantém o modo local intacto; `supabase` liga o cloud. Jobs locais antigos não são migrados automaticamente (procedimento em DEPLOYMENT.md).
+- Disco do worker = temporário. Fonte de verdade = Supabase.
+
+## D102 — Auth e ownership
+- Supabase Auth. O Next guarda access e refresh token em cookies httpOnly e envia `Authorization: Bearer` à API.
+- A API valida assinatura (ES256/RS256 via JWKS; HS256 legado opcional), `iss`, `aud`, `exp` e `role`. O userId vem só do `sub`.
+- Repositórios são construídos POR USUÁRIO e filtram toda query por `user_id`. Um job só entra em campanha do mesmo dono. URL assinada só sai para arquivo registrado do dono.
+- `DEV_AUTH_USER_ID` (usuário fixo) existe só fora de produção. Login mínimo por e-mail e senha, sem cadastro público.
+
+## D103 — Fila durável no próprio Postgres
+- Escolha: tabela `job_queue` no Supabase Postgres. Não há serviço novo (Redis/SQS); a fila fica na mesma transação e infraestrutura do estado.
+- Claim: `UPDATE … WHERE id = (SELECT … FOR UPDATE SKIP LOCKED LIMIT 1)`, mais um índice único parcial "uma running por campanha" (operações da campanha continuam serializadas).
+- Dedupe: uma tarefa ativa por chave. Lease com heartbeat; só o dono do lease encerra a tarefa.
+- Ponto único no pipeline: `dispatchJob`/`dispatchPlanning` com `JobRun` serializável (`src/pipeline/dispatch.ts`). Sem dispatcher, o comportamento é idêntico ao anterior.
+- O "está ativo?" passa a considerar a fila: fechar o navegador ou reiniciar a API não deixa o job "interrompido". Lock por campanha entre processos usa advisory lock (API espera no máx. 5s e responde "em andamento").
+
+## D104 — Worker, retomada e "sem auto-retry pago"
+- Uma tarefa por processo. O cwd da tarefa é `{WORKER_TMP_ROOT}/{jobId}/`, hidratado do Storage com as mesmas URIs relativas do documento. Ao terminar, sobe os arquivos novos e limpa.
+- Retomada de lease expirado:
+  - operação paga em voo (marcador gravado antes do POST e sem confirmação) → `blocked`, nada reenviado;
+  - planejamento pago → `blocked`;
+  - render interrompido → `failed` (re-render grátis explícito);
+  - nada em voo → requeue, continuando a sequência já aprovada.
+- `job_attempts` projeta as operações pagas: attemptId, jobId, stage, provider e status (started/submitted/confirmed/failed/uncertain).
+
+## D105 — Ledger no Postgres
+- `ledger_entries` é append-only também no banco (trigger recusa UPDATE/DELETE). Colunas: job, attempt, stage, provider, model, custo estimado, custo confirmado, moeda, status e timestamp; o registro completo fica em `entry`.
+- Valor vem só do servidor (usage/preço). Nada do browser entra no ledger.
+
+## D106 — Storage e upload direto
+- Bucket privado `tiktok-media`, com chaves `users/{userId}/uploads/...` e `users/{userId}/projects/{campaignId}/{references|clips|audio|renders}/...`.
+- `AssetStore` (put/get/delete/exists/getSignedUrl/createSignedUpload/downloadToTemp) tem duas implementações: Local (HMAC) e Supabase (REST).
+- O banco guarda bucket + path; URL assinada é sob demanda (10 min) e nunca persistida.
+- Upload: authorize na API → PUT direto ao Storage → complete na API, que confere os bytes reais. O arquivo não passa pela Vercel nem pela API.
+
+## D107 — Idempotência e proteção
+- `Idempotency-Key` (tabela `idempotency_keys`) em criar projeto e gerar job: mesmo corpo → mesma resposta; corpo diferente → 422; em execução → 409.
+- O Next deriva a chave do conteúdo do pedido numa janela de 10 min (clique duplo).
+- Rate limit de escrita por usuário. Dedupe da fila contra spam de geração. CORS por lista explícita ("*" recusado no startup).
+
+## D108 — Frontend cloud, config e segredos
+- `NEXT_PUBLIC_RUNTIME_MODE=cloud`: as telas V2 leem da API pelos mesmos view models (`src/server/backend.ts`); as Server Actions V2 viram chamadas HTTPS.
+- A tela técnica antiga fica só no modo local ("Disponível no modo local").
+- Arquivos: as rotas do Next redirecionam para URL assinada.
+- API fora do ar: "Serviço temporariamente indisponível.", sem detalhe técnico.
+- Config validada no startup e separada por serviço (frontend/API/worker), com erro mostrando só os nomes das variáveis.
+- `NEXT_PUBLIC_*` com cara de segredo, ou com o valor de um segredo do servidor, é recusado. Um teste estático garante que nenhum módulo do client lê variável não pública.
+- Logger estruturado com redação (tokens, authorization, segredos, query de URL assinada).
+- Testes cloud: Postgres REAL em WASM (PGlite) via `npm run test:cloud` (incluído no `check`), sem rede e sem API paga.
+
+## D109 — Deploy da Vercel nunca cai silenciosamente no modo local; upload cloud com erros explícitos
+
+Contexto: o upload de foto (avatar e produto) na Vercel mostrava "Ocorreu um erro inesperado." e nenhum `product_assets` era criado. No banco Supabase do projeto, nenhum login tinha acontecido (`auth.sessions` vazia) e nenhum perfil existia. O fluxo direto (authorize → PUT na URL assinada → complete) funcionou de ponta a ponta contra o mesmo Supabase. O domínio de produção serve uma versão antiga, e a branch `cloud-runtime` é publicada como Preview. Causa: o build em uso foi gerado sem `NEXT_PUBLIC_RUNTIME_MODE=cloud` (variáveis `NEXT_PUBLIC_*` são fixadas no build e por ambiente). O app rodou em modo local na Vercel: o uploader enviou o arquivo para `/api/uploads`, que tentou gravar no disco somente leitura, e a falha virou "erro inesperado".
+
+- `lib/runtime-mode.ts`: leitura ÚNICA e normalizada do modo (espaços, aspas e maiúsculas), usada pelo browser, pelo servidor e pelo `next.config`.
+- `VERCEL=1` com modo local é configuração inválida. `getRuntime()` e `/api/uploads` recusam com a causa e o que configurar. Nada é gravado no disco da Vercel.
+- `/api/runtime`: diagnóstico do deploy (modo, ambiente, host da API e booleanos das variáveis públicas, sem segredo).
+- API: `StorageError`/`AssetPathError` viram erro de upload claro. Um usuário de sessão ausente em `auth.users` do banco (login e `DATABASE_URL` em projetos Supabase diferentes) vira erro de configuração explícito, não "inesperado".
+- O fluxo de upload continua Browser → Supabase Storage direto (URL assinada `/object/upload/sign`, PUT com `Content-Type` e `x-upsert: false`, CORS aceito). Nenhum arquivo passa pela Vercel nem pela Render. As validações de tipo, tamanho, bytes reais, ownership e caminho continuam.
+
+## D110 — Retry seguro de uma cena falha usa intent durável (L8.8.2)
+
+- `retryQuote` é exclusiva para tentativa terminalmente falha; `regenerationQuote` continua exclusiva para nova versão de cena pronta.
+- O cliente envia somente job, cena e token. O servidor deriva `avatar`, `ugc_video` ou `scenes` do plano persistido.
+- Aceitar a quote grava aprovação, auditoria e `SceneRetryIntent` no mesmo save, antes do enqueue. Queda nessa janela é retomada pelo mesmo token e gera um único `JobRun`.
+- A intent fixa tentativa falha, próximo attempt, estimate, revisões, provider, modelo, modo e custo. Mudança torna a execução stale: zero submit, intent `blocked`, job `failed` e nova decisão obrigatória.
+- A fila mantém `job:<jobId>` para serializar o job. Replay com payload idêntico deduplica; payload diferente durante uma tarefa ativa é recusado, nunca aceito silenciosamente.
+- A rota não usa a tabela genérica de idempotência: `in_progress` sem takeover após crash impediria a retomada. A intent persistida é a fonte de replay.
+- Operação paga incerta em qualquer recipe bloqueia quote e submit. Cada retry liquidado cria novo attempt/ledger; MOCK não cria custo real. Nunca há retry pago automático.

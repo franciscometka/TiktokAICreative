@@ -10,13 +10,20 @@ import { isMp4 } from "../video/mp4";
 import type { PresenterProvider, PresenterRef, PresenterRequest } from "./presenter-provider";
 export class RunwayPresenterProvider implements PresenterProvider {
   readonly descriptor;
-  private readonly http: RunwayHttpClient;
+  private client?: RunwayHttpClient;
+  readonly #apiKey: string;
+  private readonly injectedTransport: typeof fetch | undefined;
   private readonly transport: typeof fetch;
   constructor(options: { pricing: ProviderPricing; apiKey: string; transport?: typeof fetch }) {
     if (options.pricing.model !== RUNWAY_PRESENTER.model || options.pricing.provider !== "runway") throw new ProviderError("Preço/modelo de presenter incompatível; aprove nova estimativa.");
     this.transport = options.transport ?? fetch;
-    this.http = new RunwayHttpClient(options.apiKey, options.transport);
+    this.injectedTransport = options.transport;
+    this.#apiKey = options.apiKey;
     this.descriptor = { ...RUNWAY_PRESENTER, id: "runway", isMock: false, pricing: options.pricing };
+  }
+  /** Cliente HTTP só quando há requisição: estimar custo (abrir o projeto) não exige a chave; sem chave, nada é enviado. */
+  private get http(): RunwayHttpClient {
+    return this.client ??= new RunwayHttpClient(this.#apiKey, this.injectedTransport);
   }
   estimateCost(seconds: number) {
     return { kind: "estimate" as const, ...costForUsage(this.descriptor.pricing, { seconds: presenterBilledSeconds(seconds) }), pricing: this.descriptor.pricing };

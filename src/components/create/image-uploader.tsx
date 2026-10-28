@@ -2,28 +2,29 @@
 
 import { useRef, useState } from "react";
 import { removeImageAction } from "@/app/actions";
-import type { ActionResult, UploadedImageView } from "@/application/campaign-actions";
 import type { ImageView } from "@/application/campaign-view";
-import { IMAGE_TYPES, UPLOAD_ERROR_MESSAGES, UPLOAD_LIMITS, isImageContentType } from "@/domain/upload";
+import { UPLOAD_LIMITS } from "@/domain/upload";
 import { buttonClasses, cx, Spinner } from "../ui/primitives";
-
-const ACCEPT = Object.keys(IMAGE_TYPES).join(",");
-const MB = 1024 * 1024;
+import { IMAGE_ACCEPT, MAX_IMAGE_MB, screenFiles, uploadProductImage } from "../upload/upload-client";
 
 /**
- * Upload local das imagens do produto. A checagem aqui é só conveniência; o servidor valida
- * MIME, tamanho e o conteúdo real do arquivo de novo.
+ * Upload local das imagens do produto (wizard avançado e avatar). L8.3: o envio (direto ao
+ * Storage no cloud) vem da camada compartilhada `components/upload`. A checagem aqui é só
+ * conveniência; o servidor valida MIME, tamanho e o conteúdo real do arquivo de novo.
  */
 export function ImageUploader({
   productId,
   images,
   onChange,
   error,
+  hint,
 }: {
   productId: string;
   images: ImageView[];
   onChange: (images: ImageView[]) => void;
   error?: string;
+  /** Lote 6: texto de ajuda próprio (ex.: foto do avatar). Ausente = texto do produto. */
+  hint?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(0);
@@ -32,35 +33,19 @@ export function ImageUploader({
   const remaining = UPLOAD_LIMITS.maxImagesPerProduct - images.length;
 
   async function upload(files: File[]) {
-    const problems: string[] = [];
-    const accepted = files.filter((file) => {
-      if (!isImageContentType(file.type)) problems.push(`${file.name}: ${UPLOAD_ERROR_MESSAGES.unsupported_type}`);
-      else if (file.size > UPLOAD_LIMITS.maxBytes) problems.push(`${file.name}: ${UPLOAD_ERROR_MESSAGES.too_large}`);
-      else return true;
-      return false;
-    });
-    if (accepted.length > remaining) {
-      problems.push(UPLOAD_ERROR_MESSAGES.limit_reached);
-      accepted.splice(remaining);
-    }
+    const screened = screenFiles(files, remaining);
+    const problems = [...screened.problems];
+    const accepted = screened.accepted.map((i) => files[i]!);
 
     let current = images;
     setUploading(accepted.length);
     for (const file of accepted) {
-      const body = new FormData();
-      body.set("file", file);
-      body.set("productId", productId);
-      try {
-        const response = await fetch("/api/uploads", { method: "POST", body });
-        const result = (await response.json()) as ActionResult<UploadedImageView>;
-        if (result.ok) {
-          current = [...current, { id: result.value.id, previewUrl: result.value.previewUrl }];
-          onChange(current);
-        } else {
-          problems.push(`${file.name}: ${result.error.message}`);
-        }
-      } catch {
-        problems.push(`${file.name}: falha no envio.`);
+      const result = await uploadProductImage(productId, file);
+      if (result.ok) {
+        current = [...current, { id: result.value.id, previewUrl: result.value.previewUrl }];
+        onChange(current);
+      } else {
+        problems.push(`${file.name}: ${result.error.message}`);
       }
       setUploading((n) => n - 1);
     }
@@ -117,7 +102,7 @@ export function ImageUploader({
       <input
         ref={inputRef}
         type="file"
-        accept={ACCEPT}
+        accept={IMAGE_ACCEPT}
         multiple
         className="sr-only"
         tabIndex={-1}
@@ -129,8 +114,8 @@ export function ImageUploader({
         }}
       />
       <p className="mt-2 text-xs text-zinc-500">
-        JPG, PNG ou WebP · até {UPLOAD_LIMITS.maxBytes / MB} MB cada · até {UPLOAD_LIMITS.maxImagesPerProduct} imagens. Fotos reais
-        do produto reduzem os segundos de vídeo IA necessários.
+        {hint ?? <>JPG, PNG ou WebP · até {MAX_IMAGE_MB} MB cada · até {UPLOAD_LIMITS.maxImagesPerProduct} imagens. Fotos reais
+        do produto reduzem os segundos de vídeo IA necessários.</>}
       </p>
       {images.length === 0 && remaining > 0 && (
         <button type="button" className={cx(buttonClasses("secondary", "sm"), "mt-2 sm:hidden")} onClick={() => inputRef.current?.click()}>

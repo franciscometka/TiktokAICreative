@@ -18,11 +18,18 @@ import { formatBrl } from "@/lib/money";
 import { getPublicConfig, getRuntime } from "@/server/runtime";
 import { ReadinessPanel } from "@/components/readiness-panel";
 import { SimpleVideoWorkspace } from "@/components/campaign/simple-video-workspace";
+import { buildProjectV2View } from "@/application/project-v2-view";
+import { generationSource } from "@/application/generation-view";
+import { GenerationProject } from "@/components/generation/generation-project";
+import { LegacyIsland } from "@/components/shell/legacy-island";
+import { runtimeMode } from "@/server/session";
+import { CloudProjectPage } from "./cloud-project";
 
 export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
+  if (runtimeMode() === "cloud") return { title: "Projeto · Creative Factory" };
   const result = await getCampaignView(getRuntime().deps, id);
   return { title: `${result.ok ? result.value.product.name : "Campanha"} · Creative Factory` };
 }
@@ -43,13 +50,17 @@ function stepStates(view: CampaignView): StepState[] {
   }
 }
 
-export default async function CampaignPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function CampaignPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ view?: string }> }) {
   const { id } = await params;
+  const { view: viewMode } = await searchParams;
+  // Lote 7: no cloud a página lê da Render API (o Next não executa pipeline nem lê disco).
+  if (runtimeMode() === "cloud") return <CloudProjectPage id={id} viewMode={viewMode} />;
   const publicConfig = getPublicConfig();
   const result = await getCampaignView(getRuntime().deps, id);
 
   if (!result.ok) {
     return (
+      <LegacyIsland>
       <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
         <Notice tone={result.error.code === "corrupted" ? "red" : "neutral"} title={result.error.title}>
           {result.error.message}
@@ -58,18 +69,33 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
           Ver campanhas
         </Link>
       </main>
+      </LegacyIsland>
     );
   }
 
   const view = result.value;
+  // Lote 6: projetos da UX V2 abrem na tela simples; "Detalhes técnicos" (?view=advanced) mostra tudo.
+  // Projetos antigos (sem uxVersion) continuam na tela completa de sempre (ilha clara).
+  // L8.5: a tela simples é a experiência de geração Cinematic (mesmo polling de 3s, mesmas ações).
+  if (view.uxVersion === 2 && viewMode !== "advanced") {
+    const v2 = buildProjectV2View(view);
+    const busy = v2.phase === "planning" || v2.phase === "generating";
+    return (
+      <>
+        {busy && <AutoRefresh intervalMs={3_000} />}
+        <GenerationProject source={generationSource(view, v2)} campaignId={view.id} />
+      </>
+    );
+  }
   const planned = view.state === "planned";
   const created = new Date(view.createdAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 
   return (
+    <LegacyIsland>
     <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
       <nav className="text-sm text-zinc-500" aria-label="Navegação">
-        <Link href="/campaigns" className="hover:text-zinc-900">
-          Campanhas
+        <Link href={view.uxVersion === 2 ? `/campaigns/${view.id}` : "/projects"} className="hover:text-zinc-900">
+          {view.uxVersion === 2 ? "← Voltar à visão simples" : "Projetos"}
         </Link>
         <span className="mx-2 text-zinc-300">/</span>
         <span className="text-zinc-700">{view.product.name}</span>
@@ -232,5 +258,6 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
         </details>
       )}
     </main>
+    </LegacyIsland>
   );
 }

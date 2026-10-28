@@ -1,44 +1,230 @@
 @import "tailwindcss";
 
-@theme {
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Menlo, monospace;
+/*
+ * L8.0 — Cinematic AI Studio: tokens globais.
+ * Valores reais ficam em variáveis --cf-* (tema escuro em :root/.theme-dark, claro em .theme-light);
+ * o @theme inline expõe utilitários semânticos (bg-surface, text-fg-muted, border-line, ...) que
+ * trocam de valor sozinhos dentro de cada tema. Componentes do DS usam SÓ esses utilitários.
+ */
+@theme inline {
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", "Cascadia Mono", Menlo, monospace;
+
+  --color-canvas: var(--cf-canvas);
+  --color-elevated: var(--cf-elevated);
+  --color-surface: var(--cf-surface);
+  --color-surface-hover: var(--cf-surface-hover);
+  --color-surface-sunken: var(--cf-surface-sunken);
+  --color-line: var(--cf-line);
+  --color-line-strong: var(--cf-line-strong);
+  --color-fg: var(--cf-fg);
+  --color-fg-muted: var(--cf-fg-muted);
+  --color-fg-subtle: var(--cf-fg-subtle);
+  --color-primary: var(--cf-primary);
+  --color-primary-hover: var(--cf-primary-hover);
+  --color-primary-light: var(--cf-primary-light);
+  --color-primary-soft: var(--cf-primary-soft);
+  --color-on-primary: #ffffff;
+  --color-accent: var(--cf-accent);
+  --color-accent-soft: var(--cf-accent-soft);
+  --color-success: var(--cf-success);
+  --color-success-soft: var(--cf-success-soft);
+  --color-warning: var(--cf-warning);
+  --color-warning-soft: var(--cf-warning-soft);
+  --color-danger: var(--cf-danger);
+  --color-danger-soft: var(--cf-danger-soft);
+
+  --shadow-pop: var(--cf-shadow-pop);
+  --shadow-raise: var(--cf-shadow-raise);
 }
 
-:root {
+@theme {
+  /* Tipografia (H1 40/1.1, H2 26, H3 19, body 15, caption 12.5). */
+  --text-display: 2.5rem;
+  --text-display--line-height: 1.1;
+  --text-display--letter-spacing: -0.03em;
+  --text-title: 1.625rem;
+  --text-title--line-height: 1.2;
+  --text-title--letter-spacing: -0.02em;
+  --text-heading: 1.1875rem;
+  --text-heading--line-height: 1.35;
+  --text-heading--letter-spacing: -0.01em;
+  --text-body: 0.9375rem;
+  --text-body--line-height: 1.6;
+  --text-caption: 0.78125rem;
+  --text-caption--line-height: 1.45;
+
+  /* Motion: fast 140ms · normal 220ms · emphasis 360ms · uma curva só. */
+  --ease-cf: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --animate-fade-in: fade-in var(--dur-normal) var(--ease-cf) both;
+  --animate-fade-up: fade-up var(--dur-emph) var(--ease-cf) both;
+  --animate-scale-in: scale-in var(--dur-normal) var(--ease-cf) both;
+  --animate-sheet-right: sheet-right var(--dur-emph) var(--ease-cf) both;
+  --animate-sheet-up: sheet-up var(--dur-emph) var(--ease-cf) both;
+  --animate-reveal: reveal var(--dur-emph) var(--ease-cf) both;
+  --animate-shimmer: shimmer 1.8s ease-in-out infinite;
+  --animate-indeterminate: indeterminate 1.4s var(--ease-cf) infinite;
+  --animate-spark: spark 2.4s ease-in-out infinite;
+  --animate-ping-soft: ping-soft 2s var(--ease-cf) infinite;
+  /* L8.5: check desenhado (etapa concluída) — roda só quando o elemento monta/muda. */
+  --animate-draw: draw var(--dur-emph) var(--ease-cf) both;
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+  }
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(6px); }
+  }
+  @keyframes scale-in {
+    from { opacity: 0; transform: translateY(4px) scale(0.97); }
+  }
+  @keyframes sheet-right {
+    from { transform: translateX(100%); }
+  }
+  @keyframes sheet-up {
+    from { transform: translateY(100%); }
+  }
+  @keyframes reveal {
+    from { opacity: 0; filter: blur(12px); transform: scale(1.02); }
+  }
+  @keyframes shimmer {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(100%); }
+  }
+  @keyframes indeterminate {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(250%); }
+  }
+  @keyframes spark {
+    0%, 100% { opacity: 1; transform: scale(1) rotate(0deg); }
+    50% { opacity: 0.55; transform: scale(0.86) rotate(45deg); }
+  }
+  @keyframes draw {
+    from { stroke-dashoffset: 24; }
+    to { stroke-dashoffset: 0; }
+  }
+  @keyframes ping-soft {
+    0% { opacity: 0.55; transform: scale(1); }
+    80%, 100% { opacity: 0; transform: scale(2.4); }
+  }
+}
+
+:root,
+.theme-dark {
+  color-scheme: dark;
+  --cf-canvas: #09090b;
+  --cf-elevated: #0f0f12;
+  --cf-surface: #151519;
+  --cf-surface-hover: #1a1a20;
+  --cf-surface-sunken: #0c0c0f;
+  --cf-line: rgb(255 255 255 / 0.08);
+  --cf-line-strong: rgb(255 255 255 / 0.14);
+  --cf-fg: #fafafa;
+  --cf-fg-muted: #a1a1aa;
+  --cf-fg-subtle: #71717a;
+  --cf-primary: #7c3aed;
+  --cf-primary-hover: #8b5cf6;
+  --cf-primary-light: #a78bfa;
+  --cf-primary-soft: rgb(124 58 237 / 0.14);
+  --cf-accent: #22d3ee;
+  --cf-accent-soft: rgb(34 211 238 / 0.12);
+  --cf-success: #34d399;
+  --cf-success-soft: rgb(16 185 129 / 0.14);
+  --cf-warning: #fbbf24;
+  --cf-warning-soft: rgb(245 158 11 / 0.14);
+  --cf-danger: #f87171;
+  --cf-danger-soft: rgb(239 68 68 / 0.14);
+  --cf-shadow-pop: 0 0 0 1px rgb(255 255 255 / 0.06), 0 16px 40px -12px rgb(0 0 0 / 0.7), 0 4px 12px -4px rgb(0 0 0 / 0.5);
+  --cf-shadow-raise: 0 1px 0 0 rgb(255 255 255 / 0.04) inset, 0 8px 24px -12px rgb(0 0 0 / 0.6);
+  --cf-gradient-ai: linear-gradient(135deg, #7c3aed, #8b5cf6, #22d3ee);
+
+  --dur-fast: 140ms;
+  --dur-normal: 220ms;
+  --dur-emph: 360ms;
+}
+
+/*
+ * Ilha clara: telas legadas/técnicas (wizard avançado, ?view=advanced, jobs, diagnósticos) e as
+ * telas V2 ainda não redesenhadas. Redefine os tokens (o DS fica claro aqui dentro), volta
+ * color-scheme/cor/fundo do texto herdado e mantém as classes zinc/white hardcoded legíveis.
+ */
+.theme-light {
   color-scheme: light;
+  --cf-canvas: #f7f7f8;
+  --cf-elevated: #ffffff;
+  --cf-surface: #ffffff;
+  --cf-surface-hover: #fafafa;
+  --cf-surface-sunken: #f4f4f5;
+  --cf-line: rgb(9 9 11 / 0.09);
+  --cf-line-strong: rgb(9 9 11 / 0.16);
+  --cf-fg: #09090b;
+  --cf-fg-muted: #52525b;
+  --cf-fg-subtle: #71717a;
+  --cf-primary: #7c3aed;
+  --cf-primary-hover: #6d28d9;
+  --cf-primary-light: #6d28d9;
+  --cf-primary-soft: rgb(124 58 237 / 0.08);
+  --cf-accent: #0891b2;
+  --cf-accent-soft: rgb(8 145 178 / 0.08);
+  --cf-success: #047857;
+  --cf-success-soft: #ecfdf5;
+  --cf-warning: #b45309;
+  --cf-warning-soft: #fffbeb;
+  --cf-danger: #b91c1c;
+  --cf-danger-soft: #fef2f2;
+  --cf-shadow-pop: 0 0 0 1px rgb(9 9 11 / 0.06), 0 16px 40px -16px rgb(9 9 11 / 0.25);
+  --cf-shadow-raise: 0 1px 2px rgb(9 9 11 / 0.04);
+  background: var(--cf-canvas);
+  color: var(--cf-fg);
 }
 
 body {
-  background: var(--color-zinc-50);
-  color: var(--color-zinc-900);
-  font-feature-settings: "cv11", "ss01";
+  background: var(--cf-canvas);
+  color: var(--cf-fg);
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Números alinhados em valores monetários e durações. */
+::selection {
+  background: rgb(124 58 237 / 0.35);
+}
+
+/* Números alinhados em valores monetários, créditos e durações. */
 .tabular {
   font-variant-numeric: tabular-nums;
+}
+
+/* Texto com o gradiente da IA — só marca, IA e estados premium. */
+.text-gradient-ai {
+  background: var(--cf-gradient-ai);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 dialog::backdrop {
   background: rgb(9 9 11 / 0.45);
 }
 
-@keyframes indeterminate {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(250%);
-  }
+dialog.cf-overlay::backdrop {
+  background: rgb(5 5 7 / 0.72);
+  animation: fade-in var(--dur-normal) var(--ease-cf) both;
 }
 
+/* Legado (ui/primitives): barra indeterminada. */
 .progress-indeterminate {
   animation: indeterminate 1.6s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .progress-indeterminate {
-    animation: none;
+  *,
+  ::before,
+  ::after,
+  ::backdrop {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

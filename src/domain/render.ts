@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { EditPlanSchema } from "./edit";
 import { MotionSchema, ShotTypeSchema, TransitionSchema, VisualSourceSchema } from "./creative";
 
 const nonEmpty = z.string().trim().min(1);
@@ -32,6 +33,8 @@ export const ManifestAssetSchema = z.object({
   visualSource: VisualSourceSchema.optional(),
   /** Descrição da cena, usada só no placeholder em modo de desenvolvimento. */
   visualDescription: z.string().optional(),
+  /** AI UGC com fala nativa: o render usa o áudio DO CLIPE nesta cena (e não há narração separada). */
+  clipAudio: z.boolean().optional(),
 });
 export type ManifestAsset = z.infer<typeof ManifestAssetSchema>;
 
@@ -60,6 +63,8 @@ export const RENDER_WARNING_CODES = [
   "asset_not_provided",
   "asset_file_missing",
   "audio_unavailable",
+  /** Lote 5.7: aviso editorial do Edit Plan V3 (duração abaixo da meta, cauda não medida…). */
+  "edit_plan",
   /** Narração real sem timing confiável: legendas estimadas (fallback do Lote 3). */
   "captions_estimated",
   /** Fala real mais longa que o plano: o fim do vídeo foi estendido (sem cortar fala). */
@@ -109,6 +114,8 @@ export const RenderManifestSchema = z.object({
   }),
   /** Avisos conhecidos na montagem (ex.: cena de IA mock). */
   warnings: z.array(RenderWarningSchema).default([]),
+  /** Creative Editor V2: edição final (A-roll contínuo + B-roll overlay). Ausente = montagem linear antiga. */
+  edit: EditPlanSchema.optional(),
 });
 export type RenderManifest = z.infer<typeof RenderManifestSchema>;
 

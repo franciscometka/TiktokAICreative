@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { EditPlanVersionSchema, SceneEditSchema } from "./edit";
+import { MasterScriptSchema } from "./master-script";
 
 /**
  * Dois níveis de schema:
@@ -44,7 +46,8 @@ export type Transition = z.infer<typeof TransitionSchema>;
  * De onde vem o visual da cena (estratégia híbrida de custo).
  * Os tipos em GENERATED_VISUAL_SOURCES consomem geração; o resto é composto no Remotion.
  */
-export const GENERATED_VISUAL_SOURCES = ["generated_video", "product_hero", "product_demo", "lifestyle", "presenter", "product_ugc"] as const;
+/** AI UGC (Lote 5.3): ugc_* = pessoa + produto a partir da referência aprovada; product_broll = close do produto. */
+export const GENERATED_VISUAL_SOURCES = ["generated_video", "product_hero", "product_demo", "lifestyle", "presenter", "product_ugc", "ugc_hook", "ugc_demo", "ugc_benefit", "ugc_cta", "product_broll"] as const;
 export const VISUAL_SOURCES = [
   ...GENERATED_VISUAL_SOURCES,
   "product_image",
@@ -52,13 +55,20 @@ export const VISUAL_SOURCES = [
   "screenshot",
   "simple_background",
   "existing_asset",
+  /** Editor V2 (AI UGC): B-roll recortado do FRAME de referência aprovado (custo zero). */
+  "reference_detail",
 ] as const;
 export const VisualSourceSchema = z.enum(VISUAL_SOURCES);
 export type VisualSource = z.infer<typeof VisualSourceSchema>;
 
 export type GeneratedVisualSource = (typeof GENERATED_VISUAL_SOURCES)[number];
+/** Única regra canônica para decidir se uma fonte visual exige geração paga de vídeo. */
+export function requiresGeneratedVideoForVisualSource(source: VisualSource): boolean {
+  return (GENERATED_VISUAL_SOURCES as readonly VisualSource[]).includes(source);
+}
+
 export function isGeneratedSource(source: VisualSource): source is GeneratedVisualSource {
-  return (GENERATED_VISUAL_SOURCES as readonly string[]).includes(source);
+  return requiresGeneratedVideoForVisualSource(source);
 }
 export const VideoDirectionSchema = z.object({
   framing: z.enum(["full_product", "product_detail", "in_context", "person_medium"]),
@@ -112,7 +122,7 @@ const sceneShape = z.object({
 type SceneLike = z.infer<typeof sceneShape>;
 
 function checkSceneRules(scene: SceneLike, ctx: z.RefinementCtx): void {
-  if (scene.requiresGeneratedVideo !== isGeneratedSource(scene.visualSource)) {
+  if (scene.requiresGeneratedVideo !== requiresGeneratedVideoForVisualSource(scene.visualSource)) {
     ctx.addIssue({
       code: "custom",
       path: ["visualSource"],
@@ -154,17 +164,19 @@ export const ScenePlanDraftSchema = sceneShape.superRefine(checkSceneRules);
 export type ScenePlanDraft = z.infer<typeof ScenePlanDraftSchema>;
 
 export const ScenePlanSchema = sceneShape
-  .extend({ id: nonEmpty, order: z.int().nonnegative() })
+  /** Editor V2: papel A-roll/B-roll, motivo do corte e continuidade (ausente em planos antigos). */
+  .extend({ id: nonEmpty, order: z.int().nonnegative(), edit: SceneEditSchema.optional() })
   .superRefine(checkSceneRules);
 export type ScenePlan = z.infer<typeof ScenePlanSchema>;
 
 // ---------- Creative ----------
 
 function checkDurationsMatch(
-  creative: { duration: number; scenes: { duration: number }[] },
+  creative: { duration: number; scenes: { duration: number; edit?: { overlay: boolean } }[] },
   ctx: z.RefinementCtx,
 ): void {
-  const total = creative.scenes.reduce((sum, s) => sum + s.duration, 0);
+  // B-roll overlay (Editor V2) fica por cima do áudio do A-roll e não soma na duração.
+  const total = creative.scenes.filter((s) => !s.edit?.overlay).reduce((sum, s) => sum + s.duration, 0);
   if (Math.abs(total - creative.duration) > DURATION_TOLERANCE_SECONDS) {
     ctx.addIssue({
       code: "custom",
@@ -197,6 +209,10 @@ export const CreativePlanSchema = z
     script: nonEmpty,
     scenes: z.array(ScenePlanSchema).min(1),
     callToAction: nonEmpty,
+    /** 2 = Creative Editor V2 (A-roll contínuo + B-roll overlay). Ausente = montagem linear antiga. */
+    editPlanVersion: EditPlanVersionSchema.optional(),
+    /** Lote 6: roteiro mestre único, dividido em segmentos de fala (um por A-roll). */
+    masterScript: MasterScriptSchema.optional(),
   })
   .superRefine((creative, ctx) => {
     checkDurationsMatch(creative, ctx);

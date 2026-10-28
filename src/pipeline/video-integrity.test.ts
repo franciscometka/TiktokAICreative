@@ -33,7 +33,7 @@ async function generate(clip: Uint8Array) {
 
 describe("leitura da duração real do MP4", () => {
   it("lê a trilha de vídeo (mdhd), detecta arquivo cortado e não-MP4", () => {
-    expect(inspectMp4(makeMp4(5))).toEqual({ complete: true, durationSeconds: 5, hasVideoTrack: true });
+    expect(inspectMp4(makeMp4(5))).toEqual({ complete: true, durationSeconds: 5, hasVideoTrack: true, hasAudioTrack: false });
     const cut = makeMp4(5, { mdatBytes: 4000 }).subarray(0, 2000);
     expect(inspectMp4(cut)).toMatchObject({ complete: false, durationSeconds: undefined });
     expect(inspectMp4(new TextEncoder().encode("<html>expirou</html>"))).toMatchObject({ complete: false, durationSeconds: undefined });

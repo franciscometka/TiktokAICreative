@@ -14,6 +14,8 @@ export interface ProviderDescriptor {
 
 export interface ProviderJobRef {
   providerJobId: string;
+  /** Identificador HTTP do provider, quando informado na criação do job. */
+  requestId?: string;
 }
 
 export type ProviderJobState = "queued" | "running" | "succeeded" | "failed";

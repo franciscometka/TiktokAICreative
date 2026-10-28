@@ -14,6 +14,7 @@ import { alignedSceneWindows, type AudioSlicer } from "@/speech/presenter-audio"
 import { waitForCompletion, type PollOptions } from "@/providers/poll";
 import { ProviderError, InvalidMediaError } from "@/providers/types";
 import { checkClipDuration, clipRejectionMessage } from "@/domain/media-integrity";
+import { assertExecutionFence, ExecutionLeaseLostError } from "@/config/execution-policy";
 export class PresenterPendingError extends Error { override name = "PresenterPendingError"; }
 export interface PresenterFlowDeps {
   store: PipelineStore; ledger: CostLedger; audioAssets: AudioAssetStore; videoAssets: VideoAssetStore;
@@ -58,6 +59,7 @@ export async function generatePresenter(deps: PresenterFlowDeps, input: { campai
     prepared = await presenterPreview(deps, campaign, plan, job, scene, provider.descriptor.isMock);
     const estimate = provider.estimateCost(prepared.durationSeconds);
     audio = provider.descriptor.isMock ? new Uint8Array() : await deps.slicer(prepared.audioPath, prepared.window);
+    if (!provider.descriptor.isMock) await assertExecutionFence();
     await persistTask({ attemptId: deps.ids("attempt"), sceneId: scene.id, avatarPresetId: campaign.request.presenterPresetId!,
       state: "submitting", isMock: provider.descriptor.isMock, requestedDurationSeconds: prepared.durationSeconds, audio: prepared.audio,
       estimatedCostUsd: estimate.costUsd, estimateId: job.approval!.estimateId, createdAt: deps.clock() });
@@ -66,6 +68,7 @@ export async function generatePresenter(deps: PresenterFlowDeps, input: { campai
   }
   const current = () => task!;
   const recordCost = async (usage: Usage) => {
+    if (!provider.descriptor.isMock) await assertExecutionFence();
     const id = `cost_${current().attemptId}`;
     const existing = (await deps.ledger.list({ jobId: job.id })).find(e => e.id === id);
     if (existing) { await persistTask({ ...current(), actualCostUsd: existing.costUsd }); return; }
@@ -84,6 +87,7 @@ export async function generatePresenter(deps: PresenterFlowDeps, input: { campai
   let costRecorded = false;
   try {
     if (!resume) {
+      if (!provider.descriptor.isMock) await assertExecutionFence();
       const ref = await provider.submit({ avatarPresetId: current().avatarPresetId, audio: audio!, durationSeconds: current().requestedDurationSeconds });
       await persistTask({ ...current(), ...ref, state: "pending" });
     }
@@ -103,9 +107,13 @@ export async function generatePresenter(deps: PresenterFlowDeps, input: { campai
       actualSeconds: stored.inspection.durationSeconds, fileComplete: stored.inspection.complete });
     await deps.videoAssets.writeIntegrity?.(stored.uri, { ...media, checkedAt: deps.clock() });
     if (media.status !== "valid") throw new InvalidMediaError(clipRejectionMessage(media, scene.order + 1), media, stored.uri);
-    attempt = { ...base(), status: "succeeded", active: true, assetUri: stored.uri, durationSeconds: media.actualMediaDurationSeconds!, media };
+    attempt = { ...base(), status: "succeeded", active: true, assetUri: stored.uri, durationSeconds: media.actualMediaDurationSeconds!, media,
+      ...(stored.audioSilence ? { audioSilence: stored.audioSilence } : {}) };
     }
   } catch (error) {
+    if (error instanceof ExecutionLeaseLostError) throw error;
+    // As gravações abaixo (custo, incerto, falha) exigem a posse do claim; sem ela, nada é gravado.
+    await assertExecutionFence();
     if (error instanceof ProviderError && error.billedUsage && !costRecorded) await recordCost(error.billedUsage);
     const terminal = error instanceof ProviderError && ["FAILED", "CANCELLED"].includes(error.diagnostic?.providerStatus ?? "");
     const uncertain = error instanceof ProviderError && !error.billedUsage && error.diagnostic?.billing !== "rejected" && !terminal;
@@ -118,6 +126,7 @@ export async function generatePresenter(deps: PresenterFlowDeps, input: { campai
       ...(error instanceof InvalidMediaError ? { media: error.media, rejectedAssetUri: error.rejectedAssetUri } : {}) };
   }
   const finalTask = { ...current(), state: attempt.status, error: attempt.error };
+  if (!provider.descriptor.isMock) await assertExecutionFence();
   job = { ...job, presenterTasks: (job.presenterTasks ?? []).map(t => t.attemptId === finalTask.attemptId ? finalTask : t),
     scenes: job.scenes.map(s => s.sceneId === scene.id ? { ...s, attempts: [...s.attempts.filter(a => a.id !== attempt.id).map(a => attempt.active ? { ...a, active: false } : a), attempt] } : s), updatedAt: deps.clock() };
   await deps.store.saveJob(job);

@@ -12,6 +12,8 @@ export type UserErrorCode =
   | "planning_budget"
   | "planning_in_progress"
   | "stale_estimate"
+  /** A cotação mudou depois que a tela foi aberta: nada foi autorizado; `quote` traz a nova. */
+  | "quote_changed"
   | "over_budget_not_allowed"
   | "invalid_state"
   | "attempt_limit"
@@ -19,13 +21,19 @@ export type UserErrorCode =
   | "corrupted"
   | "upload"
   | "job_in_progress"
-  | "render_security";
+  | "render_security"
+  /** Lote 7: backend cloud fora do ar ("Serviço temporariamente indisponível."). */
+  | "unavailable"
+  /** Lote 7: sessão ausente/expirada no modo cloud. */
+  | "auth";
 
 export interface UserError {
   code: UserErrorCode;
   title: string;
   message: string;
   retryable: boolean;
+  /** Só em `quote_changed`: a cotação atual do job, para a tela mostrar e exigir novo clique. */
+  quote?: { estimatedBrl: number; maximumAuthorizedBrl: number; token: string };
 }
 
 const PLANNING: Record<CampaignErrorCode, Omit<UserError, "code">> = {
@@ -88,6 +96,27 @@ export function planningUserError(code: CampaignErrorCode): UserError {
   return { code, ...PLANNING[code] };
 }
 
+/**
+ * "Ver detalhes" da falha de planejamento: a causa REAL (ex.: "Trecho 2: fala longa demais"),
+ * sanitizada — sem chaves/tokens, caminhos absolutos, URLs com parâmetros ou texto ilimitado.
+ */
+export function planningErrorDetails(detail: string | undefined): string | undefined {
+  if (!detail?.trim()) return undefined;
+  const clean = detail
+    .replace(/\b(sk-ant-|sk-|AIza|Bearer\s+)[\w.-]+/gi, "[oculto]")
+    .replace(/\b(api[_-]?key|token|secret|authorization)\s*[:=]\s*\S+/gi, "$1=[oculto]")
+    .replace(/\b[A-Za-z0-9_-]{40,}\b/g, "[oculto]")
+    .replace(/https?:\/\/\S+/gi, "[url]")
+    .replace(/(?:[A-Za-z]:\\|\/(?:home|Users|tmp|var|mnt)\/)[^\s"')]+/g, "[caminho]")
+    .replace(/creatives\.\d+\.scenes\.(\d+)(?:\.\w+)?/g, (_, i: string) => `Trecho ${Number(i) + 1}`)
+    .replace(/creatives\.\d+\.script/g, "Roteiro")
+    .replace(/creatives\.\d+\.scenes/g, "Trechos")
+    .replace(/creatives\.\d+/g, "Vídeo")
+    .replace(/[ \t]+/g, " ")
+    .trim();
+  return clean.length > 700 ? `${clean.slice(0, 699)}…` : clean;
+}
+
 function make(code: UserErrorCode, title: string, message: string, retryable = false): UserError {
   return { code, title, message, retryable };
 }
@@ -116,6 +145,9 @@ export function toUserError(error: unknown): UserError {
   }
   if (named(error, "PlanningInProgressError")) {
     return make("planning_in_progress", "Planejamento em andamento", "Aguarde o planejamento atual terminar.");
+  }
+  if (named(error, "QuoteChangedError")) {
+    return { ...make("quote_changed", "A estimativa foi atualizada", "O valor mudou depois que a página foi aberta. Revise o novo valor antes de continuar.", true), quote: error.quote as NonNullable<UserError["quote"]> };
   }
   if (named(error, "StaleEstimateError")) {
     return make(
@@ -165,7 +197,20 @@ export function toUserError(error: unknown): UserError {
     console.error("[render: asset corrompido]", error.message);
     return make("corrupted", "Imagem corrompida", "Uma imagem do produto não pôde ser lida. Remova e envie de novo.");
   }
+  // Product Fidelity Gate: a mensagem já é para o usuário (sem dados sensíveis).
+  if (named(error, "UgcFidelityError")) return make("invalid_state", "Fidelidade do produto", error.message);
+  // Correção Lote 6: avatar salvo com foto e provider sem referência de identidade — nada foi cobrado.
+  if (named(error, "UgcIdentityUnsupportedError")) return make("validation", "Avatar não suportado", error.message);
+  // Lote 6: Voice Lock pedido sem suporte real do provider — nunca troca de estratégia sozinho.
+  if (named(error, "VoiceLockUnavailableError")) return make("validation", "Voice Lock indisponível", error.message);
   if (named(error, "UploadValidationError")) return make("upload", "Imagem recusada", error.message);
+  // Lote 7 (upload cloud): falha do Storage/caminho vira mensagem de upload (causa logada no servidor).
+  if (named(error, "StorageError", "AssetPathError")) {
+    console.error("[upload] storage:", error.message);
+    return make("upload", "Imagem recusada", "Não foi possível falar com o armazenamento de imagens. Tente de novo em instantes.", true);
+  }
+  // Build da Vercel sem modo cloud: a mensagem já diz o que configurar (sem segredo).
+  if (named(error, "DeployMisconfiguredError")) return make("unavailable", "Deploy sem modo cloud", error.message);
   if (named(error, "InvalidUploadPathError")) return make("upload", "Imagem recusada", "Referência de imagem inválida.");
 
   console.error("[erro inesperado]", error);

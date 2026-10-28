@@ -236,3 +236,70 @@ Pré-requisito já atendido: ledger persistido em `ledger.jsonl`.
 `simpleFlow` seleciona os presets de UX sem alterar settings de campanhas antigas. `SimpleVideoWorkspace` consome apenas o view model serializável: storyboard, timeline, status, custo e URLs por ID. `updateStoryboardScene` valida a cena, recusa UGC e jobs com mídia, revisa o plano, atualiza o estado das cenas e recalcula a estimativa sob o lock da campanha.
 
 `quoteJob` cria o teto conservador e um fingerprint das entradas, modos, estimativa e revisão do storyboard. `authorizeAndRunJob` persiste `jobAuthorization` e inicia `runAuthorizedJob` no registro de jobs ativos. A orquestração chama as mesmas etapas híbridas uma a uma; antes de cada unidade compara gasto desde a aprovação + cotação com o teto. Cada provider continua protegido por `withRealStageAuthorization`. Estado interrompido é derivado e só continua após novo clique.
+
+
+## AI UGC (Lote 5.3 / D79–D85)
+- Domínio: `domain/ugc.ts` (identidade, referência versionada, estado do job, consistência por cena, perfil de biblioteca futura). `GenerationJob.ugc`, `MediaAttempt.ugc`, `CampaignRequest.creativeMode/ugc`.
+- Config: `config/ugc.ts` (identidade, ambiente, produto-âncora e planos), `config/ugc-models.ts` (Nano Banana/Veo, capacidades, durações e preset → modelo/resolução) e `config/pricing.ts` (fonte/data oficial).
+- Providers: `providers/ugc/` — `UgcReferenceProvider`/`UgcVideoProvider`, mocks, builders puros e adapters `UgcReferenceProviderGoogle`/`UgcVideoProviderVeo` sobre transportes Google reais (`google-http.ts`, `google-transports.ts`, Lote 5.4). A factory só cria REAL com `config/ugc-readiness.ts` completo (opt-in `UGC_REAL_ALLOWED`); scripts `scripts/ugc-*-real.ts` com intenções em `DATA_DIR/ugc-validation`.
+- Roteiro: `ai/ugc-script.ts` (regras de fala), `ai/mock-ugc-planner.ts`, prompt `campaign-plan@1.5.0`.
+- Fluxo: `pipeline/ugc-flow.ts` (`generateUgcReference`, `generateUgcScene`), integrado em `PipelineService` (`quoteStage`/`performHybridStage`, `approveUgcReference`, `regenerateUgcReference`, `updateUgcIdentity`, `resumeAfterUgcDecision`). Ordem `ugc_reference → narration → ugc_video → avatar → scenes → render`.
+- Storage: `storage/ugc-asset-store.ts` (`UGC_DIR`, vN atômico), rota `api/ugc/[campaignId]/[creativeId]/[version]`.
+- Render: `ManifestAsset.clipAudio` + guard de áudio duplicado; `OffthreadVideo` desmutado só em cenas com áudio próprio e o encoder preserva AAC quando a única fonte é o áudio nativo do clipe.
+- Durabilidade: referência e cena persistem intenção antes do POST; vídeo guarda `ugcVideoOperations` com operation ID, duração pedida e custo estimado. Retomada consulta/poll/download pelo ID, sem novo submit; timeout/cobrança incerta pausa.
+- UI: `application/ugc-view.ts`, `components/campaign/ugc-reference-panel.tsx`, cartões do storyboard com quem/segura/fala/faz.
+
+## UX V2, Avatares, Roteiro mestre e Voice Lock (Lote 6 / D95–D98)
+- UI: `components/v2/` (design system `ui.tsx`, `app-shell.tsx`, `create-video-form.tsx` + `create-video.tsx`, `project-v2-panel.tsx` + `project-v2.tsx`, `project-cards.tsx`, `avatar-form.tsx`, `tag-input.tsx`, `voice-profile-form.tsx`). Componentes presentacionais recebem as Server Actions por props (testáveis com `renderToStaticMarkup`).
+- Rotas: `/` (Home V2), `/create` (Create V2; `?from=` e `?mode=advanced` = wizard completo), `/projects` (cards + filtros; `/campaigns` redireciona), `/avatars`, `/avatars/new`, `/avatars/[id]`, `/settings` (Vozes + Avançado/Diagnóstico). `/campaigns/[id]`: V2 para `uxVersion: 2`, tela completa para antigos e com `?view=advanced`.
+- Aplicação: `application/create-v2.ts` (`startVideoV2`, `resolveAvatarSelection`, `v2Estimates`), `application/avatar-actions.ts` (CRUD, vozes, views sem `providerVoiceId`), `application/project-v2-view.ts` (fase/progresso/aprovação/erro/resultado e cards).
+- Domínio: `domain/avatar.ts`, `domain/avatar-selection.ts`, `domain/master-script.ts`, `domain/video-speech.ts` (capability matrix, `resolveVoiceLock`, `masterAudioSegments`), `domain/change-request.ts`. Pedido: `uxVersion`, `targetDurationSeconds`, `avatar` (seleção + snapshot), `personalization`, `voiceLock`; job: `avatar`, `voiceLock`, `masterAudio`; plano: `masterScript`.
+- IA: `ai/master-script.ts`, `ai/ugc-style-guide.ts`, prompt `campaign-plan@1.8.0`; `config/duration-targets.ts` + `withTargetDuration` (presets por duração).
+- Storage: `storage/avatar-store.ts` (`DATA_DIR/avatars/<id>.json` com revisões, `DATA_DIR/voice-profiles.json`).
+- Pipeline: `startPlanning` decide Voice Lock pela matriz do provider; `runPlanning` aplica o roteiro mestre antes do Presenter Only; narração LOCKED_VOICE grava `job.masterAudio`; `ugcSpeechMatrix()` alimenta o Diagnóstico.
+
+## Presenter Only (Lote 5.7 / D94)
+- Plano: `ai/ugc-presenter-only.ts` (`applyPresenterOnly`, `previewPresenterTimeline`), presets `UGC_PRESENTER_PLANS` e `PRESENTER_POLICY` em `config/edit-policy.ts`; prompt `campaign-plan@1.7.0`; `validatePresenterScript` em `ai/ugc-script.ts`.
+- Edição: `render/presenter-edit-plan.ts` (`buildPresenterEditPlan`, `presenterWindow`, `captionPhrases`/`captionLines`, `auditEditTimeline`), escolhido por `editPlanVersion: 3` em `render/edit-manifest.ts`.
+- Remotion: `remotion/components/CaptionV3.tsx` (legenda única, âncora fixa) usada por `EditedCreative` (V2 e V3); `tiktok-creative@1.4.0`.
+- Validação pós-render: `render/remotion/media-probe.ts` (ffprobe local) no `RemotionRenderer`, registrada em `mediaCheck`.
+
+## Creative Editor V2 (Lote 5.6 / D91)
+
+```
+planner (mock | Claude campaign-plan@1.6.1) → JSON parse → normalização de campos derivados → validação → hydrate
+  → ai/ugc-editorial.applyUgcEditorial   (A-roll/B-roll, overlay, cutReason, continuidade, catálogo → reference_detail)
+  → reviewCampaignPlan → jobs (editPlanVersion=2)
+ugc_reference → Product Fidelity Gate (domain/fidelity: pending → approved | needs_review | rejected; humano)
+ugc_video     → prompt com continuidade + fidelidade (ai/ugc-video-prompt, usado por Krea e Google)
+render        → storage/video-asset-store (silencedetect local; pausas reais persistidas)
+              → render/edit-plan.buildEditPlan (puro: handles ajustados à pausa medida,
+                fallback mantém A-roll; overlays B-roll mudos só em junções seguras,
+                faixas de áudio contínuas e sem sobreposição,
+                legendas V2, hook deliberado, CTA, usage gerado × usado)
+              → render/edit-manifest (RenderManifest.edit) → composition-props (EditProps em frames)
+              → remotion/compositions/EditedCreative (OffthreadVideo mudo + trimBefore; <Audio> do A-roll com fades)
+```
+
+- `domain/edit.ts`: `SceneEdit` (só no ScenePlan hidratado; o JSON do LLM não muda), `EditPlan` e `assertValidEditPlan` (cobertura contínua, motivo de corte, uma faixa por A-roll, nenhum áudio sobreposto, B-roll nunca fonte de áudio).
+- `render/audio-silence.ts`: análise FFmpeg local e determinística; sem pausa segura o corte visual permanece no A-roll.
+- `config/edit-policy.ts`: handles, tolerância de pausa, limite de B-roll estático, fades, punch-in, janela do CTA, legenda e presets editoriais (`UGC_EDITORIAL_PLANS`).
+- Compatibilidade: sem `editPlanVersion`/`manifest.edit`, tudo segue pela montagem linear do Lote 3; `external_lipsync` também.
+
+## Cloud Runtime (Lote 7 / D101–D108)
+Detalhes em `docs/CLOUD-RUNTIME.md`; deploy em `docs/DEPLOYMENT.md`.
+- `src/pipeline/dispatch.ts` é o ponto único entre execução no processo (local) e fila durável (cloud): `JobRun` serializável, `runJobTask`/`runPlanningTask` no worker, `deps.locks` (advisory lock) e `deps.activity` (fila).
+- `src/cloud/`:
+  - `config.ts`: env por serviço;
+  - `logger.ts`;
+  - `db/`: SqlClient pg, migrations;
+  - `repos/`: Postgres por usuário;
+  - `assets/`: AssetStore Local/Supabase, layout do Storage, CloudUploadStore;
+  - `auth/jwt.ts`;
+  - `queue/job-queue.ts`;
+  - `api/`: Render Web Service;
+  - `worker/`: Render Background Worker;
+  - `runtime.ts`: AppDeps por usuário;
+  - `infra.ts`.
+- `src/server/backend.ts` (Local × Remote), `session.ts` (Supabase Auth em cookies httpOnly) e `asset-redirect.ts`.
+- Banco: `supabase/migrations/`. Imagem: `Dockerfile` (mesma para API e worker). Blueprint: `render.yaml`.

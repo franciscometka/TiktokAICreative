@@ -24,6 +24,8 @@ import { ImageUploader } from "./image-uploader";
 import { ListEditor } from "./list-editor";
 import { QualitySelector } from "./quality-selector";
 import { enrichProductLocally } from "@/application/product-enrichment";
+import { UGC_ENVIRONMENT_LABELS } from "@/config/ugc";
+import { UGC_ENVIRONMENTS } from "@/domain/ugc";
 
 const DRAFT_KEY = "creative-factory:create-draft:v1";
 
@@ -63,6 +65,8 @@ function writeDraft(draft: Draft | undefined): void {
 }
 
 export interface WizardProps {
+  /** Lote 5.5: false = sem opção MOCK (fluxo REAL-only). */
+  allowMocks?: boolean;
   stageCapabilities: StageCapabilities;
   presets: PresetSummary[];
   initial: CampaignFormInput;
@@ -86,6 +90,7 @@ export function CampaignWizard({
   voices,
   audioProvider,
   stageCapabilities,
+  allowMocks = true,
 }: WizardProps) {
   const router = useRouter();
   const [form, setForm] = useState<CampaignFormInput>(initial);
@@ -307,6 +312,37 @@ export function CampaignWizard({
                 <QualitySelector presets={presets} value={form.quality} onChange={(q) => update("quality", q)} />
               </div>
               <fieldset>
+                <legend className="text-sm font-medium">Tipo de vídeo</legend>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {([
+                    { id: "standard", label: "Vídeo com produto", detail: "Produto, imagens, texto e apresentador opcional" },
+                    { id: "ai_ugc", label: "AI UGC", detail: "Pessoa realista segurando e apresentando o seu produto" },
+                  ] as const).map((option) => {
+                    const selected = (form.creativeMode ?? "standard") === option.id;
+                    return <button key={option.id} type="button" role="radio" aria-checked={selected} onClick={() => update("creativeMode", option.id)} className={cx("rounded-xl border p-4 text-left transition", selected ? "border-emerald-300 bg-emerald-300 text-zinc-950" : "border-white/15 bg-white/5 hover:border-white/35")}><span className="block font-semibold">{option.label}</span><span className={cx("mt-1 block text-xs", selected ? "text-zinc-700" : "text-zinc-400")}>{option.detail}</span></button>;
+                  })}
+                </div>
+              </fieldset>
+              {form.creativeMode === "ai_ugc" ? (
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <fieldset>
+                    <legend className="text-sm font-medium">Quem apresenta</legend>
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      {([{ id: "auto", label: "Automático" }, { id: "woman", label: "Mulher" }, { id: "man", label: "Homem" }] as const).map((option) => {
+                        const selected = (form.ugcPresenter ?? "auto") === option.id;
+                        return <button key={option.id} type="button" role="radio" aria-checked={selected} onClick={() => update("ugcPresenter", option.id)} className={cx("rounded-lg border px-3 py-2 text-sm font-medium transition", selected ? "border-emerald-300 bg-emerald-300 text-zinc-950" : "border-white/15 bg-white/5 hover:border-white/35")}>{option.label}</button>;
+                      })}
+                    </div>
+                  </fieldset>
+                  <label className="text-sm font-medium">Ambiente
+                    <select aria-label="Ambiente do vídeo" className={cx(inputClasses(), "mt-3 bg-white text-zinc-900")} value={form.ugcEnvironment ?? "auto"} onChange={(e) => update("ugcEnvironment", e.target.value)}>
+                      <option value="auto">Automático (pelo produto)</option>
+                      {UGC_ENVIRONMENTS.map((id) => <option key={id} value={id}>{UGC_ENVIRONMENT_LABELS[id].label}</option>)}
+                    </select>
+                  </label>
+                  <p className="text-xs text-zinc-400 sm:col-span-2">Antes de qualquer vídeo, você aprova a imagem da pessoa segurando o seu produto. A foto do produto é obrigatória.</p>
+                </div>
+              ) : <fieldset>
                 <legend className="text-sm font-medium">Apresentador</legend>
                 <div className="mt-3 grid gap-3 sm:grid-cols-3">
                   {([
@@ -319,7 +355,7 @@ export function CampaignWizard({
                     return <button key={option.label} type="button" role="radio" aria-checked={selected} onClick={() => { update("presenterChoice", choice); update("presenterPresetId", option.id); }} className={cx("rounded-xl border p-4 text-left transition", selected ? "border-emerald-300 bg-emerald-300 text-zinc-950" : "border-white/15 bg-white/5 hover:border-white/35")}><span className="block font-semibold">{option.label}</span><span className={cx("mt-1 block text-xs", selected ? "text-zinc-700" : "text-zinc-400")}>{option.detail}</span></button>;
                   })}
                 </div>
-              </fieldset>
+              </fieldset>}
               <Field id="videoConcept" label="Ideia do vídeo (opcional)" error={errors.videoConcept} hint="Uma orientação curta. O roteiro será gerado automaticamente.">
                 <textarea id="videoConcept" rows={3} maxLength={2000} className={inputClasses(!!errors.videoConcept)} value={form.videoConcept ?? ""} onChange={(e) => update("videoConcept", e.target.value)} placeholder="Ex.: direto, cotidiano e com foco nos detalhes do produto" />
               </Field>
@@ -337,7 +373,7 @@ export function CampaignWizard({
           <Panel className="space-y-4 p-5 sm:p-6">
             <h2 className="text-lg font-semibold tracking-tight">Modo por etapa</h2>
             <p className="mt-2 text-sm text-zinc-600">Tudo começa em MOCK. REAL só pode ser executado após revisar o custo e confirmar a etapa no projeto.</p>
-            <div className="my-4 grid gap-3 sm:grid-cols-2">{EXECUTION_STAGES.map(stage => <label className="text-sm" key={stage}>{({planning: "Roteiro / planejamento", narration: "Narração", scenes: "Cenas de vídeo", avatar: "Presenter / avatar", render: "Render final"})[stage]}<select className={inputClasses()} aria-label={`Modo ${stage}`} value={form.stageModes?.[stage] ?? "mock"} onChange={e => update("stageModes", { ...MOCK_STAGE_MODES, ...form.stageModes, [stage]: e.target.value as "mock" | "real" })}><option value="mock">MOCK</option><option value="real" disabled={!stageCapabilities[stage].available}>REAL · {stageCapabilities[stage].provider}</option></select>{!stageCapabilities[stage].available ? <span className="mt-1 block text-xs text-zinc-500">{stageCapabilities[stage].reason}</span> : null}</label>)}</div>
+            <div className="my-4 grid gap-3 sm:grid-cols-2">{EXECUTION_STAGES.map(stage => <label className="text-sm" key={stage}>{({planning: "Roteiro / planejamento", narration: "Narração", scenes: "Cenas de vídeo", avatar: "Presenter / avatar", ugc_reference: "Referência AI UGC", ugc_video: "Cenas AI UGC", render: "Render final"})[stage]}<select className={inputClasses()} aria-label={`Modo ${stage}`} value={form.stageModes?.[stage] ?? (allowMocks ? "mock" : "real")} onChange={e => update("stageModes", { ...MOCK_STAGE_MODES, ...form.stageModes, [stage]: e.target.value as "mock" | "real" })}>{allowMocks ? <option value="mock">MOCK</option> : null}<option value="real" disabled={!stageCapabilities[stage].available}>REAL · {stageCapabilities[stage].provider}</option></select>{!stageCapabilities[stage].available ? <span className="mt-1 block text-xs text-zinc-500">{stageCapabilities[stage].reason}</span> : null}</label>)}</div>
             <h2 className="text-lg font-semibold tracking-tight">Conceito e roteiro</h2>
             <Field id="videoConcept" label="Conceito do vídeo" error={errors.videoConcept} hint="Como apresentar o produto, para quem e qual mensagem destacar.">
               <textarea id="videoConcept" rows={3} maxLength={2000} className={inputClasses(!!errors.videoConcept)} value={form.videoConcept ?? ""} onChange={e => update("videoConcept", e.target.value)} placeholder="Ex.: Apresentador explica os detalhes e intercala fotos do produto." />

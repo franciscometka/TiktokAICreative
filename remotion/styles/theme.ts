@@ -28,6 +28,8 @@ export const SAFE_BOX = {
 
 export const COLORS = {
   ink: "#0B0B0C",
+  /** Destaque de número/especificação na legenda. */
+  highlight: "#FFE14D",
   paper: "#F4F1EA",
   white: "#FFFFFF",
   muted: "rgba(255,255,255,0.72)",
@@ -76,6 +78,18 @@ export const MOTION = {
 } as const;
 
 /** Posições verticais (topo do bloco) dentro da safe area. */
+/**
+ * Caption V3 (Lote 5.7): âncora única e simétrica, centralizada no canvas, acima da interface do
+ * TikTok (base) e fora da coluna de botões (direita, margem igual dos dois lados).
+ */
+export const CAPTION_V3 = {
+  canvasWidth: CANVAS.width,
+  sideMargin: SAFE_AREA.right,
+  bottom: SAFE_AREA.bottom + 24,
+  fontSize: 54,
+  lineHeight: 1.18,
+} as const;
+
 export const LAYOUT = {
   hookTop: SAFE_AREA.top + 120,
   sceneTextTop: SAFE_AREA.top + 40,

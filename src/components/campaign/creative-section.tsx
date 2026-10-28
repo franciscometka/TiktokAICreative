@@ -9,21 +9,25 @@ import { jobStatusTone } from "./status";
 const SOURCE_TONE: Record<VisualSource, Tone> = {
   generated_video: "blue",
   product_hero: "blue", product_demo: "blue", lifestyle: "blue", presenter: "blue", product_ugc: "blue",
+  ugc_hook: "teal", ugc_demo: "teal", ugc_benefit: "teal", ugc_cta: "teal", product_broll: "blue",
   product_image: "green",
   text_card: "neutral",
   simple_background: "neutral",
   screenshot: "sky",
   existing_asset: "teal",
+  reference_detail: "teal",
 };
 
 const SOURCE_BAR: Record<VisualSource, string> = {
   generated_video: "bg-blue-500",
   product_hero: "bg-blue-500", product_demo: "bg-blue-500", lifestyle: "bg-blue-500", presenter: "bg-blue-500", product_ugc: "bg-blue-500",
+  ugc_hook: "bg-teal-500", ugc_demo: "bg-teal-500", ugc_benefit: "bg-teal-500", ugc_cta: "bg-teal-500", product_broll: "bg-blue-400",
   product_image: "bg-emerald-500",
   text_card: "bg-zinc-400",
   simple_background: "bg-zinc-300",
   screenshot: "bg-sky-500",
   existing_asset: "bg-teal-500",
+  reference_detail: "bg-teal-300",
 };
 
 function range(scene: SceneView): string {

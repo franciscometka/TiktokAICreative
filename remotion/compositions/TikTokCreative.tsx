@@ -8,6 +8,7 @@ import { SceneText } from "../components/SceneText";
 import { MOTION, COLORS, FONT } from "../styles/theme";
 import { loadFonts } from "../styles/fonts";
 import type { CreativeProps } from "../types/props";
+import { EditedCreative } from "./EditedCreative";
 
 loadFonts();
 
@@ -16,6 +17,8 @@ loadFonts();
  * Camadas: cenas → texto da cena → hook → legendas → CTA → barra de progresso; narração (quando real).
  */
 export function TikTokCreative(props: CreativeProps) {
+  // Editor V2: edição contínua (A-roll + B-roll overlay) quando o manifest traz o Edit Plan.
+  if (props.edit) return <EditedCreative {...props} />;
   const { scenes, captions, hook, cta, product, durationInFrames, audio } = props;
 
   return (

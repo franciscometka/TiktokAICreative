@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { RenderManifestSchema, type RenderManifest } from "@/domain/render";
 import type { ResolvedAsset } from "./asset-resolver";
-import { buildCompositionProps, COVER_MAX_ASPECT, OVERLAY_TIMING, PLACEHOLDER_LABEL } from "./composition-props";
+import { buildCompositionProps, compositionHasAudio, COVER_MAX_ASPECT, OVERLAY_TIMING, PLACEHOLDER_LABEL } from "./composition-props";
 
 const IMG = "data/uploads/prod_1/img_a.png";
 const WIDE = "data/uploads/prod_1/img_b.png";
@@ -130,5 +130,12 @@ describe("buildCompositionProps", () => {
     const { props } = buildCompositionProps({ manifest: { ...m, assets }, assets: ASSETS, urlFor });
     expect(props.scenes[0]?.transition).toBe("cut");
     expect(props.scenes[1]?.transition).toBe("fade");
+  });
+});
+
+describe("compositionHasAudio", () => {
+  it("preserva áudio nativo de clipe mesmo sem faixa de narração", () => {
+    expect(compositionHasAudio({ audio: [], scenes: [{ video: { src: "clip.mp4", muted: false } } as never] })).toBe(true);
+    expect(compositionHasAudio({ audio: [], scenes: [{ video: { src: "clip.mp4", muted: true } } as never] })).toBe(false);
   });
 });
