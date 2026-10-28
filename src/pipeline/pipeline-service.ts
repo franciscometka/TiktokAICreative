@@ -340,6 +340,20 @@ export class PipelineService {
     }
     return this.getJob(jobId);
   }
+  /**
+   * REAL-only: os modos são congelados na criação do projeto. Etapa sem provider naquele momento
+   * (ex.: Chrome do Remotion ainda não instalado) ficou MOCK e, com ALLOW_MOCKS=false, bloquearia o
+   * job para sempre. Antes da aprovação, adota REAL nas etapas que agora têm provider disponível.
+   */
+  async adoptAvailableRealStages(jobId: string): Promise<void> {
+    const capabilities = this.deps.hybrid?.capabilities;
+    if (!capabilities || this.mocksAllowed() || this.isJobActive(jobId)) return;
+    const job = await this.getJob(jobId);
+    if (!["planned", "cost_estimated", "awaiting_approval"].includes(job.status)) return;
+    for (const stage of EXECUTION_STAGES) {
+      if (stage !== "planning" && capabilities[stage].available && (job.stageModes?.[stage] ?? "mock") !== "real") await this.configureStage(jobId, stage, "real");
+    }
+  }
   async configureStage(jobId: string, stage: ExecutionStage, mode: ExecutionMode): Promise<void> {
     if (stage === "planning") throw new Error("O planejamento já produziu este job. Crie uma cópia com ajustes para mudar o roteiro sem invalidar as mídias existentes.");
     await this.withJobLock(jobId, async () => {

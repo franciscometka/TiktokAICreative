@@ -121,6 +121,32 @@ describe("fluxo REAL-only no pipeline", () => {
     expect(approved.job.ugc!.references[1]!.review).toBe("approved");
   });
 
+  it("etapa indisponível na criação e disponível depois (ex.: Chrome do Remotion instalado): o job passa a REAL e gera", async () => {
+    const h = await ugcHarness({ realReference: true, request: { budget: { maxCostPerCreativeBrl: 100, maxCostPerCampaignBrl: 200, allowOverBudget: false } } });
+    // Projeto criado quando o Remotion ainda não estava pronto: o render é congelado como MOCK.
+    const creating = h.build({ allowMocks: false, unavailable: ["render"] });
+    const draft = await creating.planCampaign(h.campaign.request);
+    // Planejamento REAL espera a aprovação explícita (planner falso, sem rede).
+    const early = await (await creating.executePlanning(draft.id, (await creating.quotePlanning(draft.id)).token)).completion;
+    expect(early.status, early.error).toBe("planned");
+    const jobId = early.jobIds[0]!;
+    expect((await h.service.getJob(jobId)).stageModes!.render).toBe("mock");
+
+    // Depois do redeploy com o navegador, a view precisa oferecer uma cotação autorizável.
+    const strict = h.build({ allowMocks: false });
+    const deps = { service: strict, uploads: new LocalUploadStore(h.config.uploadsDir), rendersDir: h.config.rendersDir, audioDir: h.config.audioDir, allowMocks: false } as AppDeps;
+    const view = await getCampaignView(deps, early.id);
+    if (!view.ok) throw new Error(view.error.message);
+    const jobQuote = view.value.creatives[0]!.jobQuote!;
+    expect(jobQuote.blocked).toBeUndefined();
+    expect(jobQuote.ready).toBe(true);
+    expect((await strict.getJob(jobId)).stageModes!.render).toBe("real");
+
+    const before = h.calls.references().length;
+    await (await strict.authorizeAndRunJob(jobId, jobQuote.token)).completion;
+    expect(h.calls.references().length).toBe(before + 1);
+  });
+
   it("ALLOW_MOCKS=true mantém o fluxo MOCK completo para dev/teste", async () => {
     const h = await ugcHarness();
     expect((await h.run()).kind).toBe("WAITING_STAGE");

@@ -114,6 +114,7 @@ export async function getCampaignView(deps: AppDeps, campaignId: string): Promis
   try {
     const { service } = deps;
     const campaign = await service.getCampaign(campaignId);
+    for (const jobId of campaign.jobIds) await service.adoptAvailableRealStages(jobId).catch((error: unknown) => console.warn(`[modos ${jobId}]`, error));
     const jobs = await service.listJobs(campaignId);
     const jobActuals = new Map<string, ActualCostSummary>();
     const jobActivity = new Map<string, JobActivity>();
