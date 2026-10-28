@@ -13,6 +13,18 @@ export class StaleEstimateError extends Error {
   override name = "StaleEstimateError";
 }
 
+/**
+ * O token enviado não é o da cotação atual do job. Nada foi autorizado; a cotação nova vem junto
+ * para a tela mostrar e o usuário decidir com um NOVO clique (o token novo nunca autoriza sozinho).
+ */
+export interface RefreshedQuote { estimatedBrl: number; maximumAuthorizedBrl: number; token: string }
+export class QuoteChangedError extends Error {
+  override name = "QuoteChangedError";
+  constructor(readonly quote: RefreshedQuote) {
+    super("A estimativa mudou; revise o novo teto antes de gerar.");
+  }
+}
+
 export class AttemptLimitReachedError extends Error {
   override name = "AttemptLimitReachedError";
 }

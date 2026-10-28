@@ -12,6 +12,8 @@ export type UserErrorCode =
   | "planning_budget"
   | "planning_in_progress"
   | "stale_estimate"
+  /** A cotação mudou depois que a tela foi aberta: nada foi autorizado; `quote` traz a nova. */
+  | "quote_changed"
   | "over_budget_not_allowed"
   | "invalid_state"
   | "attempt_limit"
@@ -30,6 +32,8 @@ export interface UserError {
   title: string;
   message: string;
   retryable: boolean;
+  /** Só em `quote_changed`: a cotação atual do job, para a tela mostrar e exigir novo clique. */
+  quote?: { estimatedBrl: number; maximumAuthorizedBrl: number; token: string };
 }
 
 const PLANNING: Record<CampaignErrorCode, Omit<UserError, "code">> = {
@@ -141,6 +145,9 @@ export function toUserError(error: unknown): UserError {
   }
   if (named(error, "PlanningInProgressError")) {
     return make("planning_in_progress", "Planejamento em andamento", "Aguarde o planejamento atual terminar.");
+  }
+  if (named(error, "QuoteChangedError")) {
+    return { ...make("quote_changed", "A estimativa foi atualizada", "O valor mudou depois que a página foi aberta. Revise o novo valor antes de continuar.", true), quote: error.quote as NonNullable<UserError["quote"]> };
   }
   if (named(error, "StaleEstimateError")) {
     return make(

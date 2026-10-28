@@ -114,6 +114,7 @@ import {
   assertCanStartPaidCall,
   assertStatus,
   discardedAttemptIds,
+  QuoteChangedError,
   StaleEstimateError,
   UnexpectedStatusError,
 } from "./guards";
@@ -770,7 +771,9 @@ export class PipelineService {
     const prepared = await this.withJobLock(jobId, async () => {
       this.assertJobIdle(jobId);
       const quote = await this.quoteJob(jobId);
-      if (quote.token !== token || !quote.ready) throw new Error(quote.blocked ?? 'A estimativa mudou; revise o novo teto antes de gerar.');
+      if (!quote.ready) throw new Error(quote.blocked ?? 'A cotação do job ainda não está pronta.');
+      // Cotação pronta mas diferente da que o usuário viu: não autoriza; devolve a nova para novo clique.
+      if (quote.token !== token) throw new QuoteChangedError({ estimatedBrl: quote.estimatedBrl, maximumAuthorizedBrl: quote.maximumAuthorizedBrl, token: quote.token });
       let job = await this.getJob(jobId);
       if (!job.estimate) throw new Error('Job sem estimativa.');
       const estimateId = job.estimate.id;

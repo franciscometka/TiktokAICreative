@@ -107,7 +107,8 @@ export function buildProjectV2View(view: CampaignView): ProjectV2View {
     avatar: avatarHeader(view, creative),
     voice: creative?.voiceLock ? { label: creative.voiceLock.strategyLabel, reason: creative.voiceLock.reason } : null,
     jobId: creative?.jobId ?? null,
-    quoteToken: creative?.jobQuote?.token ?? null,
+    // Só uma cotação PRONTA vira token de clique: antes da estimativa do job o token seria descartado pelo servidor.
+    quoteToken: creative?.jobQuote?.ready ? creative.jobQuote.token : null,
     estimate: null, approval: null, error: null, result: null,
   } satisfies Partial<ProjectV2View>;
 

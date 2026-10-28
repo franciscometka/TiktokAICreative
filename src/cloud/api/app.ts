@@ -68,7 +68,7 @@ function statusFor(error: UserError): number {
   switch (error.code) {
     case "validation": case "upload": return 422;
     case "not_found": return 404;
-    case "job_in_progress": case "planning_in_progress": case "stale_estimate": case "invalid_state": case "attempt_limit": case "planning_budget": case "over_budget_not_allowed": return 409;
+    case "job_in_progress": case "planning_in_progress": case "stale_estimate": case "quote_changed": case "invalid_state": case "attempt_limit": case "planning_budget": case "over_budget_not_allowed": return 409;
     case "corrupted": case "render_security": return 500;
     default: return 400;
   }

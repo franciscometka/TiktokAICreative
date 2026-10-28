@@ -205,6 +205,30 @@ describe("fluxo de geração na nuvem", () => {
     expect(events.at(-1)).toBe("completed");
   });
 
+  it("cotação mudou: 409 quote_changed com a nova cotação, nada enfileirado; só um novo clique autoriza; clique duplo gera uma tarefa", async () => {
+    const imageId = await uploadPhoto("prod_cloud_quote");
+    const created = await h.call("POST", "/v1/projects", { body: createInput("prod_cloud_quote", imageId) });
+    await h.drain();
+    const project = await h.call("GET", `/v1/projects/${created.json.value.campaignId as string}`);
+    const jobId = project.json.value.v2.jobId as string;
+    const shown = project.json.value.v2.quoteToken as string;
+
+    // Token que a tela tinha, mas que não é mais o da cotação atual.
+    const stale = "0".repeat(64);
+    const refused = await h.call("POST", `/v1/jobs/${jobId}/generate`, { body: { token: stale } });
+    expect(refused.status).toBe(409);
+    expect(refused.json).toMatchObject({ ok: false, error: { code: "quote_changed", retryable: true, quote: { token: shown } } });
+    expect(await queueCount(jobId)).toBe(0);
+    // O token antigo continua sem poder autorizar, mesmo depois de a cotação nova ter sido devolvida.
+    expect((await h.call("POST", `/v1/jobs/${jobId}/generate`, { body: { token: stale } })).status).toBe(409);
+    expect(await queueCount(jobId)).toBe(0);
+
+    // Novo clique explícito com a cotação revisada, repetido ao mesmo tempo: UMA tarefa na fila.
+    const clicks = await Promise.all([1, 2].map(() => h.call("POST", `/v1/jobs/${jobId}/generate`, { body: { token: refused.json.error.quote.token } })));
+    expect(clicks.some((c) => c.status === 202)).toBe(true);
+    expect(await queueCount(jobId)).toBe(1);
+  });
+
   it("ownership: outro usuário não vê nem mexe no projeto/job/arquivo", async () => {
     const imageId = await uploadPhoto("prod_cloud2");
     const created = await h.call("POST", "/v1/projects", { body: createInput("prod_cloud2", imageId) });

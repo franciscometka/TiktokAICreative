@@ -2,8 +2,8 @@
 
 import { ArrowLeft, Info, PauseCircle, WifiOff } from "lucide-react";
 import Link from "next/link";
-import { useRef, useState, useTransition } from "react";
-import { buildGenerationView, withWorker, type GenerationCredits, type GenerationSource, type GenerationView } from "@/application/generation-view";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { buildGenerationView, failureMessage, withWorker, type GenerationCredits, type GenerationSource, type GenerationView } from "@/application/generation-view";
 import { formatCredits } from "@/costs/credits";
 import { AmbientGlow, Button, buttonClass, Card, cx, focusRing, interactive, Progress, Skeleton, Spark } from "../ds";
 import { useShellStatusContext } from "../shell/shell-status-context";
@@ -46,16 +46,24 @@ export function GenerationScreen({ source, campaignId, handlers, advancedHref }:
     if (inFlight.current) return;
     inFlight.current = true;
     const kind = view.kind;
+    const previousBrl = source.jobQuote?.estimatedBrl;
     startTransition(async () => {
       try {
         const r = await action();
-        setFailure(r.ok ? undefined : { kind, text: r.error?.message ?? "Não foi possível continuar." });
+        setFailure(r.ok ? undefined : { kind, text: failureMessage(r.error ?? { message: "Não foi possível continuar." }, previousBrl) });
       } finally { inFlight.current = false; }
       handlers.refresh();
     });
   };
   const v2 = source.v2;
   const progress = PROGRESS_KINDS.has(view.kind);
+  // Cotação ainda não pronta (logo após o planejamento): o botão fica desabilitado e a tela se atualiza sozinha.
+  const waitingQuote = view.kind === "awaiting_approval" && !!view.action?.disabled;
+  useEffect(() => {
+    if (!waitingQuote) return;
+    const id = setInterval(handlers.refresh, 2_500);
+    return () => clearInterval(id);
+  }, [waitingQuote, handlers]);
 
   function act() {
     const a = view.action!;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GENERATION_STATES, sceneFixture, scenesFixture, sourceFixture, v2Fixture } from "@/test/generation-fixtures";
-import { buildGenerationView, generationCredits, previewFor, sceneItems, sceneProgress, withWorker } from "./generation-view";
+import { buildGenerationView, failureMessage, generationCredits, previewFor, sceneItems, sceneProgress, withWorker } from "./generation-view";
 
 /** L8.5 — view model da geração: estados, etapas reais, cenas, créditos, prévia, retry e worker. */
 
@@ -13,6 +13,14 @@ describe("estados e etapas reais", () => {
     expect(v).toMatchObject({ kind: "awaiting_approval", headline: "Tudo pronto para começar", credits: { mode: "estimate", estimated: 2012 }, action: { kind: "authorize", label: "Gerar vídeo", credits: 2012, disabled: false } });
     expect(states(v)).toEqual(["script:completed", "reference:upcoming", "fidelity:upcoming", "scenes:upcoming", "render:upcoming"]);
     expect(buildGenerationView({ ...GENERATION_STATES.awaiting_approval!, v2: v2Fixture({ phase: "ready_to_generate", quoteToken: null }) }, { creditsPerBrl: 100 }).action!.disabled).toBe(true);
+  });
+
+  it("cotação atualizada: mostra de quanto para quanto e pede novo clique; outros erros seguem iguais", () => {
+    const changed = { message: "x", code: "quote_changed", quote: { estimatedBrl: 23 } };
+    const plain = (t: string) => t.replace(/ /g, " ");
+    expect(plain(failureMessage(changed, 22.44))).toBe("A estimativa foi atualizada de R$ 22,44 para R$ 23,00. Revise o novo valor antes de continuar.");
+    expect(plain(failureMessage(changed))).toBe("A estimativa foi atualizada para R$ 23,00. Revise o novo valor antes de continuar.");
+    expect(failureMessage({ message: "Algo deu errado" }, 22.44)).toBe("Algo deu errado");
   });
 
   it("aprovação do planejamento: só o roteiro, com a cotação do planejamento", () => {

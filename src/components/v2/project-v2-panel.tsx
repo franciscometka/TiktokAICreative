@@ -11,7 +11,7 @@ import { Card, v2Button, v2Input } from "./ui";
  * vídeo pronto. Presentacional: as ações de servidor são injetadas (testável sem Next).
  */
 
-type Outcome = { ok: boolean; error?: { message: string } };
+type Outcome = { ok: boolean; error?: { message: string; code?: string; quote?: { estimatedBrl: number } } };
 export interface ProjectV2Handlers {
   startPlanning: (token: string) => Promise<Outcome>;
   authorize: (jobId: string, token: string) => Promise<Outcome>;

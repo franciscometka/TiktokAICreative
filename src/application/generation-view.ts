@@ -1,5 +1,6 @@
 import { actualCreditsFromBrl, apportion, estimatedCreditsFromBrl, toMicroBrl } from "@/costs/credits";
 import type { CostCategory } from "@/domain/cost";
+import { formatBrl } from "@/lib/money";
 import { CREDIT_GROUPS } from "./credits";
 import type { WorkerStatusView } from "./worker-status";
 import type { CampaignView, CreativeView, SceneView } from "./campaign-view";
@@ -288,6 +289,18 @@ const COPY: Record<GenerationKind, { headline: string; subtext: string | null; t
   blocked: { headline: "Geração pausada por segurança", subtext: "O sistema não conseguiu confirmar o resultado de uma operação paga e pausou para evitar cobrança duplicada.", tone: "warning" },
 };
 
+/**
+ * Texto do erro de uma ação. `quote_changed` mostra o valor novo contra o que a pessoa viu: nada foi
+ * autorizado, e só um NOVO clique (com a cotação revisada) pode autorizar.
+ */
+export function failureMessage(error: { message: string; code?: string; quote?: { estimatedBrl: number } }, previousBrl?: number): string {
+  if (error.code !== "quote_changed" || !error.quote) return error.message;
+  const next = error.quote.estimatedBrl;
+  return previousBrl !== undefined && previousBrl !== next
+    ? `A estimativa foi atualizada de ${formatBrl(previousBrl)} para ${formatBrl(next)}. Revise o novo valor antes de continuar.`
+    : `A estimativa foi atualizada para ${formatBrl(next)}. Revise o novo valor antes de continuar.`;
+}
+
 function actionFor(kind: GenerationKind, source: GenerationSource, perBrl: number | null): GenerationAction | null {
   const { v2 } = source;
   // Cotação zerada (só mocks) → sem número: "~0 créditos" não informa nada.
@@ -296,7 +309,7 @@ function actionFor(kind: GenerationKind, source: GenerationSource, perBrl: numbe
     case "awaiting_planning_approval":
       return { kind: "start_planning", label: "Começar", credits: credits(source.planningQuote?.estimatedBrl), disabled: !v2.quoteToken };
     case "awaiting_approval":
-      return { kind: "authorize", label: "Gerar vídeo", credits: credits(source.jobQuote?.estimatedBrl), disabled: !v2.quoteToken || !v2.jobId };
+      return { kind: "authorize", label: "Gerar vídeo", credits: credits(source.jobQuote?.estimatedBrl), disabled: !v2.quoteToken || !v2.jobId || source.jobQuote?.ready === false };
     case "planning_failed":
       if (v2.error?.retry === "planning_approval") return { kind: "start_planning", label: "Tentar novamente", credits: credits(v2.estimate?.brl), disabled: !v2.quoteToken };
       return { kind: "retry_planning", label: "Tentar novamente", credits: null, disabled: false };
